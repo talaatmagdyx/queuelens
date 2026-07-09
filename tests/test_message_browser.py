@@ -1,0 +1,151 @@
+from datetime import UTC, datetime
+
+import httpx
+import pytest
+
+from app.application.message_service import message_to_dict
+from app.config import Settings
+from app.domain.fingerprint import message_fingerprint
+from app.domain.models import MessageRecord
+from app.domain.xdeath import parse_x_death
+from app.infrastructure.rabbitmq.message_browser import MessageBrowser
+from app.main import create_app
+
+
+def test_fingerprint_is_stable_and_xdeath_is_normalized() -> None:
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    first = message_fingerprint(
+        queue="orders.dlq",
+        body=b"payload",
+        headers={"x-death": [{"queue": "orders"}]},
+        message_id="message-1",
+        timestamp=timestamp,
+        exchange="orders",
+        routing_key="created",
+    )
+    second = message_fingerprint(
+        queue="orders.dlq",
+        body=b"payload",
+        headers={"x-death": [{"queue": "orders"}]},
+        message_id="message-1",
+        timestamp=timestamp,
+        exchange="orders",
+        routing_key="created",
+    )
+
+    assert first == second
+    assert len(first) == 64
+    assert parse_x_death({"x-death": [{"routing-keys": "created"}]}) == [
+        {"routing-keys": ["created"]}
+    ]
+
+
+class FakeMessage:
+    body = b'{"request_id":"req-1"}'
+    headers = {"x-death": [{"reason": "rejected"}]}
+    timestamp = None
+    message_id = "message-1"
+    content_type = "application/json"
+    content_encoding = None
+    delivery_mode = 2
+    priority = 0
+    correlation_id = "corr-1"
+    reply_to = None
+    expiration = None
+    type = "order.created"
+    user_id = None
+    app_id = "orders"
+    exchange = "orders.exchange"
+    routing_key = "orders.created"
+    redelivered = False
+    processed = False
+
+    def __init__(self) -> None:
+        self.nacked = False
+
+    async def nack(self, requeue: bool = False) -> None:
+        self.nacked = requeue
+        self.processed = True
+
+
+class FakeChannel:
+    def __init__(self, messages: list[FakeMessage]) -> None:
+        self.messages = messages
+
+    async def basic_get(self, _queue_name: str, no_ack: bool = False) -> FakeMessage | None:
+        assert no_ack is False
+        return self.messages.pop(0) if self.messages else None
+
+    async def close(self) -> None:
+        return None
+
+
+class FakeChannelContext:
+    def __init__(self, channel: FakeChannel) -> None:
+        self.channel = channel
+
+    async def __aenter__(self) -> FakeChannel:
+        return self.channel
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+
+class FakeConnection:
+    def __init__(self, channel: FakeChannelContext) -> None:
+        self._channel = channel
+
+    def channel(self) -> FakeChannelContext:
+        return self._channel
+
+
+@pytest.mark.asyncio
+async def test_browser_requeues_every_message_after_preview() -> None:
+    message = FakeMessage()
+    browser = MessageBrowser(FakeConnection(FakeChannelContext(FakeChannel([message]))))
+
+    records = await browser.list_messages("orders.dlq", limit=10)
+
+    assert len(records) == 1
+    assert records[0].payload == {"request_id": "req-1"}
+    assert records[0].payload_format == "json"
+    assert records[0].x_death == [{"reason": "rejected"}]
+    assert message.nacked is True
+
+
+@pytest.mark.asyncio
+async def test_message_route_returns_message_detail() -> None:
+    message = MessageRecord(
+        fingerprint="a" * 64,
+        source_queue="orders.dlq",
+        body=b"{}",
+        payload={},
+        payload_format="json",
+        payload_size=2,
+        content_type="application/json",
+        message_id="message-1",
+        correlation_id=None,
+        timestamp=None,
+        exchange="orders",
+        routing_key="created",
+        headers={},
+        properties={},
+        redelivered=False,
+    )
+
+    class FakeMessageService:
+        async def get_message(self, _queue: str, _fingerprint: str, _limit: int) -> MessageRecord:
+            return message
+
+        async def list_messages(self, _queue: str, _limit: int) -> list[MessageRecord]:
+            return [message]
+
+    app = create_app(Settings(auth_enabled=False))
+    app.state.message_service = FakeMessageService()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get(f"/api/queues/orders.dlq/messages/{message.fingerprint}")
+
+    assert response.status_code == 200
+    assert response.json()["message"] == message_to_dict(message)
+

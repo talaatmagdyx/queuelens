@@ -33,3 +33,23 @@ class AuditEntry:
     request_ip: str | None = None
     user_agent: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class MessageRecord:
+    fingerprint: str
+    source_queue: str
+    body: bytes
+    payload: object
+    payload_format: str
+    payload_size: int
+    content_type: str | None
+    message_id: str | None
+    correlation_id: str | None
+    timestamp: datetime | None
+    exchange: str
+    routing_key: str
+    headers: dict[str, Any]
+    properties: dict[str, Any]
+    redelivered: bool
+    x_death: list[dict[str, Any]] = field(default_factory=list)
