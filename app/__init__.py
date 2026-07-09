@@ -1,0 +1,2 @@
+"""QueueLens application package."""
+
