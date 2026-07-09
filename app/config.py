@@ -1,4 +1,6 @@
+import json
 from functools import lru_cache
+from typing import Any
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,8 +26,17 @@ class Settings(BaseSettings):
     max_message_size_bytes: int = 1_048_576
     replay_targets_json: str = "{}"
 
+    @property
+    def replay_targets(self) -> dict[str, dict[str, Any]]:
+        try:
+            parsed = json.loads(self.replay_targets_json)
+        except json.JSONDecodeError as error:
+            raise ValueError("QUEUELENS_REPLAY_TARGETS_JSON must contain valid JSON") from error
+        if not isinstance(parsed, dict):
+            raise ValueError("QUEUELENS_REPLAY_TARGETS_JSON must be an object")
+        return parsed
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
-

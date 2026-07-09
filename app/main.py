@@ -3,7 +3,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.routes import audit, health, messages, queues
+from app.api.routes import actions, audit, health, messages, queues
+from app.application.action_service import ActionService
 from app.application.message_service import MessageService
 from app.application.queue_service import QueueService
 from app.config import Settings, get_settings
@@ -12,6 +13,7 @@ from app.infrastructure.persistence.database import Database
 from app.infrastructure.rabbitmq.connection import RabbitMQConnection
 from app.infrastructure.rabbitmq.management_client import RabbitMQManagementClient
 from app.infrastructure.rabbitmq.message_browser import MessageBrowser
+from app.infrastructure.rabbitmq.message_operator import MessageOperator
 
 
 @asynccontextmanager
@@ -38,6 +40,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     rabbitmq_connection = RabbitMQConnection(app.state.settings)
     app.state.rabbitmq_connection = rabbitmq_connection
     app.state.message_service = MessageService(MessageBrowser(rabbitmq_connection))
+    app.state.action_service = ActionService(
+        app.state.settings, MessageOperator(rabbitmq_connection)
+    )
     management = RabbitMQManagementClient(app.state.settings)
     app.state.management_client = management
     app.state.queue_service = QueueService(management)
@@ -45,6 +50,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(queues.router)
     app.include_router(audit.router)
     app.include_router(messages.router)
+    app.include_router(actions.router)
     return app
 
 

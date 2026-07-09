@@ -53,3 +53,11 @@ class MessageRecord:
     properties: dict[str, Any]
     redelivered: bool
     x_death: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayTarget:
+    type: str
+    queue: str | None = None
+    exchange: str | None = None
+    routing_key: str | None = None
