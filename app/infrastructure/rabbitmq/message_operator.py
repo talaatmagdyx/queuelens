@@ -2,6 +2,7 @@ from typing import Any, cast
 
 from aio_pika import Message
 from aio_pika.abc import AbstractIncomingMessage
+from aiormq.exceptions import ChannelInvalidStateError
 
 from app.domain.models import MessageRecord, ReplayTarget
 from app.infrastructure.rabbitmq.connection import RabbitMQConnection
@@ -77,7 +78,11 @@ class MessageOperator:
     async def _requeue_unprocessed(self, messages: list[AbstractIncomingMessage]) -> None:
         for message in reversed(messages):
             if not message.processed:
-                await message.nack(requeue=True)
+                try:
+                    await message.nack(requeue=True)
+                except ChannelInvalidStateError:
+                    # RabbitMQ requeues unacked deliveries when the channel closes.
+                    return
 
     async def _publish(
         self,
