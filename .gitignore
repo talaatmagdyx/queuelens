@@ -1,5 +1,8 @@
 __pycache__/
 *.py[cod]
+build/
+dist/
+*.egg-info/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
@@ -8,4 +11,3 @@ htmlcov/
 .venv/
 data/*.db
 .env
-
