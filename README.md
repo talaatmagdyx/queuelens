@@ -57,7 +57,13 @@ QUEUELENS_REFETCH_WINDOW_SIZE=100
 - Browsing uses `basic_get` with requeue behavior and never removes messages.
 - Copy replay publishes and requeues the original.
 - Move replay publishes first and acknowledges the original only after publish succeeds.
-- Park publishes to `{source_queue}.parking` and acknowledges only after publish succeeds.
+- Park declares `{source_queue}.parking` (durable, created on demand) and acknowledges only
+  after publish succeeds.
+- Queue replay targets are verified to exist before publishing, and publishes are mandatory
+  with returned-message errors enabled, so an unroutable publish fails the action instead of
+  silently dropping the message.
+- A replay target can be supplied per action in the message detail UI (queue, or
+  exchange + routing key); otherwise the configured target for the queue is used.
 - Delete acknowledges only after explicit confirmation.
 - Actions write an audit-attempt event before execution and a success/failure event after execution; if the attempt cannot be persisted, the action is rejected.
 - Detail lookup and mutation use a bounded re-fetch window and fail safely when the fingerprint matches zero or multiple messages.

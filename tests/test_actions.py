@@ -57,9 +57,12 @@ class ActionChannel:
     def __init__(self, messages: list[ActionMessage], exchange: FakeExchange) -> None:
         self.messages = messages
         self.default_exchange = exchange
+        self.declared: list[tuple[str, bool, bool]] = []
 
-    async def declare_queue(self, _queue: str, passive: bool = False) -> "ActionChannel":
-        assert passive is True
+    async def declare_queue(
+        self, queue: str, passive: bool = False, durable: bool = False
+    ) -> "ActionChannel":
+        self.declared.append((queue, passive, durable))
         return self
 
     async def get(self, no_ack: bool = False, fail: bool = False) -> ActionMessage | None:
@@ -201,3 +204,56 @@ async def test_replay_route_requires_confirmation_and_audits_success(tmp_path) -
     assert successful.status_code == 200
     assert failed.status_code == 502
     assert sum(event["result"] == "failed" for event in events) == 1
+
+
+@pytest.mark.asyncio
+async def test_park_creates_parking_queue_before_publish() -> None:
+    target = ActionMessage()
+    exchange = FakeExchange()
+    channel = ActionChannel([target], exchange)
+    connection = ActionConnection(ChannelContext(channel))
+    operator = MessageOperator(connection)  # type: ignore[arg-type]
+    fingerprint = MessageBrowser._to_record("orders.dlq", target).fingerprint
+
+    result = await operator.operate(
+        source_queue="orders.dlq",
+        fingerprint=fingerprint,
+        action="park",
+        target=ReplayTarget(type="queue", queue="orders.dlq.parking"),
+    )
+
+    assert result["status"] == "success"
+    assert ("orders.dlq.parking", False, True) in channel.declared
+    assert target.acked is True
+    assert len(exchange.published) == 1
+
+
+@pytest.mark.asyncio
+async def test_replay_to_missing_queue_target_fails_before_ack() -> None:
+    from aiormq.exceptions import ChannelNotFoundEntity
+
+    class MissingTargetChannel(ActionChannel):
+        async def declare_queue(
+            self, queue: str, passive: bool = False, durable: bool = False
+        ) -> "ActionChannel":
+            if passive and queue != "orders.dlq":
+                raise ChannelNotFoundEntity(404, f"NOT_FOUND - no queue '{queue}'")
+            return await super().declare_queue(queue, passive=passive, durable=durable)
+
+    target = ActionMessage()
+    exchange = FakeExchange()
+    connection = ActionConnection(ChannelContext(MissingTargetChannel([target], exchange)))
+    operator = MessageOperator(connection)  # type: ignore[arg-type]
+    fingerprint = MessageBrowser._to_record("orders.dlq", target).fingerprint
+
+    with pytest.raises(ChannelNotFoundEntity):
+        await operator.operate(
+            source_queue="orders.dlq",
+            fingerprint=fingerprint,
+            action="move",
+            target=ReplayTarget(type="queue", queue="missing.queue"),
+        )
+
+    assert target.acked is False
+    assert target.nacked is True
+    assert exchange.published == []

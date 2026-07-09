@@ -2,6 +2,8 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Literal, cast
 
+from aio_pika.exceptions import DeliveryError
+from aiormq.exceptions import ChannelNotFoundEntity
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -82,6 +84,16 @@ async def _run_action(
             raise HTTPException(
                 status_code=409,
                 detail="Message was not found uniquely; refresh and try again",
+            ) from error
+        if isinstance(error, ChannelNotFoundEntity):
+            raise HTTPException(
+                status_code=404,
+                detail="Queue not found; check the source queue and replay target",
+            ) from error
+        if isinstance(error, DeliveryError):
+            raise HTTPException(
+                status_code=400,
+                detail="Message was unroutable; the target does not route to any queue",
             ) from error
         if isinstance(error, ValueError):
             raise HTTPException(status_code=400, detail=str(error)) from error

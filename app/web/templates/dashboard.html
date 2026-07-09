@@ -6,7 +6,7 @@
   <h2>Detected DLQ queues</h2>
   {% if queues %}
   <table><thead><tr><th>Queue</th><th>Messages</th><th>Ready</th><th>Consumers</th><th></th></tr></thead>
-  <tbody>{% for queue in queues %}<tr><td>{{ queue.name }}</td><td>{{ queue.messages }}</td><td>{{ queue.messages_ready }}</td><td>{{ queue.consumers }}</td><td><a href="/queues/{{ queue.name }}">Open</a></td></tr>{% endfor %}</tbody></table>
+  <tbody>{% for queue in queues %}<tr><td>{{ queue.name }}</td><td>{{ queue.messages }}</td><td>{{ queue.messages_ready }}</td><td>{{ queue.consumers }}</td><td><a href="/queues/{{ queue.name | urlencode }}">Open</a></td></tr>{% endfor %}</tbody></table>
   {% else %}<p>No DLQ queues detected.</p>{% endif %}
 </section>
 {% endblock %}

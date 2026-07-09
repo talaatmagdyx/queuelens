@@ -1,6 +1,5 @@
 import base64
 import json
-from datetime import datetime
 from typing import Any, cast
 
 from aio_pika.abc import AbstractIncomingMessage
@@ -38,7 +37,7 @@ class MessageBrowser:
     @staticmethod
     def _to_record(queue_name: str, message: AbstractIncomingMessage) -> MessageRecord:
         headers = dict(message.headers or {})
-        timestamp = _as_datetime(message.timestamp)
+        timestamp = message.timestamp
         body = bytes(message.body)
         payload, payload_format = _decode_payload(body)
         fingerprint = message_fingerprint(
@@ -92,7 +91,3 @@ def _decode_payload(body: bytes) -> tuple[object, str]:
             return body.decode("utf-8"), "text"
         except UnicodeDecodeError:
             return base64.b64encode(body).decode("ascii"), "base64"
-
-
-def _as_datetime(value: datetime | None) -> datetime | None:
-    return value

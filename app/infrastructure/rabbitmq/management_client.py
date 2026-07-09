@@ -11,6 +11,10 @@ from app.config import Settings
 class RabbitMQManagementError(RuntimeError):
     """Raised when the RabbitMQ Management API returns an error."""
 
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 class RabbitMQManagementClient:
     def __init__(self, settings: Settings, client: httpx.AsyncClient | None = None) -> None:
@@ -54,7 +58,8 @@ class RabbitMQManagementClient:
     async def _json_or_raise(self, response: httpx.Response) -> Any:
         if response.is_error:
             raise RabbitMQManagementError(
-                f"RabbitMQ Management API returned HTTP {response.status_code}"
+                f"RabbitMQ Management API returned HTTP {response.status_code}",
+                status_code=response.status_code,
             )
         return response.json()
 

@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Error · QueueLens{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>{{ status_code }}</h1>
+  <p>{{ detail }}</p>
+  <a class="button" href="/">Back to dashboard</a>
+</section>
+{% endblock %}

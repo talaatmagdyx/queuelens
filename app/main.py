@@ -2,7 +2,10 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+import httpx
+from aiormq.exceptions import ChannelNotFoundEntity
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import actions, audit, health, messages, queues
@@ -12,11 +15,50 @@ from app.application.queue_service import QueueService
 from app.config import Settings, get_settings
 from app.infrastructure.persistence.audit_repository import AuditRepository
 from app.infrastructure.persistence.database import Database
-from app.infrastructure.rabbitmq.connection import RabbitMQConnection
-from app.infrastructure.rabbitmq.management_client import RabbitMQManagementClient
+from app.infrastructure.rabbitmq.connection import RabbitMQConnection, RabbitMQUnavailableError
+from app.infrastructure.rabbitmq.management_client import (
+    RabbitMQManagementClient,
+    RabbitMQManagementError,
+)
 from app.infrastructure.rabbitmq.message_browser import MessageBrowser
 from app.infrastructure.rabbitmq.message_operator import MessageOperator
 from app.web import routes as web
+
+
+def _error_response(request: Request, status_code: int, detail: str) -> Response:
+    if request.url.path.startswith("/api"):
+        return JSONResponse({"detail": detail}, status_code=status_code)
+    return web.templates.TemplateResponse(
+        request=request,
+        name="error.html",
+        context={"status_code": status_code, "detail": detail},
+        status_code=status_code,
+    )
+
+
+def _register_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(LookupError)
+    async def _lookup(request: Request, error: Exception) -> Response:
+        return _error_response(request, 404, str(error))
+
+    @app.exception_handler(ChannelNotFoundEntity)
+    async def _queue_missing(request: Request, error: Exception) -> Response:
+        return _error_response(request, 404, "Queue not found")
+
+    @app.exception_handler(RabbitMQManagementError)
+    async def _management(request: Request, error: Exception) -> Response:
+        assert isinstance(error, RabbitMQManagementError)
+        if error.status_code == 404:
+            return _error_response(request, 404, "Queue not found")
+        return _error_response(request, 502, str(error))
+
+    @app.exception_handler(httpx.HTTPError)
+    async def _management_unreachable(request: Request, error: Exception) -> Response:
+        return _error_response(request, 503, "RabbitMQ Management API is unreachable")
+
+    @app.exception_handler(RabbitMQUnavailableError)
+    async def _amqp_unavailable(request: Request, error: Exception) -> Response:
+        return _error_response(request, 503, "RabbitMQ connection is not available")
 
 
 @asynccontextmanager
@@ -50,6 +92,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     management = RabbitMQManagementClient(app.state.settings)
     app.state.management_client = management
     app.state.queue_service = QueueService(management)
+    _register_error_handlers(app)
     app.include_router(health.router)
     app.include_router(queues.router)
     app.include_router(audit.router)

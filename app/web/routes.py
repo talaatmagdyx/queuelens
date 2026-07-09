@@ -59,7 +59,7 @@ async def message_detail(
     _username: str = Depends(get_current_username),
 ) -> HTMLResponse:
     message = await cast(MessageService, request.app.state.message_service).get_message(
-        queue_name, fingerprint, request.app.state.settings.max_preview_messages
+        queue_name, fingerprint, request.app.state.settings.refetch_window_size
     )
     return templates.TemplateResponse(
         request=request,

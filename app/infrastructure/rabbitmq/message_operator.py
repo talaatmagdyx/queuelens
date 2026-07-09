@@ -46,6 +46,13 @@ class MessageOperator:
                 if action in {"copy", "move", "park"}:
                     if target is None:
                         raise ValueError("A publish target is required")
+                    if target.type == "queue" and target.queue:
+                        # Parking queues are created on demand; replay targets
+                        # must already exist. Either way an unroutable publish
+                        # can never silently drop the message.
+                        await cast(Any, channel).declare_queue(
+                            target.queue, durable=True, passive=action != "park"
+                        )
                     await self._publish(channel, target_record, target, replay_headers or {})
 
                 if action in {"move", "park", "delete"}:

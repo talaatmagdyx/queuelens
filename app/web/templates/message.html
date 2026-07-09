@@ -8,6 +8,13 @@
 <section class="card"><h2>x-death</h2><pre>{{ message.x_death | tojson(indent=2) }}</pre></section>
 <section class="card">
   <h2>Actions</h2>
+  <fieldset class="replay-target">
+    <legend>Replay target (leave blank to use the configured target)</legend>
+    <label>Queue <input id="target-queue" placeholder="queue name"></label>
+    <span class="muted">or</span>
+    <label>Exchange <input id="target-exchange" placeholder="exchange"></label>
+    <label>Routing key <input id="target-routing-key" placeholder="routing key"></label>
+  </fieldset>
   <button onclick="runAction('replay', 'copy')">Replay copy</button>
   <button onclick="runAction('replay', 'move')">Replay move</button>
   <button onclick="runAction('park')">Park</button>
@@ -15,6 +22,14 @@
   <pre id="action-result" aria-live="polite"></pre>
 </section>
 <script>
+function replayTarget() {
+  const queue = document.getElementById('target-queue').value.trim();
+  const exchange = document.getElementById('target-exchange').value.trim();
+  const routingKey = document.getElementById('target-routing-key').value.trim();
+  if (queue) return {type: 'queue', queue: queue};
+  if (exchange) return {type: 'exchange', exchange: exchange, routing_key: routingKey};
+  return null;
+}
 async function runAction(action, mode) {
   if (!window.confirm('Confirm ' + action + (mode ? ' (' + mode + ')' : '') + '?')) return;
   const body = {
@@ -23,7 +38,11 @@ async function runAction(action, mode) {
     confirm: true
   };
   let endpoint = '/api/messages/' + action;
-  if (action === 'replay') body.mode = mode;
+  if (action === 'replay') {
+    body.mode = mode;
+    const target = replayTarget();
+    if (target) body.target = target;
+  }
   const response = await fetch(endpoint, {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
   });

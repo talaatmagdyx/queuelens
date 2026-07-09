@@ -13,3 +13,9 @@ pre { overflow: auto; background: #f0f4f8; padding: 1rem; border-radius: .25rem;
 .muted { color: #627d98; }
 .button { display: inline-block; padding: .6rem 1rem; background: #1976d2; color: white; border-radius: .25rem; text-decoration: none; }
 
+.replay-target { border: 1px solid #d9e2ec; border-radius: .25rem; margin-bottom: 1rem; padding: .75rem; }
+.replay-target legend { color: #627d98; font-size: .85rem; padding: 0 .3rem; }
+.replay-target label { margin-right: .75rem; font-size: .9rem; }
+.replay-target input { border: 1px solid #bcccdc; border-radius: .25rem; padding: .35rem .5rem; }
+button { padding: .5rem .9rem; border: 1px solid #bcccdc; border-radius: .25rem; background: white; cursor: pointer; }
+button:hover { background: #f0f4f8; }

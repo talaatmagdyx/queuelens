@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 
 from app.domain.models import MessageRecord
@@ -47,8 +48,22 @@ def message_to_dict(
         "timestamp": message.timestamp.isoformat() if message.timestamp else None,
         "exchange": message.exchange,
         "routing_key": message.routing_key,
-        "headers": message.headers,
-        "properties": message.properties,
+        "headers": _jsonable(message.headers),
+        "properties": _jsonable(message.properties),
         "redelivered": message.redelivered,
-        "x_death": message.x_death,
+        "x_death": _jsonable(message.x_death),
     }
+
+
+def _jsonable(value: Any) -> Any:
+    """Broker headers may carry datetimes (x-death "time") and raw bytes,
+    which Jinja's tojson cannot serialize."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, dict):
+        return {key: _jsonable(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_jsonable(item) for item in value]
+    return value
