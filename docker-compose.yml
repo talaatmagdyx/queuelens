@@ -1,0 +1,39 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    hostname: queuelens-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: queuelens
+      RABBITMQ_DEFAULT_PASS: queuelens
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  queuelens:
+    build: .
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      QUEUELENS_AUTH_ENABLED: "true"
+      QUEUELENS_ADMIN_USERNAME: admin
+      QUEUELENS_ADMIN_PASSWORD: change-me
+      QUEUELENS_RABBITMQ_URL: amqp://queuelens:queuelens@rabbitmq:5672/
+      QUEUELENS_RABBITMQ_MANAGEMENT_URL: http://rabbitmq:15672
+      QUEUELENS_RABBITMQ_MANAGEMENT_USERNAME: queuelens
+      QUEUELENS_RABBITMQ_MANAGEMENT_PASSWORD: queuelens
+      QUEUELENS_DATABASE_URL: sqlite+aiosqlite:///./data/queuelens.db
+      QUEUELENS_REPLAY_TARGETS_JSON: '{}'
+    ports:
+      - "8000:8000"
+    volumes:
+      - queuelens-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  queuelens-data:

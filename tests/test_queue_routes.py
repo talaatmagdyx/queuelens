@@ -35,7 +35,7 @@ async def test_queue_route_returns_only_dlq_queues() -> None:
             ],
         )
 
-    app = create_app(Settings())
+    app = create_app(Settings(auth_enabled=False))
     management = app.state.management_client
     management._client = httpx.AsyncClient(
         transport=httpx.MockTransport(handler), base_url="http://management.test"

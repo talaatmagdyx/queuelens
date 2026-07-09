@@ -1,0 +1,12 @@
+{
+  "orders.created.dlq": {
+    "type": "exchange",
+    "exchange": "orders.exchange",
+    "routing_key": "orders.created"
+  },
+  "email.delivery.dlq": {
+    "type": "queue",
+    "queue": "email.delivery"
+  }
+}
+

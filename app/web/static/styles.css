@@ -1,0 +1,15 @@
+:root { color-scheme: light; font-family: system-ui, sans-serif; }
+body { margin: 0; background: #f4f6f8; color: #1d2733; }
+.topbar { display: flex; justify-content: space-between; padding: 1rem 6vw; background: #102a43; color: white; }
+.topbar a { color: white; margin-left: 1rem; text-decoration: none; }
+.brand { font-weight: 700; margin-left: 0 !important; }
+.container { max-width: 1100px; margin: 2rem auto; padding: 0 1rem; }
+.card { background: white; border-radius: .5rem; padding: 1.25rem; margin: 1rem 0; box-shadow: 0 1px 4px #102a4320; }
+.narrow { max-width: 420px; margin: 5rem auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: .7rem; border-bottom: 1px solid #d9e2ec; text-align: left; }
+pre { overflow: auto; background: #f0f4f8; padding: 1rem; border-radius: .25rem; }
+.mono { font-family: ui-monospace, monospace; }
+.muted { color: #627d98; }
+.button { display: inline-block; padding: .6rem 1rem; background: #1976d2; color: white; border-radius: .25rem; text-decoration: none; }
+

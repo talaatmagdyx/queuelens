@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 
 router = APIRouter(tags=["health"])
 
@@ -9,8 +10,10 @@ async def health() -> dict[str, str]:
 
 
 @router.get("/ready")
-async def ready(request: Request) -> dict[str, str]:
+async def ready(request: Request) -> JSONResponse:
     if not getattr(request.app.state, "ready", False):
-        return {"status": "not_ready"}
-    return {"status": "ok"}
-
+        return JSONResponse({"status": "not_ready"}, status_code=503)
+    connection = getattr(request.app.state, "rabbitmq_connection", None)
+    if connection is not None and connection.is_started and not connection.is_connected:
+        return JSONResponse({"status": "not_ready"}, status_code=503)
+    return JSONResponse({"status": "ok"})

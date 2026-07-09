@@ -1,7 +1,9 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import actions, audit, health, messages, queues
 from app.application.action_service import ActionService
@@ -14,15 +16,17 @@ from app.infrastructure.rabbitmq.connection import RabbitMQConnection
 from app.infrastructure.rabbitmq.management_client import RabbitMQManagementClient
 from app.infrastructure.rabbitmq.message_browser import MessageBrowser
 from app.infrastructure.rabbitmq.message_operator import MessageOperator
+from app.web import routes as web
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.management_client.start()
-    await app.state.database.start()
-    await app.state.rabbitmq_connection.start()
-    app.state.ready = True
     try:
+        await app.state.database.start()
+        await app.state.rabbitmq_connection.start()
+        app.state.rabbitmq_connection.start_reconnect_loop()
+        app.state.ready = True
         yield
     finally:
         app.state.ready = False
@@ -51,6 +55,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(audit.router)
     app.include_router(messages.router)
     app.include_router(actions.router)
+    app.include_router(web.router)
+    app.mount(
+        "/static",
+        StaticFiles(directory=Path(__file__).parent / "web" / "static"),
+        name="static",
+    )
     return app
 
 

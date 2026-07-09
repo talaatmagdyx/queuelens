@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Message · QueueLens{% endblock %}
+{% block content %}
+<h1>Message detail</h1>
+<p class="mono">{{ message.fingerprint }}</p>
+<section class="card"><h2>Payload</h2><pre>{{ message.payload | tojson(indent=2) }}</pre></section>
+<section class="card"><h2>Headers</h2><pre>{{ message.headers | tojson(indent=2) }}</pre></section>
+<section class="card"><h2>x-death</h2><pre>{{ message.x_death | tojson(indent=2) }}</pre></section>
+{% endblock %}
+
