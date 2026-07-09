@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./data/queuelens.db"
     max_preview_messages: int = 100
     max_message_size_bytes: int = 1_048_576
+    refetch_window_size: int = 100
     replay_targets_json: str = "{}"
 
     @property

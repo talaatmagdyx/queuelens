@@ -28,6 +28,7 @@ services:
       QUEUELENS_RABBITMQ_MANAGEMENT_USERNAME: queuelens
       QUEUELENS_RABBITMQ_MANAGEMENT_PASSWORD: queuelens
       QUEUELENS_DATABASE_URL: sqlite+aiosqlite:///./data/queuelens.db
+      QUEUELENS_REFETCH_WINDOW_SIZE: 100
       QUEUELENS_REPLAY_TARGETS_JSON: '{}'
     ports:
       - "8000:8000"

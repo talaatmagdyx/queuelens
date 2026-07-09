@@ -20,7 +20,12 @@ async def list_messages(
     limit: int = Query(default=100, ge=1, le=100),
 ) -> dict[str, object]:
     messages = await _service(request).list_messages(queue_name, limit)
-    return {"messages": [message_to_dict(message) for message in messages]}
+    return {
+        "messages": [
+            message_to_dict(message, request.app.state.settings.max_message_size_bytes)
+            for message in messages
+        ]
+    }
 
 
 @router.get("/{queue_name}/messages/{fingerprint}")
@@ -34,4 +39,8 @@ async def get_message(
         message = await _service(request).get_message(queue_name, fingerprint, 100)
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    return {"message": message_to_dict(message)}
+    return {
+        "message": message_to_dict(
+            message, request.app.state.settings.max_message_size_bytes
+        )
+    }

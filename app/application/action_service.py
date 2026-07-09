@@ -35,7 +35,7 @@ class ActionService:
             action=mode,
             target=resolved_target,
             replay_headers=headers,
-            max_scan=self._settings.max_preview_messages,
+            max_scan=self._settings.refetch_window_size,
         )
 
     async def park(self, *, source_queue: str, fingerprint: str) -> dict[str, object]:
@@ -45,7 +45,7 @@ class ActionService:
             fingerprint=fingerprint,
             action="park",
             target=target,
-            max_scan=self._settings.max_preview_messages,
+            max_scan=self._settings.refetch_window_size,
         )
 
     async def delete(self, *, source_queue: str, fingerprint: str) -> dict[str, object]:
@@ -53,7 +53,7 @@ class ActionService:
             source_queue=source_queue,
             fingerprint=fingerprint,
             action="delete",
-            max_scan=self._settings.max_preview_messages,
+            max_scan=self._settings.refetch_window_size,
         )
 
     def _configured_target(self, source_queue: str) -> ReplayTarget | None:
@@ -66,4 +66,3 @@ class ActionService:
             exchange=raw_target.get("exchange"),
             routing_key=raw_target.get("routing_key"),
         )
-

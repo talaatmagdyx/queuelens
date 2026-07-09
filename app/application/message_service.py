@@ -13,17 +13,32 @@ class MessageService:
 
     async def get_message(self, queue_name: str, fingerprint: str, limit: int) -> MessageRecord:
         messages = await self._browser.list_messages(queue_name, limit)
-        for message in messages:
-            if message.fingerprint == fingerprint:
-                return message
-        raise LookupError(f"Message {fingerprint} was not found in {queue_name}")
+        matches = [message for message in messages if message.fingerprint == fingerprint]
+        if len(matches) != 1:
+            raise MessageNotUniquelyIdentifiable(
+                f"Message {fingerprint} was not found uniquely in {queue_name}"
+            )
+        return matches[0]
 
 
-def message_to_dict(message: MessageRecord) -> dict[str, Any]:
+class MessageNotUniquelyIdentifiable(LookupError):
+    """The best-effort fingerprint did not identify exactly one message."""
+
+
+def message_to_dict(
+    message: MessageRecord,
+    max_message_size_bytes: int | None = None,
+) -> dict[str, Any]:
+    payload = message.payload
+    payload_truncated = False
+    if max_message_size_bytes is not None and message.payload_size > max_message_size_bytes:
+        payload = f"[payload truncated at {max_message_size_bytes} bytes]"
+        payload_truncated = True
     return {
         "fingerprint": message.fingerprint,
         "queue": message.source_queue,
-        "payload": message.payload,
+        "payload": payload,
+        "payload_truncated": payload_truncated,
         "payload_format": message.payload_format,
         "payload_size": message.payload_size,
         "content_type": message.content_type,
@@ -37,4 +52,3 @@ def message_to_dict(message: MessageRecord) -> dict[str, Any]:
         "redelivered": message.redelivered,
         "x_death": message.x_death,
     }
-

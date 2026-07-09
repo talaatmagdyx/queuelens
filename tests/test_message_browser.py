@@ -3,7 +3,11 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from app.application.message_service import message_to_dict
+from app.application.message_service import (
+    MessageNotUniquelyIdentifiable,
+    MessageService,
+    message_to_dict,
+)
 from app.config import Settings
 from app.domain.fingerprint import message_fingerprint
 from app.domain.models import MessageRecord
@@ -38,6 +42,61 @@ def test_fingerprint_is_stable_and_xdeath_is_normalized() -> None:
     assert parse_x_death({"x-death": [{"routing-keys": "created"}]}) == [
         {"routing-keys": ["created"]}
     ]
+
+
+def test_message_payload_preview_is_limited() -> None:
+    message = MessageRecord(
+        fingerprint="a" * 64,
+        source_queue="orders.dlq",
+        body=b"large",
+        payload={"large": True},
+        payload_format="json",
+        payload_size=100,
+        content_type="application/json",
+        message_id=None,
+        correlation_id=None,
+        timestamp=None,
+        exchange="orders",
+        routing_key="created",
+        headers={},
+        properties={},
+        redelivered=False,
+    )
+
+    rendered = message_to_dict(message, max_message_size_bytes=10)
+
+    assert rendered["payload_truncated"] is True
+    assert rendered["payload"] == "[payload truncated at 10 bytes]"
+
+
+@pytest.mark.asyncio
+async def test_detail_lookup_rejects_duplicate_best_effort_matches() -> None:
+    message = MessageRecord(
+        fingerprint="a" * 64,
+        source_queue="orders.dlq",
+        body=b"{}",
+        payload={},
+        payload_format="json",
+        payload_size=2,
+        content_type="application/json",
+        message_id=None,
+        correlation_id=None,
+        timestamp=None,
+        exchange="orders",
+        routing_key="created",
+        headers={},
+        properties={},
+        redelivered=False,
+    )
+
+    class DuplicateBrowser:
+        async def list_messages(self, _queue: str, _limit: int) -> list[MessageRecord]:
+            return [message, message]
+
+    with pytest.raises(MessageNotUniquelyIdentifiable):
+        await MessageService(DuplicateBrowser()).get_message(
+            "orders.dlq", message.fingerprint, 100
+        )
 
 
 class FakeMessage:
@@ -148,4 +207,3 @@ async def test_message_route_returns_message_detail() -> None:
 
     assert response.status_code == 200
     assert response.json()["message"] == message_to_dict(message)
-

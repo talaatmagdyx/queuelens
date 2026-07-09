@@ -23,8 +23,7 @@ class MessageOperator:
         max_scan: int = 100,
     ) -> dict[str, object]:
         scanned: list[AbstractIncomingMessage] = []
-        target_message: AbstractIncomingMessage | None = None
-        target_record: MessageRecord | None = None
+        matches: list[tuple[AbstractIncomingMessage, MessageRecord]] = []
         try:
             async with self._connection.channel() as channel:
                 basic_get_channel = cast(Any, channel)
@@ -35,12 +34,13 @@ class MessageOperator:
                     scanned.append(message)
                     record = MessageBrowser._to_record(source_queue, message)
                     if record.fingerprint == fingerprint:
-                        target_message = message
-                        target_record = record
-                        break
+                        matches.append((message, record))
 
-                if target_message is None or target_record is None:
-                    raise LookupError(f"Message {fingerprint} was not found in {source_queue}")
+                if len(matches) != 1:
+                    raise LookupError(
+                        f"Message {fingerprint} was not found uniquely in {source_queue}"
+                    )
+                target_message, target_record = matches[0]
 
                 if action in {"copy", "move", "park"}:
                     if target is None:
@@ -126,4 +126,3 @@ def _target_to_dict(target: ReplayTarget | None) -> dict[str, str | None] | None
         "exchange": target.exchange,
         "routing_key": target.routing_key,
     }
-

@@ -135,6 +135,29 @@ async def test_publish_failure_requeues_target_and_does_not_ack() -> None:
 
 
 @pytest.mark.asyncio
+async def test_duplicate_fingerprint_fails_safely_without_ack_or_publish() -> None:
+    first = ActionMessage()
+    second = ActionMessage()
+    exchange = FakeExchange()
+    connection = ActionConnection(ChannelContext(ActionChannel([first, second], exchange)))
+    operator = MessageOperator(connection)  # type: ignore[arg-type]
+    fingerprint = MessageBrowser._to_record("orders.dlq", first).fingerprint
+
+    with pytest.raises(LookupError, match="not found uniquely"):
+        await operator.operate(
+            source_queue="orders.dlq",
+            fingerprint=fingerprint,
+            action="delete",
+        )
+
+    assert first.acked is False
+    assert second.acked is False
+    assert first.nacked is True
+    assert second.nacked is True
+    assert exchange.published == []
+
+
+@pytest.mark.asyncio
 async def test_replay_route_requires_confirmation_and_audits_success(tmp_path) -> None:
     settings = Settings(
         auth_enabled=False,

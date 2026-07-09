@@ -64,7 +64,11 @@ async def message_detail(
     return templates.TemplateResponse(
         request=request,
         name="message.html",
-        context={"message": message_to_dict(message)},
+        context={
+            "message": message_to_dict(
+                message, request.app.state.settings.max_message_size_bytes
+            )
+        },
     )
 
 
