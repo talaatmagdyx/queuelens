@@ -187,9 +187,17 @@ async def test_replay_route_requires_confirmation_and_audits_success(tmp_path) -
         body["confirm"] = True
         successful = await client.post("/api/messages/replay", json=body)
 
+        class FailingActionService:
+            async def replay(self, **_kwargs: object) -> dict[str, object]:
+                raise RuntimeError("broker publish failed")
+
+        app.state.action_service = FailingActionService()
+        failed = await client.post("/api/messages/replay", json=body)
+
     events = await AuditRepository(app.state.database).list(action="replay")
     await app.state.database.close()
 
     assert missing_confirmation.status_code == 400
     assert successful.status_code == 200
-    assert [event["result"] for event in events] == ["success", "started"]
+    assert failed.status_code == 502
+    assert sum(event["result"] == "failed" for event in events) == 1
