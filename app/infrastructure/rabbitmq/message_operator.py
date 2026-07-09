@@ -24,8 +24,8 @@ class MessageOperator:
     ) -> dict[str, object]:
         scanned: list[AbstractIncomingMessage] = []
         matches: list[tuple[AbstractIncomingMessage, MessageRecord]] = []
-        try:
-            async with self._connection.channel() as channel:
+        async with self._connection.channel() as channel:
+            try:
                 queue = await cast(Any, channel).declare_queue(source_queue, passive=True)
                 for _ in range(max_scan):
                     message = await queue.get(no_ack=False, fail=False)
@@ -61,9 +61,9 @@ class MessageOperator:
                     "fingerprint": fingerprint,
                     "target": _target_to_dict(target),
                 }
-        except Exception:
-            await self._requeue_unprocessed(scanned)
-            raise
+            except Exception:
+                await self._requeue_unprocessed(scanned)
+                raise
 
     async def _requeue_other_messages(
         self,

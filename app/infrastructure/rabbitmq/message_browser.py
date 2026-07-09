@@ -17,17 +17,18 @@ class MessageBrowser:
 
     async def list_messages(self, queue_name: str, limit: int) -> list[MessageRecord]:
         messages: list[AbstractIncomingMessage] = []
-        try:
-            async with self._connection.channel() as channel:
+        async with self._connection.channel() as channel:
+            try:
                 queue = await cast(Any, channel).declare_queue(queue_name, passive=True)
                 for _ in range(limit):
                     message = await queue.get(no_ack=False, fail=False)
                     if message is None:
                         break
                     messages.append(message)
-                return [self._to_record(queue_name, message) for message in messages]
-        finally:
-            await self._requeue(messages)
+                records = [self._to_record(queue_name, message) for message in messages]
+            finally:
+                await self._requeue(messages)
+        return records
 
     async def _requeue(self, messages: list[AbstractIncomingMessage]) -> None:
         for message in reversed(messages):
