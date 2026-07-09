@@ -6,5 +6,28 @@
 <section class="card"><h2>Payload</h2><pre>{{ message.payload | tojson(indent=2) }}</pre></section>
 <section class="card"><h2>Headers</h2><pre>{{ message.headers | tojson(indent=2) }}</pre></section>
 <section class="card"><h2>x-death</h2><pre>{{ message.x_death | tojson(indent=2) }}</pre></section>
+<section class="card">
+  <h2>Actions</h2>
+  <button onclick="runAction('replay', 'copy')">Replay copy</button>
+  <button onclick="runAction('replay', 'move')">Replay move</button>
+  <button onclick="runAction('park')">Park</button>
+  <button onclick="runAction('delete')">Delete</button>
+  <pre id="action-result" aria-live="polite"></pre>
+</section>
+<script>
+async function runAction(action, mode) {
+  if (!window.confirm('Confirm ' + action + (mode ? ' (' + mode + ')' : '') + '?')) return;
+  const body = {
+    source_queue: {{ message.queue | tojson }},
+    fingerprint: {{ message.fingerprint | tojson }},
+    confirm: true
+  };
+  let endpoint = '/api/messages/' + action;
+  if (action === 'replay') body.mode = mode;
+  const response = await fetch(endpoint, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+  });
+  document.getElementById('action-result').textContent = await response.text();
+}
+</script>
 {% endblock %}
-
