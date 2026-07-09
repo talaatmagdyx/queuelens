@@ -77,4 +77,14 @@ pytest -q
 mypy app
 ```
 
+`tests/test_integration_rabbitmq.py` runs the browse → park → replay → delete flow against a
+real broker and is skipped automatically when none is reachable. To include it:
+
+```bash
+docker compose up -d rabbitmq
+pytest -q   # picks it up once the broker is reachable
+```
+
+Point it at another broker with `QUEUELENS_IT_AMQP_URL` and `QUEUELENS_IT_MANAGEMENT_URL`.
+
 SQLite is the default Phase 1 audit store for simple self-hosted deployments. PostgreSQL is deferred for teams that need stronger concurrency, retention, and operational guarantees.
