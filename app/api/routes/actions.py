@@ -78,6 +78,13 @@ async def _run_action(
                 error_message=str(error),
             )
         )
+        if isinstance(error, LookupError):
+            raise HTTPException(
+                status_code=409,
+                detail="Message was not found uniquely; refresh and try again",
+            ) from error
+        if isinstance(error, ValueError):
+            raise HTTPException(status_code=400, detail=str(error)) from error
         raise
     await audit.record(
         AuditEntry(
