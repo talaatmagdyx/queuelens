@@ -19,9 +19,9 @@ class MessageBrowser:
         messages: list[AbstractIncomingMessage] = []
         try:
             async with self._connection.channel() as channel:
-                basic_get_channel = cast(Any, channel)
+                queue = await cast(Any, channel).declare_queue(queue_name, passive=True)
                 for _ in range(limit):
-                    message = await basic_get_channel.basic_get(queue_name, no_ack=False)
+                    message = await queue.get(no_ack=False, fail=False)
                     if message is None:
                         break
                     messages.append(message)

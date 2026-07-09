@@ -26,9 +26,9 @@ class MessageOperator:
         matches: list[tuple[AbstractIncomingMessage, MessageRecord]] = []
         try:
             async with self._connection.channel() as channel:
-                basic_get_channel = cast(Any, channel)
+                queue = await cast(Any, channel).declare_queue(source_queue, passive=True)
                 for _ in range(max_scan):
-                    message = await basic_get_channel.basic_get(source_queue, no_ack=False)
+                    message = await queue.get(no_ack=False, fail=False)
                     if message is None:
                         break
                     scanned.append(message)

@@ -131,8 +131,13 @@ class FakeChannel:
     def __init__(self, messages: list[FakeMessage]) -> None:
         self.messages = messages
 
-    async def basic_get(self, _queue_name: str, no_ack: bool = False) -> FakeMessage | None:
+    async def declare_queue(self, _queue_name: str, passive: bool = False) -> "FakeChannel":
+        assert passive is True
+        return self
+
+    async def get(self, no_ack: bool = False, fail: bool = False) -> FakeMessage | None:
         assert no_ack is False
+        assert fail is False
         return self.messages.pop(0) if self.messages else None
 
     async def close(self) -> None:

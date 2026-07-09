@@ -58,8 +58,13 @@ class ActionChannel:
         self.messages = messages
         self.default_exchange = exchange
 
-    async def basic_get(self, _queue: str, no_ack: bool = False) -> ActionMessage | None:
+    async def declare_queue(self, _queue: str, passive: bool = False) -> "ActionChannel":
+        assert passive is True
+        return self
+
+    async def get(self, no_ack: bool = False, fail: bool = False) -> ActionMessage | None:
         assert no_ack is False
+        assert fail is False
         return self.messages.pop(0) if self.messages else None
 
     async def get_exchange(self, _name: str, ensure: bool = False) -> FakeExchange:
