@@ -36,7 +36,11 @@ async def get_message(
     _username: str = Depends(get_current_username),
 ) -> dict[str, object]:
     try:
-        message = await _service(request).get_message(queue_name, fingerprint, 100)
+        message = await _service(request).get_message(
+            queue_name,
+            fingerprint,
+            request.app.state.settings.refetch_window_size,
+        )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return {
