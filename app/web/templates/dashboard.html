@@ -23,6 +23,10 @@
   {% endif %}
   <div class="stat {% if failed_today %}stat-alert{% endif %}"><span class="tile t-red"><svg width="17" height="17" viewBox="0 0 15 15" fill="none"><path d="M7.5 1.5l5.5 2v4c0 3.2-2.3 5.4-5.5 6.3C4.3 12.9 2 10.7 2 7.5v-4l5.5-2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></span>
     <div><b>{{ failed_today }}</b><span>Failed Actions Today</span>{% if failed_today %}<a class="plain-link" href="/audit">View failures →</a>{% endif %}</div></div>
+  {% if success_rate_today is not none %}
+  <div class="stat"><span class="tile t-green"><svg width="17" height="17" viewBox="0 0 15 15" fill="none"><circle cx="7.5" cy="7.5" r="6" stroke="currentColor" stroke-width="1.5"/><path d="M4.8 7.7l1.8 1.8 3.6-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+    <div><b>{{ success_rate_today }}%</b><span>Successful Actions Today</span></div></div>
+  {% endif %}
   <div class="stat"><span class="tile t-green"><svg width="17" height="17" viewBox="0 0 15 15" fill="none"><circle cx="5" cy="5" r="2.4" stroke="currentColor" stroke-width="1.5"/><path d="M1.5 13c.5-2.4 1.8-3.6 3.5-3.6S8 10.6 8.5 13M10 6.1a2.4 2.4 0 1 0 0-4M10.5 9.5c1.6.2 2.6 1.3 3 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
     <div><b>{{ no_consumers }}</b><span>Queues with No Consumers</span></div></div>
 </div>
@@ -36,7 +40,7 @@
   {% if queues %}
   <div class="table-wrap">
   <table><thead><tr><th>Queue</th><th>Type</th><th>Messages</th><th>Ready</th><th>Consumers</th><th>Status</th><th></th></tr></thead>
-  <tbody>{% for queue in queues %}<tr data-href="/queues/{{ queue.name | urlencode }}"><td><a href="/queues/{{ queue.name | urlencode }}" class="mono">{{ queue.name }}</a></td><td><span class="badge k-{{ queue.kind }}">{{ queue.kind }}</span></td><td class="mono"{% if queue.severity == 'attention' %} style="color: var(--red); font-weight: 700"{% endif %}>{{ queue.messages }}</td><td class="mono">{{ queue.messages_ready }}</td><td class="mono">{{ queue.consumers }}</td><td><span class="badge dot s-{{ queue.status }}">{{ {'attention': 'Needs Attention', 'warning': 'Warning', 'low': 'Low', 'empty': 'Empty', 'parking': 'Parking'}.get(queue.status, queue.status) }}</span></td><td><a class="button row-open" href="/queues/{{ queue.name | urlencode }}">Open ›</a></td></tr>{% endfor %}</tbody></table>
+  <tbody>{% for queue in queues %}<tr data-href="/queues/{{ queue.name | urlencode }}"><td><a href="/queues/{{ queue.name | urlencode }}" class="mono">{{ queue.name }}</a></td><td><span class="badge k-{{ queue.kind }}">{{ 'DLQ · Retry' if queue.kind == 'retry' else queue.kind }}</span></td><td class="mono"{% if queue.severity == 'attention' %} style="color: var(--red); font-weight: 700"{% endif %}>{{ queue.messages }}</td><td class="mono">{{ queue.messages_ready }}</td><td class="mono">{{ queue.consumers }}</td><td><span class="badge dot s-{{ queue.status }}">{{ {'attention': 'Needs Attention', 'warning': 'Warning', 'low': 'Low', 'empty': 'Empty', 'parking': 'Parking'}.get(queue.status, queue.status) }}</span></td><td><a class="button row-open" href="/queues/{{ queue.name | urlencode }}">Open ›</a></td></tr>{% endfor %}</tbody></table>
   </div>
   <p class="muted small">Showing {{ queues | length }} of {{ queues | length }} DLQ queues</p>
   {% else %}

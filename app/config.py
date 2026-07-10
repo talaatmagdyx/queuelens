@@ -32,6 +32,20 @@ class Settings(BaseSettings):
     masked_fields: str = (
         "password,token,access_token,refresh_token,authorization,api_key,secret,email,phone"
     )
+    users_json: str = "{}"
+
+    @property
+    def users(self) -> dict[str, str]:
+        """username -> password map; the admin account is always included."""
+        try:
+            parsed = json.loads(self.users_json)
+        except json.JSONDecodeError as error:
+            raise ValueError("QUEUELENS_USERS_JSON must contain valid JSON") from error
+        if not isinstance(parsed, dict):
+            raise ValueError("QUEUELENS_USERS_JSON must be an object")
+        users = {str(name): str(password) for name, password in parsed.items()}
+        users[self.admin_username] = self.admin_password
+        return users
 
     @property
     def masked_field_names(self) -> tuple[str, ...]:

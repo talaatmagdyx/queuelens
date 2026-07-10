@@ -154,9 +154,9 @@ coloring, a summary panel, and safe actions:
 
 ![Message detail](docs/screenshots/message-detail.png)
 
-**Actions** — replay target per action, with a clear result and audit link:
+**Replay wizard** — action cards, target selection, provenance-header toggle, and type-to-confirm safety:
 
-![Action result](docs/screenshots/action-result.png)
+![Replay wizard](docs/screenshots/replay-wizard.png)
 
 **Bulk actions** — dry-run first, then execute on exactly what the dry run counted:
 

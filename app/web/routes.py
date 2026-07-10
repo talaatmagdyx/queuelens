@@ -38,11 +38,17 @@ async def dashboard(
     queue_dicts = queues_to_dicts(queues)
     recent_events: list[dict[str, Any]] = []
     failed_today = 0
+    success_rate_today = None
     try:
         audit = request.app.state.audit_repository
         recent_events = await audit.list(limit=8)
         midnight = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
         failed_today = await audit.count(result="failed", since=midnight)
+        succeeded_today = await audit.count(result="success", since=midnight)
+        if failed_today + succeeded_today:
+            success_rate_today = round(
+                100 * succeeded_today / (failed_today + succeeded_today), 1
+            )
     except Exception:  # audit store unavailable must not take the dashboard down
         pass
     return templates.TemplateResponse(
@@ -54,6 +60,7 @@ async def dashboard(
             "no_consumers": sum(1 for q in queue_dicts if q["consumers"] == 0),
             "recent_events": recent_events,
             "failed_today": failed_today,
+            "success_rate_today": success_rate_today,
             "broker": _broker_display(settings.rabbitmq_url, settings.rabbitmq_vhost),
             "preview_limit": settings.max_preview_messages,
         },
@@ -129,6 +136,88 @@ async def message_detail(
     )
 
 
+@router.get("/messages", response_class=HTMLResponse)
+async def messages_index(
+    request: Request,
+    _username: str = Depends(get_current_username),
+) -> HTMLResponse:
+    queues = await cast(QueueService, request.app.state.queue_service).list_queues(dlq_only=True)
+    return templates.TemplateResponse(
+        request=request,
+        name="messages.html",
+        context={"queues": queues_to_dicts(queues)},
+    )
+
+
+@router.get("/replay", response_class=HTMLResponse)
+async def replay_hub(
+    request: Request,
+    _username: str = Depends(get_current_username),
+) -> HTMLResponse:
+    queues = await cast(QueueService, request.app.state.queue_service).list_queues(dlq_only=True)
+    events: list[dict[str, Any]] = []
+    try:
+        events = await request.app.state.audit_repository.list(action="replay", limit=15)
+    except Exception:
+        pass
+    return templates.TemplateResponse(
+        request=request,
+        name="replay_hub.html",
+        context={"queues": queues_to_dicts(queues), "events": events},
+    )
+
+
+@router.get("/users", response_class=HTMLResponse)
+async def users_page(
+    request: Request,
+    _username: str = Depends(get_current_username),
+) -> HTMLResponse:
+    settings = request.app.state.settings
+    accounts = [
+        {
+            "username": name,
+            "role": "Administrator" if name == settings.admin_username else "Operator",
+        }
+        for name in sorted(settings.users)
+    ]
+    return templates.TemplateResponse(
+        request=request,
+        name="users.html",
+        context={"accounts": accounts},
+    )
+
+
+@router.get(
+    "/messages/{queue_name}/{fingerprint}/{wizard}",
+    response_class=HTMLResponse,
+)
+async def action_wizard(
+    request: Request,
+    queue_name: str,
+    fingerprint: str,
+    wizard: str,
+    _username: str = Depends(get_current_username),
+) -> HTMLResponse:
+    if wizard not in {"replay", "park"}:
+        raise LookupError(f"Unknown wizard: {wizard}")
+    settings = request.app.state.settings
+    message = await cast(MessageService, request.app.state.message_service).get_message(
+        queue_name, fingerprint, settings.refetch_window_size
+    )
+    return templates.TemplateResponse(
+        request=request,
+        name=f"wizard_{wizard}.html",
+        context={
+            "message": message_to_dict(
+                message,
+                settings.max_message_size_bytes,
+                masked_fields=settings.masked_field_names,
+            ),
+            "vhost": settings.rabbitmq_vhost,
+        },
+    )
+
+
 @router.get("/audit", response_class=HTMLResponse)
 async def audit_log(
     request: Request,
@@ -139,6 +228,7 @@ async def audit_log(
     succeeded = results.count("success")
     failed = results.count("failed") + results.count("partial")
     outcomes = succeeded + failed
+    started = results.count("started")
     return templates.TemplateResponse(
         request=request,
         name="audit.html",
@@ -148,6 +238,7 @@ async def audit_log(
                 "total": len(events),
                 "succeeded": succeeded,
                 "failed": failed,
+                "in_progress": max(0, started - outcomes),
                 "success_rate": round(100 * succeeded / outcomes, 1) if outcomes else None,
                 "users": len({event["username"] for event in events}),
             },

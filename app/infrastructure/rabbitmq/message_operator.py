@@ -1,3 +1,4 @@
+import json
 from typing import Any, cast
 
 from aio_pika import Message
@@ -63,6 +64,8 @@ class MessageOperator:
                     "action": action,
                     "fingerprint": fingerprint,
                     "target": _target_to_dict(target),
+                    "message_id": target_record.message_id,
+                    "x_death": json.loads(json.dumps(target_record.x_death, default=str)),
                 }
             except Exception:
                 await self._requeue_unprocessed(scanned)

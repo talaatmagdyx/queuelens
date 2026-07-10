@@ -30,7 +30,12 @@
         <label>Routing key <input id="target-routing-key" placeholder="routing key"></label>
       </fieldset>
       <div class="actions-row">
-        <button class="primary" onclick="runAction('replay', 'move')">Replay move</button>
+        <a class="button primary" href="/messages/{{ message.queue | urlencode }}/{{ message.fingerprint }}/replay">▶ Replay Wizard</a>
+        <a class="button" href="/messages/{{ message.queue | urlencode }}/{{ message.fingerprint }}/park">⚑ Park Wizard</a>
+      </div>
+      <p class="muted small" style="margin: 0.8rem 0 0.4rem">Quick actions (skip the wizard):</p>
+      <div class="actions-row">
+        <button onclick="runAction('replay', 'move')">Replay move</button>
         <button onclick="runAction('replay', 'copy')">Replay copy</button>
         <button onclick="runAction('park')">Park</button>
         <button class="danger" onclick="runAction('delete')">Delete</button>

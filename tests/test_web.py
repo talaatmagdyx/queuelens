@@ -236,3 +236,73 @@ async def test_queues_index_lists_all_queues_with_kind_and_status() -> None:
     assert 'k-parking' in response.text
     assert 'k-normal' in response.text
     assert 's-active' in response.text  # consumer-backed normal queue
+
+
+@pytest.mark.asyncio
+async def test_multi_user_auth_and_users_page(tmp_path) -> None:
+    import json as jsonlib
+
+    app = create_app(
+        Settings(
+            auth_enabled=True,
+            admin_username="admin",
+            admin_password="root-pw",
+            users_json=jsonlib.dumps({"sre": "sre-pw"}),
+            database_url=f"sqlite+aiosqlite:///{tmp_path}/u.db",
+        )
+    )
+    await app.state.database.start()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        anonymous = await client.get("/users")
+        wrong = await client.get("/users", auth=("sre", "bad"))
+        sre = await client.get("/users", auth=("sre", "sre-pw"))
+        admin = await client.get("/users", auth=("admin", "root-pw"))
+    await app.state.database.close()
+
+    assert anonymous.status_code == 401
+    assert wrong.status_code == 401
+    assert sre.status_code == 200
+    assert admin.status_code == 200
+    assert "Administrator" in admin.text
+    assert "sre" in admin.text
+
+
+@pytest.mark.asyncio
+async def test_replay_wizard_renders_with_message_context() -> None:
+    app = create_app(Settings(auth_enabled=False))
+    message = MessageRecord(
+        fingerprint="e" * 64,
+        source_queue="orders.dlq",
+        body=b"{}",
+        payload={"order": 1},
+        payload_format="json",
+        payload_size=12,
+        content_type="application/json",
+        message_id="m-9",
+        correlation_id=None,
+        timestamp=None,
+        exchange="",
+        routing_key="orders.dlq",
+        headers={},
+        properties={},
+        redelivered=False,
+        x_death=[{"count": 2, "reason": "rejected", "queue": "orders"}],
+    )
+
+    class FakeMessageService:
+        async def get_message(self, _queue: str, _fp: str, _limit: int) -> MessageRecord:
+            return message
+
+    app.state.message_service = FakeMessageService()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        replay = await client.get(f"/messages/orders.dlq/{message.fingerprint}/replay")
+        park = await client.get(f"/messages/orders.dlq/{message.fingerprint}/park")
+
+    assert replay.status_code == 200
+    assert "Replay (Move)" in replay.text
+    assert "Type the source queue name to confirm" in replay.text
+    assert park.status_code == 200
+    assert "Parking Queue" in park.text
+    assert "orders.dlq.parking" in park.text

@@ -15,10 +15,14 @@ async def get_current_username(
         return "local"
     if credentials is None:
         raise _unauthorized()
-    if not (
-        compare_digest(credentials.username, settings.admin_username)
-        and compare_digest(credentials.password, settings.admin_password)
-    ):
+    matched = False
+    for username, password in settings.users.items():
+        # compare every account to keep timing independent of username validity
+        if compare_digest(credentials.username, username) and compare_digest(
+            credentials.password, password
+        ):
+            matched = True
+    if not matched:
         raise _unauthorized()
     return credentials.username
 

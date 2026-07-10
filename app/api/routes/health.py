@@ -35,6 +35,20 @@ async def broker(
     }
 
 
+@router.get("/api/exchanges")
+async def exchanges(
+    request: Request,
+    _username: str = Depends(get_current_username),
+) -> dict[str, object]:
+    raw = await request.app.state.management_client.list_exchanges()
+    return {
+        "exchanges": [
+            {"name": item.get("name", ""), "type": item.get("type", "direct")}
+            for item in raw
+        ]
+    }
+
+
 @router.get("/api/broker/test")
 async def broker_test(
     request: Request,

@@ -18,18 +18,22 @@ class ActionService:
         mode: str,
         target: ReplayTarget | None,
         username: str,
+        annotate: bool = True,
     ) -> dict[str, object]:
         resolved_target = target or self._configured_target(source_queue)
         if resolved_target is None:
             raise ValueError("No replay target configured for this queue")
-        headers = {
-            "x-queuelens-replayed": True,
-            "x-queuelens-replayed-at": datetime.now(UTC).isoformat(),
-            "x-queuelens-replayed-by": username,
-            "x-queuelens-source-queue": source_queue,
-            "x-queuelens-original-fingerprint": fingerprint,
-        }
-        return await self._operator.operate(
+        headers: dict[str, object] = {}
+        if annotate:
+            headers = {
+                "x-queuelens-replayed": True,
+                "x-queuelens-action": f"replay_{mode}",
+                "x-queuelens-replayed-at": datetime.now(UTC).isoformat(),
+                "x-queuelens-replayed-by": username,
+                "x-queuelens-source-queue": source_queue,
+                "x-queuelens-original-fingerprint": fingerprint,
+            }
+        result = await self._operator.operate(
             source_queue=source_queue,
             fingerprint=fingerprint,
             action=mode,
@@ -37,16 +41,27 @@ class ActionService:
             replay_headers=headers,
             max_scan=self._settings.refetch_window_size,
         )
+        result["headers_added"] = headers
+        return result
 
     async def park(self, *, source_queue: str, fingerprint: str) -> dict[str, object]:
         target = ReplayTarget(type="queue", queue=f"{source_queue}.parking")
-        return await self._operator.operate(
+        headers: dict[str, object] = {
+            "x-queuelens-action": "park",
+            "x-queuelens-parked-at": datetime.now(UTC).isoformat(),
+            "x-queuelens-source-queue": source_queue,
+            "x-queuelens-original-fingerprint": fingerprint,
+        }
+        result = await self._operator.operate(
             source_queue=source_queue,
             fingerprint=fingerprint,
             action="park",
             target=target,
+            replay_headers=headers,
             max_scan=self._settings.refetch_window_size,
         )
+        result["headers_added"] = headers
+        return result
 
     async def delete(self, *, source_queue: str, fingerprint: str) -> dict[str, object]:
         return await self._operator.operate(

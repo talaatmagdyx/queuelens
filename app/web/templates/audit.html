@@ -15,6 +15,8 @@
     <div><b>{{ stats.succeeded }}</b><span>Successful{% if stats.success_rate is not none %} · {{ stats.success_rate }}%{% endif %}</span></div></div>
   <div class="stat {% if stats.failed %}stat-alert{% endif %}"><span class="tile t-red"><svg width="17" height="17" viewBox="0 0 15 15" fill="none"><circle cx="7.5" cy="7.5" r="6" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 5.5l4 4M9.5 5.5l-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
     <div><b>{{ stats.failed }}</b><span>Failed / Partial</span></div></div>
+  <div class="stat"><span class="tile t-amber"><svg width="17" height="17" viewBox="0 0 15 15" fill="none"><circle cx="7.5" cy="7.5" r="6" stroke="currentColor" stroke-width="1.5"/><path d="M7.5 4v3.5l2.5 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+    <div><b>{{ stats.in_progress }}</b><span>In Progress</span></div></div>
   <div class="stat"><span class="tile t-purple"><svg width="17" height="17" viewBox="0 0 15 15" fill="none"><circle cx="5" cy="5" r="2.4" stroke="currentColor" stroke-width="1.5"/><path d="M1.5 13c.5-2.4 1.8-3.6 3.5-3.6S8 10.6 8.5 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
     <div><b>{{ stats.users }}</b><span>Unique Users</span></div></div>
 </div>
@@ -32,6 +34,11 @@
         <option>success</option><option>failed</option><option>started</option>
         <option>partial</option><option>skipped_duplicate</option><option>not_found</option>
       </select>
+    </label>
+    <label>From date <input type="date" id="a-from"></label>
+    <label>To date <input type="date" id="a-to"></label>
+    <label>Per page
+      <select id="a-pagesize"><option>15</option><option>25</option><option>50</option><option>100</option></select>
     </label>
     <button type="button" onclick="clearAuditFilters()">Clear Filters</button>
   </div>
@@ -64,7 +71,7 @@
 </aside>
 </div>
 <script>
-const PAGE_SIZE = 15;
+let PAGE_SIZE = 15;
 let currentPage = 1;
 const rows = Array.from(document.querySelectorAll('#a-table tbody tr'));
 
@@ -72,9 +79,14 @@ function matches(row) {
   const search = document.getElementById('a-search').value.trim().toLowerCase();
   const action = document.getElementById('a-action').value;
   const result = document.getElementById('a-result').value;
+  const from = document.getElementById('a-from').value;
+  const to = document.getElementById('a-to').value;
   if (search && !row.dataset.haystack.includes(search)) return false;
   if (action && row.dataset.action !== action) return false;
   if (result && row.dataset.result !== result) return false;
+  const timestamp = JSON.parse(row.dataset.payload).timestamp || '';
+  if (from && timestamp.slice(0, 10) < from) return false;
+  if (to && timestamp.slice(0, 10) > to) return false;
   return true;
 }
 
@@ -103,14 +115,21 @@ function render() {
 }
 
 function clearAuditFilters() {
-  ['a-search', 'a-action', 'a-result'].forEach(id => { document.getElementById(id).value = ''; });
+  ['a-search', 'a-action', 'a-result', 'a-from', 'a-to'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
   currentPage = 1;
   render();
 }
 
-['a-search', 'a-action', 'a-result'].forEach(id => {
+['a-search', 'a-action', 'a-result', 'a-from', 'a-to'].forEach(id => {
   const el = document.getElementById(id);
   if (el) el.addEventListener('input', () => { currentPage = 1; render(); });
+});
+document.getElementById('a-pagesize').addEventListener('change', event => {
+  PAGE_SIZE = Number(event.target.value);
+  currentPage = 1;
+  render();
 });
 
 function kvRow(parent, label, value, mono) {
@@ -148,9 +167,45 @@ function showDetails(button) {
       ? event.metadata.duration_ms + 'ms' : null, true);
   kvRow(body, 'Batch', event.metadata ? event.metadata.batch_id : null, true);
   kvRow(body, 'Error', event.error_message, true);
-  if (event.metadata && Object.keys(event.metadata).length) {
+  if (['replay', 'park'].includes(event.action) && event.result === 'success') {
+    kvRow(body, 'Published First', 'Yes (publish-before-ack)', false);
+  }
+  const metadata = event.metadata || {};
+  if (metadata.headers_added && Object.keys(metadata.headers_added).length) {
+    const label = document.createElement('div');
+    label.className = 'kv-row';
+    label.innerHTML = '<span>Headers Added</span>';
+    body.append(label);
     const pre = document.createElement('pre');
-    pre.textContent = JSON.stringify(event.metadata, null, 2);
+    pre.textContent = Object.entries(metadata.headers_added)
+      .map(([key, value]) => key + ': ' + value).join('\n');
+    body.append(pre);
+  }
+  if (metadata.x_death && metadata.x_death.length) {
+    const label = document.createElement('div');
+    label.className = 'kv-row';
+    label.innerHTML = '<span>x-death (' + metadata.x_death.length + ')</span>';
+    body.append(label);
+    const table = document.createElement('table');
+    table.innerHTML = '<thead><tr><th>Reason</th><th>Queue</th><th>Count</th></tr></thead>';
+    const tbody = document.createElement('tbody');
+    metadata.x_death.forEach(death => {
+      const tr = document.createElement('tr');
+      [death.reason, death.queue, death.count].forEach(value => {
+        const td = document.createElement('td');
+        td.className = 'mono';
+        td.textContent = value === undefined ? '—' : String(value);
+        tr.append(td);
+      });
+      tbody.append(tr);
+    });
+    table.append(tbody);
+    body.append(table);
+  } else if (Object.keys(metadata).length) {
+    const pre = document.createElement('pre');
+    pre.textContent = JSON.stringify(
+      Object.fromEntries(Object.entries(metadata).filter(([key]) => key !== 'headers_added')),
+      null, 2);
     pre.style.marginTop = '0.6rem';
     body.append(pre);
   }

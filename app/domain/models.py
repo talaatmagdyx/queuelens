@@ -14,7 +14,8 @@ class QueueInfo:
     durable: bool
     arguments: dict[str, Any] = field(default_factory=dict)
     is_dlq: bool = False
-    kind: str = "dlq"  # dlq | parking | retry
+    kind: str = "dlq"  # dlq | parking | retry | normal
+    publish_rate: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

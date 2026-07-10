@@ -47,6 +47,11 @@ class RabbitMQManagementClient:
         response = await self.client.get("/api/overview")
         return cast(dict[str, Any], await self._json_or_raise(response))
 
+    async def list_exchanges(self) -> list[dict[str, Any]]:
+        vhost = quote(self._settings.rabbitmq_vhost, safe="")
+        response = await self.client.get(f"/api/exchanges/{vhost}")
+        return cast(list[dict[str, Any]], await self._json_or_raise(response))
+
     async def list_queues(self) -> list[dict[str, Any]]:
         vhost = quote(self._settings.rabbitmq_vhost, safe="")
         response = await self.client.get(f"/api/queues/{vhost}")

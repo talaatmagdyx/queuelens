@@ -37,6 +37,7 @@ class ReplayRequest(BaseModel):
     mode: Literal["copy", "move"] = "copy"
     target: TargetRequest | None = None
     confirm: bool = False
+    annotate: bool = True  # stamp x-queuelens-* provenance headers
 
 
 class MessageActionRequest(BaseModel):
@@ -108,6 +109,11 @@ async def _run_action(
     elapsed_ms = round((time.perf_counter() - started_at) * 1000)
     OPERATION_SECONDS.labels(action=action).observe(elapsed_ms / 1000)
     ACTIONS.labels(action=action, result="success").inc()
+    metadata: dict[str, object] = {"duration_ms": elapsed_ms}
+    if result.get("headers_added"):
+        metadata["headers_added"] = result["headers_added"]
+    if result.get("x_death"):
+        metadata["x_death"] = result["x_death"]
     await audit.record(
         AuditEntry(
             username=username,
@@ -116,7 +122,7 @@ async def _run_action(
             source_queue=source_queue,
             message_fingerprint=fingerprint,
             result="success",
-            metadata={"duration_ms": elapsed_ms},
+            metadata=metadata,
         )
     )
     return result
@@ -142,6 +148,7 @@ async def replay(
             mode=body.mode,
             target=body.target.to_domain() if body.target else None,
             username=username,
+            annotate=body.annotate,
         ),
     )
 

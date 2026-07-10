@@ -49,6 +49,9 @@ class QueueService:
             arguments=arguments,
             is_dlq=is_dlq,
             kind=QueueService._classify(name) if is_dlq else "normal",
+            publish_rate=(raw.get("message_stats") or {})
+            .get("publish_details", {})
+            .get("rate"),
         )
 
     @staticmethod
@@ -108,6 +111,7 @@ def queues_to_dicts(queues: Sequence[QueueInfo]) -> list[dict[str, Any]]:
             "kind": queue.kind,
             "severity": _severity(queue.messages),
             "status": _status(queue),
+            "publish_rate": queue.publish_rate,
         }
         for queue in queues
     ]
