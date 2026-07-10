@@ -25,7 +25,10 @@ inspect DLQ safely -> understand the message -> replay / park / delete safely ->
   with `x-queuelens-*` provenance headers stamped on every replayed message
 - **Park & delete** — park moves a message to `{queue}.parking` (created on demand);
   both require explicit confirmation
+- **Sensitive-field masking** — values under configurable keys (`password`, `token`, `email`, …)
+  render as `•••`; display-only, replay payloads are never modified
 - **Audit log** — every action writes an attempt event before execution and an outcome event after
+- **Preview honesty** — the queue view says "showing 100 of 4,812" instead of pretending you saw everything
 - **Honest failure modes** — friendly 404 for unknown queues and ambiguous messages, 400 for
   unroutable targets, 503 while the broker is down, and a `/ready` probe that reports real
   broker connectivity
@@ -103,28 +106,27 @@ URLs, credentials, preview/scan limits, and preconfigured replay targets. See
 [`config/replay-targets.example.json`](config/replay-targets.example.json) for the replay
 target format. A replay target can also be entered per action in the message detail UI.
 
-> **Sensitive data warning:** Phase 1 does not include sensitive-field masking. Do not expose
-> QueueLens publicly; run it inside a trusted private network or behind secure internal access
-> controls because DLQ payloads may contain tokens, emails, customer data, or internal
-> identifiers.
+> **Sensitive data warning:** masking is key-based and display-only — secrets under
+> unlisted keys are shown, and replayed messages carry the original payload. Do not expose
+> QueueLens publicly; run it inside a trusted private network or behind secure internal
+> access controls.
 
 ## Known limitations (Phase 1)
 
 - Single-message actions only — bulk operations are deferred
-- Preview capped at `QUEUELENS_MAX_PREVIEW_MESSAGES` messages
+- Preview capped at `QUEUELENS_MAX_PREVIEW_MESSAGES` messages (the UI says so when it happens)
 - HTTP Basic Auth only
 - SQLite audit store (PostgreSQL deferred for teams needing stronger concurrency and retention)
-- No sensitive-field masking yet
+- Masking is key-based and display-only — it does not detect secrets under unlisted keys
 - Message fingerprints are best-effort identifiers for the current preview batch, bounded
   re-fetch matching, and audit correlation; they are not globally stable RabbitMQ message IDs.
   Mutating actions fail safely unless exactly one matching message is found.
 
 ## Roadmap
 
-1. Sensitive-field masking (display-only)
-2. Preview-limit honesty and pagination
-3. Bulk operations (dry-run preview, per-message results, partial-failure summary)
-4. PostgreSQL audit store, alerts, metrics, RBAC
+1. Bulk operations (dry-run preview, per-message results, partial-failure summary)
+2. Full pagination beyond the preview window
+3. PostgreSQL audit store, alerts, metrics, RBAC
 
 ## Development
 
@@ -140,3 +142,7 @@ container, and a Docker image build on every push.
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the test strategy, code conventions, and
 the release checklist.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
