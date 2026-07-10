@@ -8,7 +8,9 @@
   const pct = (n, total) => (total ? ((n / total) * 100).toFixed(1) + '%' : '—');
 
   function AuditLog({ nav }) {
-    const [sel, setSel] = React.useState(D.audit[0] || null);
+    // Refetch on every mount so actions executed this session show up immediately.
+    const audit = React.useMemo(() => window.QL.fetchAudit(), []);
+    const [sel, setSel] = React.useState(audit[0] || null);
     const [page, setPage] = React.useState(1);
     const [pageSize, setPageSize] = React.useState(10);
     const [q, setQ] = React.useState('');
@@ -17,7 +19,7 @@
     const [from, setFrom] = React.useState('');
     const [to, setTo] = React.useState('');
 
-    const rows = React.useMemo(() => D.audit.filter((r) => {
+    const rows = React.useMemo(() => audit.filter((r) => {
       if (q && !(r.queue + ' ' + r.user + ' ' + r.action + ' ' + r.target).toLowerCase().includes(q.toLowerCase())) return false;
       if (actionF !== 'All Actions' && r.action !== ACTION_FILTER[actionF]) return false;
       if (resultF !== 'All Results' && r.result !== resultF) return false;
@@ -26,11 +28,11 @@
       return true;
     }), [q, actionF, resultF, from, to]);
 
-    const total = D.audit.length;
-    const ok = D.audit.filter((r) => r.result === 'Success').length;
-    const failed = D.audit.filter((r) => r.result === 'Failed').length;
-    const started = D.audit.filter((r) => r.result === 'Started').length;
-    const uniqueUsers = new Set(D.audit.map((r) => r.user)).size;
+    const total = audit.length;
+    const ok = audit.filter((r) => r.result === 'Success').length;
+    const failed = audit.filter((r) => r.result === 'Failed').length;
+    const started = audit.filter((r) => r.result === 'Started').length;
+    const uniqueUsers = new Set(audit.map((r) => r.user)).size;
 
     const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
     const safePage = Math.min(page, pageCount);

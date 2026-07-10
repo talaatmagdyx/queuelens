@@ -150,29 +150,30 @@ window.QL.screens = window.QL.screens || {};
   var payload = first ? JSON.stringify(first.payload, null, 2) : '{}';
   var xdeath = mapXDeath(first && first.x_death);
 
-  var auditRaw = (getJson('/api/audit?limit=500') || {}).events || [];
-  var outcomes = auditRaw.filter(function (e) { return e.result !== 'started'; });
-  var audit = outcomes.map(function (e, i) {
-    var meta = e.metadata || {};
-    return {
-      key: (e.id || '') + '-' + i,
-      time: e.timestamp ? e.timestamp.slice(0, 19).replace('T', ' ') : '—',
-      user: e.username, action: kitAction(e), queue: e.source_queue || '—',
-      target: target(e), result: kitResult(e.result),
-      duration: meta.duration_ms != null ? (meta.duration_ms / 1000).toFixed(2) + 's' : '—',
-      fingerprint: e.message_fingerprint || null,
-      headersAdded: meta.headers_added || null,
-      xdeathList: mapXDeath(meta.x_death),
-      error: meta.error || null,
-    };
-  });
+  window.QL.fetchAudit = function () {
+    var raw = (getJson('/api/audit?limit=500') || {}).events || [];
+    return raw.filter(function (e) { return e.result !== 'started'; }).map(function (e, i) {
+      var meta = e.metadata || {};
+      return {
+        key: (e.id || '') + '-' + i,
+        time: e.timestamp ? e.timestamp.slice(0, 19).replace('T', ' ') : '—',
+        user: e.username, action: kitAction(e), queue: e.source_queue || '—',
+        target: target(e), result: kitResult(e.result),
+        duration: meta.duration_ms != null ? (meta.duration_ms / 1000).toFixed(2) + 's' : '—',
+        fingerprint: e.message_fingerprint || null,
+        headersAdded: meta.headers_added || null,
+        xdeathList: mapXDeath(meta.x_death),
+        error: e.error_message || meta.error || null,
+      };
+    });
+  };
+  var audit = window.QL.fetchAudit();
 
-  var recentActions = outcomes.slice(0, 5).map(function (e) {
-    var action = kitAction(e);
+  var recentActions = audit.slice(0, 5).map(function (r) {
     return {
-      time: e.timestamp ? e.timestamp.slice(11, 19) : '—',
-      action: action, label: title(action),
-      queue: e.source_queue || '—', target: target(e), result: kitResult(e.result),
+      time: r.time.length > 11 ? r.time.slice(11) : r.time,
+      action: r.action, label: title(r.action),
+      queue: r.queue, target: r.target, result: r.result,
     };
   });
 
@@ -183,13 +184,13 @@ window.QL.screens = window.QL.screens || {};
         message: q.name + ' has ' + q.messages + ' messages', source: 'Queue Monitor' });
     }
   });
-  auditRaw.filter(function (e) { return e.result !== 'started'; }).slice(0, 8).forEach(function (e) {
-    var failed = e.result === 'failed' || e.result === 'partial';
+  audit.slice(0, 8).forEach(function (r) {
+    var failed = r.result === 'Failed';
     notifications.push({
-      time: e.timestamp ? rel(e.timestamp) : '—',
+      time: r.time.length > 11 ? r.time.slice(11) : r.time,
       level: failed ? 'Alert' : 'Success',
-      title: failed ? 'Failed ' + e.action + ' action' : title(e.action) + ' action successful',
-      message: (e.source_queue || '—') + (target(e) !== '—' ? ' → ' + target(e) : ''),
+      title: failed ? 'Failed ' + title(r.action) + ' action' : title(r.action) + ' action successful',
+      message: r.queue + (r.target !== '—' ? ' → ' + r.target : ''),
       source: 'Audit Log',
     });
   });
