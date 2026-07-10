@@ -297,3 +297,37 @@ async def test_dry_run_with_explicit_selection() -> None:
     assert preview["message_count"] == 2  # only the selected-and-present messages
     assert preview["unique_fingerprints"] == 2
     assert preview["selected_not_seen"] == 1  # the vanished selection is reported
+
+
+@pytest.mark.asyncio
+async def test_dry_run_failure_is_audited_and_maps_missing_queue_to_404(tmp_path) -> None:
+    from aiormq.exceptions import ChannelNotFoundEntity
+
+    settings = Settings(
+        auth_enabled=False,
+        database_url=f"sqlite+aiosqlite:///{tmp_path}/dr.db",
+    )
+    app = create_app(settings)
+    await app.state.database.start()
+
+    class FakeBulkService:
+        async def dry_run(self, **_kwargs: object) -> dict[str, object]:
+            raise ChannelNotFoundEntity("NOT_FOUND - no queue 'ghost.dlq' in vhost '/'")
+
+    app.state.bulk_service = FakeBulkService()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/messages/bulk/dry-run",
+            json={"source_queue": "ghost.dlq", "action": "replay", "fingerprints": ["f" * 64]},
+        )
+        audit = await client.get("/api/audit?limit=5")
+    await app.state.database.close()
+
+    assert response.status_code == 404
+    assert "Queue not found" in response.json()["detail"]
+    events = audit.json()["events"]
+    assert events[0]["action"] == "bulk_replay"
+    assert events[0]["result"] == "failed"
+    assert events[0]["source_queue"] == "ghost.dlq"
+    assert "no queue 'ghost.dlq'" in events[0]["error_message"]

@@ -37,7 +37,7 @@ def _service(request: Request) -> BulkActionService:
 async def dry_run(
     request: Request,
     body: BulkDryRunRequest,
-    _username: str = Depends(get_current_username),
+    username: str = Depends(get_current_username),
 ) -> dict[str, object]:
     try:
         return await _service(request).dry_run(
@@ -50,8 +50,27 @@ async def dry_run(
                 frozenset(body.fingerprints) if body.fingerprints is not None else None
             ),
         )
-    except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
+    except Exception as error:
+        # Dry-run failures are audited too — a rejected bulk attempt is still an attempt.
+        await request.app.state.audit_repository.record(
+            AuditEntry(
+                username=username,
+                action=f"bulk_{body.action}",
+                timestamp=datetime.now(UTC),
+                source_queue=body.source_queue,
+                result="failed",
+                error_message=str(error),
+                metadata={"stage": "dry_run"},
+            )
+        )
+        if isinstance(error, ChannelNotFoundEntity):
+            raise HTTPException(
+                status_code=404,
+                detail="Queue not found; check the source queue and replay target",
+            ) from error
+        if isinstance(error, ValueError):
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        raise HTTPException(status_code=502, detail="Bulk dry-run failed") from error
 
 
 @router.post("/execute")
