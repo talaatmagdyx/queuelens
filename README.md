@@ -57,6 +57,19 @@ Open [http://localhost:8000](http://localhost:8000). The default local credentia
 RabbitMQ Management UI is available at [http://localhost:15672](http://localhost:15672)
 with `queuelens` / `queuelens`.
 
+## Documentation
+
+| Doc | What's inside |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layering, components, request flows, design decisions (fingerprints, publish-before-ack, health tracking) |
+| [docs/API.md](docs/API.md) | Full REST API reference: endpoints, request/response shapes, error matrix |
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every `QUEUELENS_*` environment variable, replay-target format, broker permissions |
+| [docs/SAFETY.md](docs/SAFETY.md) | The safety model: each guarantee, how it's enforced, the failure matrix, known limits |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Deployment, security posture, health probes, audit store, troubleshooting |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Local setup, test strategy, CI, code conventions, release checklist |
+
+Interactive OpenAPI docs are served by the app itself at `/docs`.
+
 ## Screenshots
 
 **DLQ dashboard** — source queues with dead-letter config are not misreported as DLQs:
@@ -84,24 +97,11 @@ with `queuelens` / `queuelens`.
 ## Configuration
 
 All external I/O is asynchronous (`aio-pika`, `httpx.AsyncClient`, SQLAlchemy asyncio with
-`aiosqlite`). Important environment variables:
-
-```env
-QUEUELENS_AUTH_ENABLED=true
-QUEUELENS_ADMIN_USERNAME=admin
-QUEUELENS_ADMIN_PASSWORD=change-me
-QUEUELENS_RABBITMQ_URL=amqp://queuelens:queuelens@localhost:5672/
-QUEUELENS_RABBITMQ_MANAGEMENT_URL=http://localhost:15672
-QUEUELENS_DATABASE_URL=sqlite+aiosqlite:///./data/queuelens.db
-QUEUELENS_MAX_PREVIEW_MESSAGES=100
-QUEUELENS_MAX_MESSAGE_SIZE_BYTES=1048576
-QUEUELENS_OPERATION_TIMEOUT_SECONDS=10
-QUEUELENS_REFETCH_WINDOW_SIZE=100
-```
-
-Preconfigured replay targets can be supplied through `QUEUELENS_REPLAY_TARGETS_JSON`; see
-[`config/replay-targets.example.json`](config/replay-targets.example.json). A target can also
-be entered per action in the message detail UI.
+`aiosqlite`). Everything is configured through `QUEUELENS_*` environment variables — broker
+URLs, credentials, preview/scan limits, and preconfigured replay targets. See
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference and
+[`config/replay-targets.example.json`](config/replay-targets.example.json) for the replay
+target format. A replay target can also be entered per action in the message detail UI.
 
 > **Sensitive data warning:** Phase 1 does not include sensitive-field masking. Do not expose
 > QueueLens publicly; run it inside a trusted private network or behind secure internal access
@@ -130,20 +130,13 @@ be entered per action in the message detail UI.
 
 ```bash
 python -m pip install '.[dev]'
-ruff check app tests
-pytest -q
-mypy app
+ruff check app tests && mypy app && pytest -q
 ```
 
 `tests/test_integration_rabbitmq.py` runs the browse → park → replay → delete flow against a
-real broker and is skipped automatically when none is reachable. To include it:
+real broker (`docker compose up -d rabbitmq`) and is skipped automatically when none is
+reachable. CI runs lint, strict type-checks, the full suite against a real RabbitMQ service
+container, and a Docker image build on every push.
 
-```bash
-docker compose up -d rabbitmq
-pytest -q   # picks it up once the broker is reachable
-```
-
-Point it at another broker with `QUEUELENS_IT_AMQP_URL` and `QUEUELENS_IT_MANAGEMENT_URL`.
-
-CI (GitHub Actions) runs lint, type-checks, the full test suite against a real RabbitMQ
-service container, and a Docker image build on every push.
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the test strategy, code conventions, and
+the release checklist.
