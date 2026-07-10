@@ -47,3 +47,45 @@ async def test_management_client_lists_queues_with_encoded_vhost() -> None:
     assert queues[0].name == "orders.dlq"
     assert queues[0].is_dlq is True
 
+
+
+@pytest.mark.asyncio
+async def test_source_queues_with_dlx_arguments_are_not_listed_as_dlqs() -> None:
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        def queue(name: str, arguments: dict) -> dict:
+            return {
+                "name": name,
+                "vhost": "/",
+                "messages": 0,
+                "messages_ready": 0,
+                "messages_unacknowledged": 0,
+                "consumers": 0,
+                "durable": True,
+                "arguments": arguments,
+            }
+
+        return httpx.Response(
+            200,
+            json=[
+                # source queue declaring a DLX -> NOT a DLQ
+                queue(
+                    "orders.processing",
+                    {"x-dead-letter-exchange": "", "x-dead-letter-routing-key": "orders.failed"},
+                ),
+                # referenced as a dead-letter target -> IS a DLQ despite the name
+                queue("orders.failed", {}),
+                # matches by name convention
+                queue("email.dlq", {}),
+                # unrelated queue
+                queue("email.delivery", {}),
+            ],
+        )
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="http://management.test"
+    )
+    management = RabbitMQManagementClient(settings(), client=client)
+    queues = await QueueService(management).list_queues(dlq_only=True)
+    await client.aclose()
+
+    assert sorted(queue.name for queue in queues) == ["email.dlq", "orders.failed"]

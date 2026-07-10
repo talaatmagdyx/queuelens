@@ -11,19 +11,32 @@ class QueueService:
 
     async def list_queues(self, dlq_only: bool = False) -> list[QueueInfo]:
         raw_queues = await self._management.list_queues()
-        queues = [self._to_queue_info(item) for item in raw_queues]
+        dead_letter_targets = self._dead_letter_targets(raw_queues)
+        queues = [self._to_queue_info(item, dead_letter_targets) for item in raw_queues]
         if dlq_only:
             queues = [queue for queue in queues if queue.is_dlq]
         return queues
 
     async def get_queue(self, queue_name: str) -> QueueInfo:
-        return self._to_queue_info(await self._management.get_queue(queue_name))
+        return self._to_queue_info(await self._management.get_queue(queue_name), set())
 
     @staticmethod
-    def _to_queue_info(raw: dict[str, Any]) -> QueueInfo:
+    def _dead_letter_targets(raw_queues: list[dict[str, Any]]) -> set[str]:
+        """Queue names other queues dead-letter into via the default exchange."""
+        targets: set[str] = set()
+        for raw in raw_queues:
+            arguments = raw.get("arguments") or {}
+            routing_key = arguments.get("x-dead-letter-routing-key")
+            if arguments.get("x-dead-letter-exchange") == "" and routing_key:
+                targets.add(str(routing_key))
+        return targets
+
+    @staticmethod
+    def _to_queue_info(raw: dict[str, Any], dead_letter_targets: set[str]) -> QueueInfo:
         arguments = raw.get("arguments") or {}
+        name = str(raw.get("name", ""))
         return QueueInfo(
-            name=str(raw.get("name", "")),
+            name=name,
             vhost=str(raw.get("vhost", "/")),
             messages=int(raw.get("messages", 0)),
             messages_ready=int(raw.get("messages_ready", 0)),
@@ -31,18 +44,17 @@ class QueueService:
             consumers=int(raw.get("consumers", 0)),
             durable=bool(raw.get("durable", False)),
             arguments=arguments,
-            is_dlq=QueueService._looks_like_dlq(str(raw.get("name", "")), arguments),
+            is_dlq=QueueService._looks_like_dlq(name, dead_letter_targets),
         )
 
     @staticmethod
-    def _looks_like_dlq(name: str, arguments: dict[str, Any]) -> bool:
+    def _looks_like_dlq(name: str, dead_letter_targets: set[str]) -> bool:
+        # A queue that *declares* x-dead-letter-* arguments is a source, not a
+        # DLQ, so detection is by name convention or by being the queue that
+        # another queue dead-letters into.
         normalized_name = name.lower()
         name_match = any(token in normalized_name for token in (".dlq", "_dlq", "dead"))
-        argument_match = any(
-            "dead-letter" in str(key).lower() or "dead-letter" in str(value).lower()
-            for key, value in arguments.items()
-        )
-        return name_match or argument_match
+        return name_match or name in dead_letter_targets
 
 
 def queues_to_dicts(queues: Sequence[QueueInfo]) -> list[dict[str, Any]]:
