@@ -19,6 +19,7 @@ class BulkDryRunRequest(BaseModel):
     mode: Literal["copy", "move"] = "copy"
     target: TargetRequest | None = None
     payload_contains: str | None = None
+    fingerprints: list[str] | None = Field(default=None, max_length=1000)
 
 
 class BulkExecuteRequest(BaseModel):
@@ -43,6 +44,9 @@ async def dry_run(
             mode=body.mode,
             target=body.target.to_domain() if body.target else None,
             payload_contains=body.payload_contains,
+            selected_fingerprints=(
+                frozenset(body.fingerprints) if body.fingerprints is not None else None
+            ),
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error

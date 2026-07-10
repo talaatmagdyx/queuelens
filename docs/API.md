@@ -181,6 +181,7 @@ after the dry run are never touched. Scope is the scan window (up to
 | `mode` | no (`copy`) | Replay mode |
 | `target` | no | Replay target; falls back to the configured target, else `400` |
 | `payload_contains` | no | Only messages whose raw body contains this substring |
+| `fingerprints` | no (max 1000) | Explicit selection: only these fingerprints are considered (combines with `payload_contains` as an intersection) |
 
 Response:
 
@@ -190,6 +191,7 @@ Response:
   "message_count": 5,
   "unique_fingerprints": 4,
   "duplicate_fingerprints": 1,
+  "selected_not_seen": 0,
   "sample_fingerprints": ["…first 10…"],
   "expires_at": "2026-07-10T02:40:00+00:00",
   "scan_limit": 500
@@ -197,7 +199,8 @@ Response:
 ```
 
 `duplicate_fingerprints` counts fingerprints with more than one physical message — those are
-**skipped and reported** at execution, never guessed at. Tokens expire after
+**skipped and reported** at execution, never guessed at. `selected_not_seen` counts
+explicitly selected fingerprints that are no longer in the scan window (they are ignored). Tokens expire after
 `QUEUELENS_BULK_DRY_RUN_TTL_SECONDS` and live in process memory (a restart voids them —
 rerun the dry run).
 

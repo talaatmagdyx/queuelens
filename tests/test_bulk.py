@@ -259,3 +259,41 @@ async def test_bulk_routes_confirmation_expiry_and_audit(tmp_path) -> None:
     envelope = next(event for event in events if event["action"] == "bulk_delete")
     assert envelope["result"] == "partial"
     assert envelope["metadata"]["succeeded"] == 1
+
+
+@pytest.mark.asyncio
+async def test_dry_run_with_explicit_selection() -> None:
+    def record(message_id: str) -> MessageRecord:
+        return MessageRecord(
+            fingerprint=message_id * 8,
+            source_queue="orders.dlq",
+            body=b"{}",
+            payload={},
+            payload_format="json",
+            payload_size=2,
+            content_type="application/json",
+            message_id=message_id,
+            correlation_id=None,
+            timestamp=None,
+            exchange="",
+            routing_key="orders.dlq",
+            headers={},
+            properties={},
+            redelivered=False,
+        )
+
+    class FakeBrowser:
+        async def list_messages(self, _queue: str, _limit: int) -> list[MessageRecord]:
+            return [record("aaaaaaaa"), record("bbbbbbbb"), record("cccccccc")]
+
+    service = BulkActionService(Settings(), FakeBrowser(), object())  # type: ignore[arg-type]
+
+    preview = await service.dry_run(
+        source_queue="orders.dlq",
+        action="delete",
+        selected_fingerprints=frozenset({"aaaaaaaa" * 8, "cccccccc" * 8, "gone" * 16}),
+    )
+
+    assert preview["message_count"] == 2  # only the selected-and-present messages
+    assert preview["unique_fingerprints"] == 2
+    assert preview["selected_not_seen"] == 1  # the vanished selection is reported

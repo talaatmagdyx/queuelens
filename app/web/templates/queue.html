@@ -10,15 +10,16 @@
     this is a preview, not the whole queue. Raise <code>QUEUELENS_MAX_PREVIEW_MESSAGES</code>
     to preview more.</p>
   {% endif %}
-  {% if messages %}<table><thead><tr><th>Fingerprint</th><th>Payload</th><th>Routing key</th><th>Size</th><th></th></tr></thead>
-  <tbody>{% for message in messages %}<tr><td class="mono">{{ message.fingerprint[:12] }}</td><td>{{ message.payload_format }}</td><td>{{ message.routing_key }}</td><td>{{ message.payload_size }}</td><td><a href="/messages/{{ queue.name | urlencode }}/{{ message.fingerprint }}">Inspect</a></td></tr>{% endfor %}</tbody></table>
+  {% if messages %}<table><thead><tr><th><input type="checkbox" id="select-all" onchange="toggleAll(this)" aria-label="Select all messages"></th><th>Fingerprint</th><th>Payload</th><th>Routing key</th><th>Size</th><th></th></tr></thead>
+  <tbody>{% for message in messages %}<tr><td><input type="checkbox" class="msg-select" data-fingerprint="{{ message.fingerprint }}" onchange="updateSelectionCount()" aria-label="Select message {{ message.fingerprint[:12] }}"></td><td class="mono">{{ message.fingerprint[:12] }}</td><td>{{ message.payload_format }}</td><td>{{ message.routing_key }}</td><td>{{ message.payload_size }}</td><td><a href="/messages/{{ queue.name | urlencode }}/{{ message.fingerprint }}">Inspect</a></td></tr>{% endfor %}</tbody></table>
   {% else %}<p>No messages returned.</p>{% endif %}
 </section>
 {% if messages %}
 <section class="card">
   <h2>Bulk actions</h2>
   <p class="muted">Applies to messages in the current scan window. Every bulk action starts
-    with a dry run; execution only touches the messages the dry run counted.</p>
+    with a dry run; execution only touches the messages the dry run counted.
+    <span id="selection-count"></span></p>
   <div class="bulk-form">
     <label>Action
       <select id="bulk-action">
@@ -39,6 +40,22 @@
 const QUEUE_NAME = {{ queue.name | tojson }};
 let pendingBatch = null;
 
+function selectedFingerprints() {
+  return Array.from(document.querySelectorAll('.msg-select:checked'))
+    .map(box => box.dataset.fingerprint);
+}
+
+function toggleAll(master) {
+  document.querySelectorAll('.msg-select').forEach(box => { box.checked = master.checked; });
+  updateSelectionCount();
+}
+
+function updateSelectionCount() {
+  const count = selectedFingerprints().length;
+  document.getElementById('selection-count').textContent =
+    count ? count + ' message(s) selected — the dry run will use the selection.' : '';
+}
+
 function bulkBody() {
   const selection = document.getElementById('bulk-action').value;
   const body = {source_queue: QUEUE_NAME};
@@ -52,6 +69,8 @@ function bulkBody() {
   }
   const filter = document.getElementById('bulk-filter').value.trim();
   if (filter) body.payload_contains = filter;
+  const selected = selectedFingerprints();
+  if (selected.length) body.fingerprints = selected;
   return body;
 }
 
@@ -90,6 +109,10 @@ async function bulkDryRun() {
   if (detail.duplicate_fingerprints > 0) {
     line(preview, 'Duplicates:', detail.duplicate_fingerprints
       + ' duplicated fingerprint(s) will be skipped and reported');
+  }
+  if (detail.selected_not_seen > 0) {
+    line(preview, 'Not found:', detail.selected_not_seen
+      + ' selected message(s) are no longer in the scan window and will be ignored');
   }
   if (detail.message_count > 0) {
     const button = document.createElement('button');

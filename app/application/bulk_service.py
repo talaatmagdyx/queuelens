@@ -51,6 +51,7 @@ class BulkActionService:
         mode: str = "copy",
         target: ReplayTarget | None = None,
         payload_contains: str | None = None,
+        selected_fingerprints: frozenset[str] | None = None,
     ) -> dict[str, object]:
         if action == "replay":
             operator_action = mode
@@ -72,6 +73,12 @@ class BulkActionService:
         if payload_contains:
             needle = payload_contains.encode("utf-8")
             records = [record for record in records if needle in record.body]
+        not_seen = 0
+        if selected_fingerprints is not None:
+            records = [
+                record for record in records if record.fingerprint in selected_fingerprints
+            ]
+            not_seen = len(selected_fingerprints - {r.fingerprint for r in records})
 
         fingerprints = [record.fingerprint for record in records]
         unique = frozenset(fingerprints)
@@ -100,6 +107,7 @@ class BulkActionService:
             "message_count": batch.message_count,
             "unique_fingerprints": len(unique),
             "duplicate_fingerprints": duplicates,
+            "selected_not_seen": not_seen,
             "sample_fingerprints": batch.sample_fingerprints,
             "expires_at": batch.expires_at.isoformat(),
             "scan_limit": self._settings.max_bulk_size,

@@ -28,8 +28,9 @@ inspect DLQ safely -> understand the message -> replay / park / delete safely ->
   with `x-queuelens-*` provenance headers stamped on every replayed message
 - **Park & delete** — park moves a message to `{queue}.parking` (created on demand);
   both require explicit confirmation
-- **Bulk operations** — replay/park/delete many messages with a mandatory dry-run first,
-  hard caps, per-message results, and duplicates skipped rather than guessed at
+- **Bulk operations** — replay/park/delete many messages at once, scoped by checkbox
+  selection or a payload filter, with a mandatory dry-run first, hard caps, per-message
+  results, and duplicates skipped rather than guessed at
 - **Sensitive-field masking** — values under configurable keys (`password`, `token`, `email`, …)
   render as `***`; display-only, replay payloads are never modified
 - **Audit log** — every action writes an attempt event before execution and an outcome event after
