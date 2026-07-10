@@ -1,13 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Dashboard · QueueLens{% endblock %}
 {% block content %}
+<p class="overline">DLQ Console</p>
 <h1>DLQ Dashboard</h1>
+<p class="muted">Every dead-letter queue this broker knows about, live.</p>
+{% if queues %}
+<div class="stats">
+  <div class="stat"><b>{{ queues | length }}</b><span>Dead-letter queues</span></div>
+  <div class="stat"><b>{{ queues | sum(attribute='messages') }}</b><span>Dead letters total</span></div>
+  <div class="stat"><b>{{ queues | sum(attribute='messages_ready') }}</b><span>Ready to inspect</span></div>
+</div>
+{% endif %}
 <section class="card">
   <h2>Detected DLQ queues</h2>
   {% if queues %}
   <table><thead><tr><th>Queue</th><th>Messages</th><th>Ready</th><th>Consumers</th><th></th></tr></thead>
-  <tbody>{% for queue in queues %}<tr><td>{{ queue.name }}</td><td>{{ queue.messages }}</td><td>{{ queue.messages_ready }}</td><td>{{ queue.consumers }}</td><td><a href="/queues/{{ queue.name | urlencode }}">Open</a></td></tr>{% endfor %}</tbody></table>
-  {% else %}<p>No DLQ queues detected.</p>{% endif %}
+  <tbody>{% for queue in queues %}<tr><td class="mono">{{ queue.name }}</td><td class="mono">{{ queue.messages }}</td><td class="mono">{{ queue.messages_ready }}</td><td class="mono">{{ queue.consumers }}</td><td><a href="/queues/{{ queue.name | urlencode }}">Open →</a></td></tr>{% endfor %}</tbody></table>
+  {% else %}<p class="empty">No DLQ queues detected.</p>{% endif %}
 </section>
 {% endblock %}
-

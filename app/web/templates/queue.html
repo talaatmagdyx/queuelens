@@ -1,8 +1,15 @@
 {% extends "base.html" %}
 {% block title %}{{ queue.name }} · QueueLens{% endblock %}
 {% block content %}
+<p class="overline">Queue Manifest</p>
 <h1>{{ queue.name }}</h1>
-<p class="muted">{{ queue.messages }} total · {{ queue.messages_ready }} ready</p>
+<div class="kv">
+  <div><span>Total</span><b>{{ queue.messages }}</b></div>
+  <div><span>Ready</span><b>{{ queue.messages_ready }}</b></div>
+  <div><span>Unacked</span><b>{{ queue.messages_unacked }}</b></div>
+  <div><span>Consumers</span><b>{{ queue.consumers }}</b></div>
+  <div><span>Durable</span><b>{{ 'yes' if queue.durable else 'no' }}</b></div>
+</div>
 <section class="card">
   <h2>Messages</h2>
   {% if queue.messages > messages|length %}
@@ -11,8 +18,8 @@
     to preview more.</p>
   {% endif %}
   {% if messages %}<table><thead><tr><th><input type="checkbox" id="select-all" onchange="toggleAll(this)" aria-label="Select all messages"></th><th>Fingerprint</th><th>Payload</th><th>Routing key</th><th>Size</th><th></th></tr></thead>
-  <tbody>{% for message in messages %}<tr><td><input type="checkbox" class="msg-select" data-fingerprint="{{ message.fingerprint }}" onchange="updateSelectionCount()" aria-label="Select message {{ message.fingerprint[:12] }}"></td><td class="mono">{{ message.fingerprint[:12] }}</td><td>{{ message.payload_format }}</td><td>{{ message.routing_key }}</td><td>{{ message.payload_size }}</td><td><a href="/messages/{{ queue.name | urlencode }}/{{ message.fingerprint }}">Inspect</a></td></tr>{% endfor %}</tbody></table>
-  {% else %}<p>No messages returned.</p>{% endif %}
+  <tbody>{% for message in messages %}<tr><td><input type="checkbox" class="msg-select" data-fingerprint="{{ message.fingerprint }}" onchange="updateSelectionCount()" aria-label="Select message {{ message.fingerprint[:12] }}"></td><td class="mono">{{ message.fingerprint[:12] }}</td><td><span class="badge b-{{ message.payload_format }}">{{ message.payload_format }}</span></td><td class="mono">{{ message.routing_key }}</td><td class="mono">{{ message.payload_size }}</td><td><a href="/messages/{{ queue.name | urlencode }}/{{ message.fingerprint }}">Inspect →</a></td></tr>{% endfor %}</tbody></table>
+  {% else %}<p class="empty">No messages returned.</p>{% endif %}
 </section>
 {% if messages %}
 <section class="card">
@@ -31,7 +38,7 @@
     </label>
     <label>Replay target queue <input id="bulk-target-queue" placeholder="for replay"></label>
     <label>Payload contains <input id="bulk-filter" placeholder="optional filter"></label>
-    <button onclick="bulkDryRun()">Dry run</button>
+    <button class="primary" onclick="bulkDryRun()">Dry run</button>
   </div>
   <div id="bulk-preview" class="action-result" hidden></div>
   <div id="bulk-result" class="action-result" hidden></div>
@@ -116,6 +123,7 @@ async function bulkDryRun() {
   }
   if (detail.message_count > 0) {
     const button = document.createElement('button');
+    button.className = 'primary';
     button.textContent = 'Execute on ' + detail.message_count + ' message(s)';
     button.onclick = bulkExecute;
     preview.append(button);
@@ -165,4 +173,3 @@ async function bulkExecute() {
 </script>
 {% endif %}
 {% endblock %}
-

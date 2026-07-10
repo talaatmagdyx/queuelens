@@ -1,11 +1,20 @@
 {% extends "base.html" %}
 {% block title %}Message · QueueLens{% endblock %}
 {% block content %}
+<p class="overline">Dead Letter</p>
 <h1>Message detail</h1>
-<p class="mono">{{ message.fingerprint }}</p>
-<section class="card"><h2>Payload</h2><pre>{{ message.payload | tojson(indent=2) }}</pre></section>
-<section class="card"><h2>Headers</h2><pre>{{ message.headers | tojson(indent=2) }}</pre></section>
-<section class="card"><h2>x-death</h2><pre>{{ message.x_death | tojson(indent=2) }}</pre></section>
+<p class="ticket"><span class="mono">{{ message.fingerprint }}</span>
+  <button type="button" onclick="copyFingerprint(this)">Copy</button></p>
+<div class="kv">
+  <div><span>Queue</span><b>{{ message.queue }}</b></div>
+  <div><span>Format</span><b>{{ message.payload_format }}</b></div>
+  <div><span>Size</span><b>{{ message.payload_size }} B</b></div>
+  {% if message.message_id %}<div><span>Message ID</span><b>{{ message.message_id }}</b></div>{% endif %}
+  {% if message.routing_key %}<div><span>Routing key</span><b>{{ message.routing_key }}</b></div>{% endif %}
+</div>
+<section class="card"><h2>Payload</h2><pre class="code-json">{{ message.payload | tojson(indent=2) }}</pre></section>
+<section class="card"><h2>Headers</h2><pre class="code-json">{{ message.headers | tojson(indent=2) }}</pre></section>
+<section class="card"><h2>x-death</h2><pre class="code-json">{{ message.x_death | tojson(indent=2) }}</pre></section>
 <section class="card">
   <h2>Actions</h2>
   <fieldset class="replay-target">
@@ -15,15 +24,24 @@
     <label>Exchange <input id="target-exchange" placeholder="exchange"></label>
     <label>Routing key <input id="target-routing-key" placeholder="routing key"></label>
   </fieldset>
-  <button onclick="runAction('replay', 'copy')">Replay copy</button>
-  <button onclick="runAction('replay', 'move')">Replay move</button>
-  <button onclick="runAction('park')">Park</button>
-  <button onclick="runAction('delete')">Delete</button>
+  <div class="actions-row">
+    <button onclick="runAction('replay', 'copy')">Replay copy</button>
+    <button onclick="runAction('replay', 'move')">Replay move</button>
+    <button onclick="runAction('park')">Park</button>
+    <button class="danger" onclick="runAction('delete')">Delete</button>
+  </div>
   <div id="action-result" aria-live="polite" hidden></div>
 </section>
 <script>
 const SOURCE_QUEUE = {{ message.queue | tojson }};
 const FINGERPRINT = {{ message.fingerprint | tojson }};
+
+function copyFingerprint(button) {
+  navigator.clipboard.writeText(FINGERPRINT).then(() => {
+    button.textContent = 'Copied';
+    setTimeout(() => { button.textContent = 'Copy'; }, 1500);
+  });
+}
 
 function replayTarget() {
   const queue = document.getElementById('target-queue').value.trim();

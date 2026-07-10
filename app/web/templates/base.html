@@ -9,10 +9,47 @@
 </head>
 <body>
   <header class="topbar">
-    <a href="/" class="brand">QueueLens</a>
+    <a href="/" class="brand">Queue<em>Lens</em></a>
+    <span class="broker-status" id="broker-status" data-state="unknown"><i></i><span>BROKER …</span></span>
     <nav><a href="/">Dashboard</a><a href="/audit">Audit Log</a></nav>
   </header>
   <main class="container">{% block content %}{% endblock %}</main>
+  <footer class="footer">
+    <span>QueueLens — safe replay for dead letters</span>
+    <span>publish-before-ack · audit-everything</span>
+  </footer>
+  <script>
+  async function pollBroker() {
+    const el = document.getElementById('broker-status');
+    if (!el) return;
+    try {
+      const response = await fetch('/ready');
+      el.dataset.state = response.ok ? 'up' : 'down';
+      el.querySelector('span').textContent = response.ok ? 'BROKER LIVE' : 'BROKER DOWN';
+    } catch (error) {
+      el.dataset.state = 'down';
+      el.querySelector('span').textContent = 'BROKER DOWN';
+    }
+  }
+  pollBroker();
+  setInterval(pollBroker, 15000);
+
+  function colorizeJson(pre) {
+    const escaped = pre.textContent
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    pre.innerHTML = escaped.replace(
+      /("(?:[^"\\]|\\.)*")(\s*:)?|\b(true|false|null)\b|(-?\d+\.?\d*(?:[eE][+-]?\d+)?)/g,
+      (match, str, colon, keyword, number) => {
+        if (str) {
+          return colon
+            ? '<span class="j-key">' + str + '</span>' + colon
+            : '<span class="j-str">' + str + '</span>';
+        }
+        if (keyword) return '<span class="j-kw">' + keyword + '</span>';
+        return '<span class="j-num">' + number + '</span>';
+      });
+  }
+  document.querySelectorAll('pre.code-json').forEach(colorizeJson);
+  </script>
 </body>
 </html>
-

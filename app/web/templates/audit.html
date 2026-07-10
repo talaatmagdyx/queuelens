@@ -1,8 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Audit Log · QueueLens{% endblock %}
 {% block content %}
+<p class="overline">Flight Recorder</p>
 <h1>Audit Log</h1>
-<section class="card"><table><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Queue</th><th>Result</th></tr></thead>
-<tbody>{% for event in events %}<tr><td>{{ event.timestamp }}</td><td>{{ event.username }}</td><td>{{ event.action }}</td><td>{{ event.source_queue }}</td><td>{{ event.result }}</td></tr>{% endfor %}</tbody></table></section>
+<p class="muted">Every action writes an attempt event before execution and an outcome after.</p>
+<section class="card">
+  <h2>Latest events</h2>
+  {% if events %}
+  <table><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Queue</th><th>Result</th></tr></thead>
+  <tbody>{% for event in events %}<tr><td class="mono">{{ event.timestamp }}</td><td class="mono">{{ event.username }}</td><td class="mono">{{ event.action }}</td><td class="mono">{{ event.source_queue or '—' }}</td><td><span class="badge b-{{ event.result }}">{{ event.result }}</span></td></tr>{% endfor %}</tbody></table>
+  {% else %}<p class="empty">No audit events yet.</p>{% endif %}
+</section>
 {% endblock %}
-

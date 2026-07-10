@@ -2,8 +2,9 @@
 {% block title %}Error · QueueLens{% endblock %}
 {% block content %}
 <section class="card narrow">
-  <h1>{{ status_code }}</h1>
+  <p class="overline">Signal Lost</p>
+  <p class="error-code">{{ status_code }}</p>
   <p>{{ detail }}</p>
-  <a class="button" href="/">Back to dashboard</a>
+  <a class="button primary" href="/">Back to dashboard</a>
 </section>
 {% endblock %}
