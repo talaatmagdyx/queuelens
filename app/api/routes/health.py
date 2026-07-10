@@ -35,6 +35,23 @@ async def broker(
     }
 
 
+@router.get("/api/users")
+async def users(
+    request: Request,
+    _username: str = Depends(get_current_username),
+) -> dict[str, object]:
+    settings = request.app.state.settings
+    return {
+        "accounts": [
+            {
+                "username": name,
+                "role": "Administrator" if name == settings.admin_username else "Operator",
+            }
+            for name in sorted(settings.users)
+        ]
+    }
+
+
 @router.get("/api/exchanges")
 async def exchanges(
     request: Request,

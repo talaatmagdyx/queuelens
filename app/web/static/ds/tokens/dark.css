@@ -1,0 +1,60 @@
+/* QueueLens dark theme — activated via <html data-theme="dark"> */
+[data-theme="dark"] {
+  /* Neutrals */
+  --slate-0: #121927;
+  --slate-25: #0F1522;
+  --slate-50: #0C111D;
+  --slate-100: #212C42;
+  --slate-200: #243046;
+  --slate-300: #334259;
+  --slate-400: #64748B;
+  --slate-500: #8B99AF;
+  --slate-600: #AEBACB;
+  --slate-700: #CBD5E1;
+  --slate-900: #F1F5FA;
+
+  /* Brand blues */
+  --blue-50: #15233C;
+  --blue-100: #1B2E51;
+  --blue-200: #28457A;
+  --blue-500: #4E8EF5;
+  --blue-600: #3E86F4;
+  --blue-700: #6AA3F7;
+  --blue-900: #CFE0FB;
+
+  /* Semantic pastels → dark tints */
+  --green-50: #0F2819;
+  --green-100: #14331F;
+  --green-200: #215538;
+  --green-600: #41C878;
+  --green-700: #63D890;
+
+  --red-50: #2E1416;
+  --red-100: #3A181B;
+  --red-200: #5C2328;
+  --red-600: #F0655F;
+  --red-700: #F58C87;
+
+  --amber-50: #2E230E;
+  --amber-100: #3A2C12;
+  --amber-200: #5C471F;
+  --amber-600: #EBA43C;
+  --amber-700: #F2BE6C;
+
+  --purple-50: #211433;
+  --purple-100: #2A1A40;
+  --purple-600: #AC82F6;
+  --purple-700: #C09FF9;
+
+  --magenta-100: #381233;
+  --magenta-600: #E45FE0;
+
+  /* Surfaces */
+  --surface-table-header: #161E2F;
+  --surface-control: #18202F;
+  --surface-raised: #1B2537;
+
+  /* Shadows */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.55);
+}

@@ -1,0 +1,89 @@
+/* QueueLens color tokens — sampled from product screenshots */
+:root {
+  /* Brand blues */
+  --blue-50: #EFF5FE;
+  --blue-100: #DCE9FC;
+  --blue-200: #BAD3F8;
+  --blue-500: #2E7CF0;
+  --blue-600: #1A69E2;
+  --blue-700: #1554C0;
+  --blue-900: #0B2B66;
+
+  /* Neutrals (cool slate) */
+  --slate-0: #FFFFFF;
+  --slate-25: #FBFCFD;
+  --slate-50: #F8FAFC;
+  --slate-100: #F1F5F9;
+  --slate-200: #E5EAF0;
+  --slate-300: #CBD5E1;
+  --slate-400: #94A3B8;
+  --slate-500: #64748B;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-900: #0E1526;
+
+  /* Semantic: success (green) */
+  --green-50: #F2FAF5;
+  --green-100: #E7F8F0;
+  --green-200: #BBE9CE;
+  --green-600: #16A34A;
+  --green-700: #12813C;
+
+  /* Semantic: danger (red) */
+  --red-50: #FEF5F5;
+  --red-100: #FDECEC;
+  --red-200: #F6C9C9;
+  --red-600: #DC2626;
+  --red-700: #B91C1C;
+
+  /* Semantic: warning (amber) */
+  --amber-50: #FFF9EF;
+  --amber-100: #FDF1DC;
+  --amber-200: #F5DCA8;
+  --amber-600: #D97706;
+  --amber-700: #B45309;
+
+  /* Semantic: park / special (purple) */
+  --purple-50: #F7F3FE;
+  --purple-100: #EFE7FD;
+  --purple-600: #7C3AED;
+  --purple-700: #6527CC;
+
+  /* Base64 / data (magenta accent used on payload-type badges) */
+  --magenta-100: #FBE7F6;
+  --magenta-600: #C026D3;
+
+  /* Semantic aliases */
+  --brand: var(--blue-600);
+  --brand-hover: var(--blue-700);
+  --brand-soft: var(--blue-50);
+
+  --text-heading: var(--slate-900);
+  --text-body: var(--slate-600);
+  --text-muted: var(--slate-500);
+  --text-faint: var(--slate-400);
+  --text-link: var(--blue-600);
+  --text-on-brand: #FFFFFF;
+
+  --surface-page: var(--slate-0);
+  --surface-sunken: var(--slate-50);
+  --surface-card: var(--slate-0);
+  --surface-sidebar: var(--slate-25);
+  --surface-table-header: #F9FAFB;
+  --surface-control: #FFFFFF;
+  --surface-raised: #FFFFFF;
+
+  --border-default: var(--slate-200);
+  --border-strong: var(--slate-300);
+
+  --status-success-fg: var(--green-600);
+  --status-success-bg: var(--green-100);
+  --status-danger-fg: var(--red-600);
+  --status-danger-bg: var(--red-100);
+  --status-warning-fg: var(--amber-600);
+  --status-warning-bg: var(--amber-100);
+  --status-info-fg: var(--blue-600);
+  --status-info-bg: var(--blue-50);
+  --status-park-fg: var(--purple-600);
+  --status-park-bg: var(--purple-100);
+}

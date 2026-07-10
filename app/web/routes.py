@@ -4,7 +4,7 @@ from typing import Any, cast
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.application.message_service import MessageService, message_to_dict
@@ -44,6 +44,16 @@ def _broker_display(rabbitmq_url: str, vhost: str) -> str:
 @router.get("/login", response_class=HTMLResponse)
 async def login(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request=request, name="login.html", context={})
+
+
+@router.get("/app")
+async def spa(
+    _username: str = Depends(get_current_username),
+) -> RedirectResponse:
+    """The claude.ai/design UI kit, served as a single-page app wired to the
+    live API. Auth here forces the Basic Auth prompt before the static SPA
+    loads, so its data layer inherits browser credentials."""
+    return RedirectResponse(url="/static/ds/ui_kits/queuelens/index.html")
 
 
 @router.get("/", response_class=HTMLResponse)

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>QueueLens</title>
+<link rel="stylesheet" href="../../styles.css">
+<script src="/static/vendor/react.production.min.js"></script>
+<script src="/static/vendor/react-dom.production.min.js"></script>
+<script src="/static/vendor/babel.min.js"></script>
+<script src="/static/vendor/lucide.js"></script>
+<script src="../../ds-loader.js"></script>
+<style>
+  html, body { margin: 0; background: var(--slate-50); font-family: var(--font-ui); }
+  * { box-sizing: border-box; }
+  a { color: var(--text-link); } a:hover { color: var(--blue-700); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+window.__loadDS('../../');
+window.QL = window.QL || {};
+</script>
+<script src="data.js"></script>
+<script type="text/babel" src="shared.jsx"></script>
+<script type="text/babel" src="Login.jsx"></script>
+<script type="text/babel" src="Dashboard.jsx"></script>
+<script type="text/babel" src="Queues.jsx"></script>
+<script type="text/babel" src="Messages.jsx"></script>
+<script type="text/babel" src="Wizard.jsx"></script>
+<script type="text/babel" src="AuditLog.jsx"></script>
+<script type="text/babel" src="Configuration.jsx"></script>
+<script type="text/babel" src="Users.jsx"></script>
+<script type="text/babel" src="Notifications.jsx"></script>
+<script type="text/babel">
+const { SidebarNav, TopBar, Alert } = window.__NS;
+const S = window.QL.screens;
+
+// Single real environment, discovered from the running broker (/api/broker).
+const B = window.QL.broker || { environment: 'development', host: 'rabbitmq:5672', api: '', vhost: '/', live: true, latency: '—' };
+const ENVS = [
+  { id: B.environment, label: (B.environment || 'development').toUpperCase(), host: B.host, api: B.api,
+    vhosts: [{ id: B.vhost, sub: (window.QL.data.queues || []).length + ' queues' }] },
+];
+window.QL.ENVS = ENVS;
+
+function OfflineState({ envObj, onRetry, nav }) {
+  const { EmptyState } = window.QL;
+  const { Button } = window.__NS;
+  return (
+    <div style={{ padding: '60px 0' }}>
+      <EmptyState icon="unplug" tone="danger" title="Cannot reach the broker"
+        actions={<React.Fragment>
+          <Button icon="refresh-cw" onClick={onRetry}>Retry connection</Button>
+          <Button variant="secondary" onClick={() => nav('config')}>View Configuration</Button>
+        </React.Fragment>}>
+        {envObj.api} is not responding. Check that the RabbitMQ Management API is reachable and credentials are valid. Queues and messages are unavailable until the connection is restored.
+      </EmptyState>
+    </div>
+  );
+}
+
+function App() {
+  const [route, setRoute] = React.useState({ id: 'login', params: {} });
+  const [bellOpen, setBellOpen] = React.useState(false);
+  const [envId, setEnvId] = React.useState(ENVS[0].id);
+  const [vhost, setVhost] = React.useState(B.vhost || '/');
+  const [brokerLive, setBrokerLive] = React.useState(B.live !== false);
+  const [theme, setTheme] = React.useState(localStorage.getItem('ql_theme') || 'light');
+  React.useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('ql_theme', theme);
+  }, [theme]);
+  const envObj = ENVS.find((e) => e.id === envId) || ENVS[0];
+  const switchEnv = (id) => { setEnvId(id); setVhost(B.vhost || '/'); };
+  const nav = (id, params = {}) => { setRoute({ id, params }); setBellOpen(false); window.scrollTo(0, 0); };
+
+  if (route.id === 'login') return <S.Login onSignIn={() => nav('dashboard')} />;
+
+  const screenLabelMap = {
+    dashboard: 'Dashboard', queues: 'Queues', messages: 'Messages', replay: 'Replay',
+    parking: 'Parking', audit: 'Audit Log', config: 'Configuration', users: 'Users', notifications: 'Notifications',
+  };
+  const activeNav = route.id === 'replay' ? (route.params.mode === 'park' ? 'parking' : 'replay') : route.id;
+
+  let screen = null;
+  if (route.id === 'dashboard') screen = <S.Dashboard nav={nav} empty={(window.QL.data.queues || []).length === 0} />;
+  else if (route.id === 'queues') screen = <S.Queues nav={nav} />;
+  else if (route.id === 'messages') screen = <S.Messages nav={nav} queue={route.params.queue || window.QL.defaultQueue} />;
+  else if (route.id === 'replay' || route.id === 'parking') screen = <S.Wizard nav={nav} mode={route.params.mode || (route.id === 'parking' ? 'park' : 'move')} msg={route.params.msg || window.QL.data.messages[0]} count={route.params.count || 1} />;
+  else if (route.id === 'audit') screen = <S.AuditLog nav={nav} />;
+  else if (route.id === 'config') screen = <S.Configuration nav={nav} envs={ENVS} activeEnv={envId} vhost={vhost} onEnvChange={switchEnv} />;
+  else if (route.id === 'notifications') screen = <S.Notifications nav={nav} />;
+  else if (route.id === 'users') screen = <S.Users nav={nav} />;
+  else screen = (
+    <div style={{ padding: '80px 0', textAlign: 'center', color: 'var(--slate-400)', fontSize: 14 }}>
+      {screenLabelMap[route.id] || route.id} — not represented in the source screenshots; intentionally left blank.
+    </div>
+  );
+
+  if (!brokerLive && !['config', 'users'].includes(route.id)) {
+    screen = <OfflineState envObj={envObj} onRetry={() => setBrokerLive(true)} nav={nav} />;
+  }
+
+  return (
+    <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'stretch' }} data-screen-label={screenLabelMap[route.id] || route.id}>
+      <SidebarNav
+        activeId={activeNav} onNavigate={(id) => nav(id)}
+        groups={[
+          { label: 'Main', items: [
+            { id: 'dashboard', label: 'Dashboard', icon: 'layout-grid' },
+            { id: 'queues', label: 'Queues', icon: 'list' },
+            { id: 'messages', label: 'Messages', icon: 'mail' },
+            { id: 'replay', label: 'Replay', icon: 'code' },
+            { id: 'parking', label: 'Parking', icon: 'flag' },
+            { id: 'audit', label: 'Audit Log', icon: 'clipboard-list' } ] },
+          { label: 'Settings', items: [
+            { id: 'config', label: 'Configuration', icon: 'settings' },
+            { id: 'users', label: 'Users', icon: 'users' } ] }]}
+        broker={{ host: envObj.host, vhost: vhost, latency: B.latency || '—', offline: !brokerLive }}
+        safety={['Non-destructive browsing', 'Publish-before-ack', 'Audit everything', 'Messages never lost']}
+        user={{ initials: (window.QL.user || 'ad').slice(0, 2).toUpperCase(), name: window.QL.user || 'admin', role: 'Administrator' }}
+      />
+      <div style={{ flex: 1, minWidth: 0, position: 'relative', background: 'var(--surface-page)' }}>
+        <TopBar userName={window.QL.user || 'admin'} notifications={window.QL.alertCount || 0} onBell={() => setBellOpen(!bellOpen)}
+          envs={ENVS} activeEnv={envId} onEnvChange={switchEnv}
+          vhosts={envObj.vhosts} vhost={vhost} onVhostChange={setVhost}
+          brokerLive={brokerLive} onBrokerToggle={() => setBrokerLive(!brokerLive)}
+          theme={theme} onThemeToggle={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          lastRefreshed={brokerLive ? 'just now' : '—'} />
+        {bellOpen && <window.QL.NotificationsPopover onViewAll={() => nav('notifications')} onClose={() => setBellOpen(false)} />}
+        <main style={{ padding: '24px 32px 40px', maxWidth: 1400, margin: '0 auto' }}>
+          {envId === 'production' && (
+            <Alert tone="danger" icon="shield-alert" title="You are connected to PRODUCTION." style={{ marginBottom: 20 }}>
+              Destructive actions require type-to-confirm. All operations are audited with environment and vhost.
+            </Alert>
+          )}
+          {screen}
+        </main>
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
