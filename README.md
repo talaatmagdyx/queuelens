@@ -17,6 +17,10 @@ QueueLens gives backend teams a safe UI and API for exactly that flow:
 inspect DLQ safely -> understand the message -> replay / park / delete safely -> audit everything
 ```
 
+QueueLens is a **focused RabbitMQ DLQ recovery tool, not a replacement for the RabbitMQ
+Management UI** — the Management UI shows queues; QueueLens helps engineers safely recover
+failed messages.
+
 ## Features
 
 - **DLQ auto-detection** — by name convention (`.dlq`, `_dlq`, `dead`) or by being the queue
@@ -56,15 +60,66 @@ inspect DLQ safely -> understand the message -> replay / park / delete safely ->
 
 ## Quick start
 
+Local demo with a bundled broker:
+
 ```bash
 docker compose up --build
 ```
 
 Open [http://localhost:8000](http://localhost:8000). The default local credentials are
 `admin` / `change-me`; change them before using a shared environment.
-
 RabbitMQ Management UI is available at [http://localhost:15672](http://localhost:15672)
 with `queuelens` / `queuelens`.
+
+## Connect to an existing RabbitMQ cluster
+
+Prebuilt images are published to GHCR on every release:
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e QUEUELENS_RABBITMQ_URL='amqps://user:pass@rabbitmq.internal:5671/' \
+  -e QUEUELENS_RABBITMQ_MANAGEMENT_URL='https://rabbitmq.internal:15671' \
+  -e QUEUELENS_RABBITMQ_MANAGEMENT_USERNAME='monitoring-user' \
+  -e QUEUELENS_RABBITMQ_MANAGEMENT_PASSWORD='…' \
+  -e QUEUELENS_ADMIN_USERNAME='admin' \
+  -e QUEUELENS_ADMIN_PASSWORD='change-me-now' \
+  -v queuelens-data:/app/data \
+  ghcr.io/talaatmagdyx/queuelens:latest
+```
+
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for every variable and the required
+broker permissions.
+
+## Production readiness checklist
+
+Before pointing QueueLens at a real cluster:
+
+- [ ] Change the default `QUEUELENS_ADMIN_PASSWORD`.
+- [ ] Run behind a VPN, private network, or authenticating reverse proxy — never public.
+- [ ] Terminate TLS in front of the app; use `amqps://` / HTTPS Management URLs to the broker.
+- [ ] Use a least-privilege RabbitMQ user (read on DLQs, write on replay targets,
+      configure only for `*.parking`; Management user needs only the `monitoring` tag).
+- [ ] Review `QUEUELENS_MASKED_FIELDS` for your payloads (masking is display-only).
+- [ ] Set preview / bulk limits (`QUEUELENS_MAX_PREVIEW_MESSAGES`, `QUEUELENS_MAX_BULK_SIZE`).
+- [ ] Persist `/app/data` on a volume and back up the audit database if history matters.
+- [ ] Run a single replica — the SQLite audit store and in-memory bulk tokens are
+      single-process by design (PostgreSQL backend is on the roadmap).
+- [ ] Scrape `/metrics` and load [deploy/prometheus/alerts.yml](deploy/prometheus/alerts.yml).
+
+See [SECURITY.md](SECURITY.md) for the full security model and reporting policy.
+
+## QueueLens vs RabbitMQ Management UI
+
+| Capability | RabbitMQ Management UI | QueueLens |
+|---|---|---|
+| Queue inspection | ✅ | ✅ |
+| DLQ-focused workflow | limited | ✅ |
+| Parsed `x-death` history | raw headers | ✅ |
+| Safe replay (publish-before-ack) | manual + risky | ✅ |
+| Bulk actions with mandatory dry-run | ❌ | ✅ |
+| Audit trail (attempt + outcome) | ❌ | ✅ |
+| Display masking of sensitive fields | ❌ | ✅ |
+| Prometheus metrics for DLQ health | broker-level only | app + DLQ level |
 
 ## Documentation
 
