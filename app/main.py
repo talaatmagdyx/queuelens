@@ -8,8 +8,9 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import actions, audit, health, messages, queues
+from app.api.routes import actions, audit, bulk, health, messages, queues
 from app.application.action_service import ActionService
+from app.application.bulk_service import BulkActionService
 from app.application.message_service import MessageService
 from app.application.queue_service import QueueService
 from app.config import Settings, get_settings
@@ -85,10 +86,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.audit_repository = AuditRepository(database)
     rabbitmq_connection = RabbitMQConnection(app.state.settings)
     app.state.rabbitmq_connection = rabbitmq_connection
-    app.state.message_service = MessageService(MessageBrowser(rabbitmq_connection))
-    app.state.action_service = ActionService(
-        app.state.settings, MessageOperator(rabbitmq_connection)
-    )
+    browser = MessageBrowser(rabbitmq_connection)
+    operator = MessageOperator(rabbitmq_connection)
+    app.state.message_service = MessageService(browser)
+    app.state.action_service = ActionService(app.state.settings, operator)
+    app.state.bulk_service = BulkActionService(app.state.settings, browser, operator)
     management = RabbitMQManagementClient(app.state.settings)
     app.state.management_client = management
     app.state.queue_service = QueueService(management)
@@ -98,6 +100,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(audit.router)
     app.include_router(messages.router)
     app.include_router(actions.router)
+    app.include_router(bulk.router)
     app.include_router(web.router)
     app.mount(
         "/static",

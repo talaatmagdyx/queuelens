@@ -14,5 +14,132 @@
   <tbody>{% for message in messages %}<tr><td class="mono">{{ message.fingerprint[:12] }}</td><td>{{ message.payload_format }}</td><td>{{ message.routing_key }}</td><td>{{ message.payload_size }}</td><td><a href="/messages/{{ queue.name | urlencode }}/{{ message.fingerprint }}">Inspect</a></td></tr>{% endfor %}</tbody></table>
   {% else %}<p>No messages returned.</p>{% endif %}
 </section>
+{% if messages %}
+<section class="card">
+  <h2>Bulk actions</h2>
+  <p class="muted">Applies to messages in the current scan window. Every bulk action starts
+    with a dry run; execution only touches the messages the dry run counted.</p>
+  <div class="bulk-form">
+    <label>Action
+      <select id="bulk-action">
+        <option value="park">Park</option>
+        <option value="delete">Delete</option>
+        <option value="replay-copy">Replay copy</option>
+        <option value="replay-move">Replay move</option>
+      </select>
+    </label>
+    <label>Replay target queue <input id="bulk-target-queue" placeholder="for replay"></label>
+    <label>Payload contains <input id="bulk-filter" placeholder="optional filter"></label>
+    <button onclick="bulkDryRun()">Dry run</button>
+  </div>
+  <div id="bulk-preview" class="action-result" hidden></div>
+  <div id="bulk-result" class="action-result" hidden></div>
+</section>
+<script>
+const QUEUE_NAME = {{ queue.name | tojson }};
+let pendingBatch = null;
+
+function bulkBody() {
+  const selection = document.getElementById('bulk-action').value;
+  const body = {source_queue: QUEUE_NAME};
+  if (selection.startsWith('replay-')) {
+    body.action = 'replay';
+    body.mode = selection.split('-')[1];
+    const targetQueue = document.getElementById('bulk-target-queue').value.trim();
+    if (targetQueue) body.target = {type: 'queue', queue: targetQueue};
+  } else {
+    body.action = selection;
+  }
+  const filter = document.getElementById('bulk-filter').value.trim();
+  if (filter) body.payload_contains = filter;
+  return body;
+}
+
+function line(parent, label, value) {
+  const p = document.createElement('p');
+  const strong = document.createElement('strong');
+  strong.textContent = label;
+  p.append(strong, document.createTextNode(' ' + value));
+  parent.append(p);
+}
+
+async function bulkDryRun() {
+  const preview = document.getElementById('bulk-preview');
+  const resultBox = document.getElementById('bulk-result');
+  resultBox.hidden = true;
+  preview.replaceChildren();
+  preview.hidden = false;
+  const response = await fetch('/api/messages/bulk/dry-run', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(bulkBody())
+  });
+  let detail = {};
+  try { detail = await response.json(); } catch (e) {}
+  if (!response.ok) {
+    preview.className = 'action-result error';
+    line(preview, 'Dry run failed:', detail.detail || response.status);
+    return;
+  }
+  pendingBatch = detail;
+  preview.className = 'action-result success';
+  const title = document.createElement('h3');
+  title.textContent = 'Dry run: ' + detail.message_count + ' message(s) would be affected';
+  preview.append(title);
+  line(preview, 'Action:', detail.action + (detail.mode ? ' (' + detail.mode + ')' : ''));
+  if (detail.target && detail.target.queue) line(preview, 'Target:', detail.target.queue);
+  if (detail.duplicate_fingerprints > 0) {
+    line(preview, 'Duplicates:', detail.duplicate_fingerprints
+      + ' duplicated fingerprint(s) will be skipped and reported');
+  }
+  if (detail.message_count > 0) {
+    const button = document.createElement('button');
+    button.textContent = 'Execute on ' + detail.message_count + ' message(s)';
+    button.onclick = bulkExecute;
+    preview.append(button);
+  }
+}
+
+async function bulkExecute() {
+  if (!pendingBatch) return;
+  if (!window.confirm('Execute bulk ' + pendingBatch.action + ' on '
+      + pendingBatch.message_count + ' message(s) in ' + QUEUE_NAME + '?')) return;
+  const resultBox = document.getElementById('bulk-result');
+  resultBox.replaceChildren();
+  resultBox.hidden = false;
+  const response = await fetch('/api/messages/bulk/execute', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({batch_id: pendingBatch.batch_id, confirm: true})
+  });
+  let detail = {};
+  try { detail = await response.json(); } catch (e) {}
+  pendingBatch = null;
+  document.getElementById('bulk-preview').hidden = true;
+  if (!response.ok) {
+    resultBox.className = 'action-result error';
+    line(resultBox, 'Bulk execution failed:', detail.detail || response.status);
+    return;
+  }
+  const summary = detail.summary;
+  resultBox.className = 'action-result ' + (summary.failed === 0 ? 'success' : 'error');
+  const title = document.createElement('h3');
+  title.textContent = 'Bulk ' + detail.action + ' finished';
+  resultBox.append(title);
+  line(resultBox, 'Succeeded:', summary.succeeded);
+  if (summary.failed) line(resultBox, 'Failed:', summary.failed);
+  if (summary.skipped_duplicates) line(resultBox, 'Skipped duplicates:', summary.skipped_duplicates);
+  if (summary.not_found) line(resultBox, 'No longer in queue:', summary.not_found);
+  const links = document.createElement('p');
+  links.className = 'action-links';
+  const audit = document.createElement('a');
+  audit.href = '/audit';
+  audit.textContent = 'View audit log';
+  const refresh = document.createElement('a');
+  refresh.href = window.location.href;
+  refresh.textContent = 'Refresh queue';
+  links.append(refresh, audit);
+  resultBox.append(links);
+}
+</script>
+{% endif %}
 {% endblock %}
 

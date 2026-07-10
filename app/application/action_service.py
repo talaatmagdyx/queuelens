@@ -57,12 +57,16 @@ class ActionService:
         )
 
     def _configured_target(self, source_queue: str) -> ReplayTarget | None:
-        raw_target = self._settings.replay_targets.get(source_queue)
-        if not raw_target:
-            return None
-        return ReplayTarget(
-            type=str(raw_target.get("type", "")),
-            queue=raw_target.get("queue"),
-            exchange=raw_target.get("exchange"),
-            routing_key=raw_target.get("routing_key"),
-        )
+        return configured_target(self._settings, source_queue)
+
+
+def configured_target(settings: Settings, source_queue: str) -> ReplayTarget | None:
+    raw_target = settings.replay_targets.get(source_queue)
+    if not raw_target:
+        return None
+    return ReplayTarget(
+        type=str(raw_target.get("type", "")),
+        queue=raw_target.get("queue"),
+        exchange=raw_target.get("exchange"),
+        routing_key=raw_target.get("routing_key"),
+    )

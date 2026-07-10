@@ -155,6 +155,88 @@ Body: `source_queue`, `fingerprint`, `confirm`. Acks (removes) the message.
 }
 ```
 
+## Bulk actions
+
+Bulk operations are **two-phase**: a dry run captures exactly which messages were seen and
+returns a one-shot token; execution acts only on that approved set. Messages that arrive
+after the dry run are never touched. Scope is the scan window (up to
+`QUEUELENS_MAX_BULK_SIZE` messages from the head of the queue), not the whole queue.
+
+### `POST /api/messages/bulk/dry-run`
+
+```json
+{
+  "source_queue": "orders.processing.dlq",
+  "action": "replay",
+  "mode": "move",
+  "target": {"type": "queue", "queue": "orders.processing"},
+  "payload_contains": "\"tenant\": \"acme\""
+}
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `source_queue` | yes | Queue to act on |
+| `action` | yes | `replay`, `park`, or `delete` |
+| `mode` | no (`copy`) | Replay mode |
+| `target` | no | Replay target; falls back to the configured target, else `400` |
+| `payload_contains` | no | Only messages whose raw body contains this substring |
+
+Response:
+
+```json
+{
+  "batch_id": "…one-shot token…",
+  "message_count": 5,
+  "unique_fingerprints": 4,
+  "duplicate_fingerprints": 1,
+  "sample_fingerprints": ["…first 10…"],
+  "expires_at": "2026-07-10T02:40:00+00:00",
+  "scan_limit": 500
+}
+```
+
+`duplicate_fingerprints` counts fingerprints with more than one physical message — those are
+**skipped and reported** at execution, never guessed at. Tokens expire after
+`QUEUELENS_BULK_DRY_RUN_TTL_SECONDS` and live in process memory (a restart voids them —
+rerun the dry run).
+
+### `POST /api/messages/bulk/execute`
+
+```json
+{"batch_id": "…token from dry-run…", "confirm": true}
+```
+
+Executes at most one batch at a time (a second call waits). The token is consumed on
+execution. Response:
+
+```json
+{
+  "action": "park",
+  "source_queue": "orders.processing.dlq",
+  "summary": {
+    "fingerprints_requested": 4,
+    "succeeded": 3,
+    "failed": 0,
+    "skipped_duplicates": 1,
+    "not_found": 0
+  },
+  "results": [
+    {"fingerprint": "…", "status": "success"},
+    {"fingerprint": "…", "status": "skipped_duplicate"}
+  ]
+}
+```
+
+Per-message statuses: `success`, `failed` (with `error`; the message was requeued),
+`skipped_duplicate`, `not_found` (no longer in the queue). Each message follows the same
+publish-before-ack spine as single actions and fails independently. Audit gets one event per
+fingerprint plus a `bulk_<action>` envelope whose result is `success` or `partial`.
+
+Errors: `400` missing confirmation / no replay target, `404` unknown or expired batch token,
+unknown queue or target, `502` channel-level broker failure (the whole batch aborts and the
+broker requeues everything unacked).
+
 ## Audit
 
 ### `GET /api/audit`

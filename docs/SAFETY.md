@@ -42,7 +42,23 @@ convenience: QueueLens refuses to guess which duplicate you meant.
 
 ### 5. Delete is explicit, twice
 Delete (and every other action) requires `"confirm": true` in the API and a browser
-confirmation dialog in the UI. There is no bulk delete in Phase 1.
+confirmation dialog in the UI.
+
+### 5b. Bulk actions cannot touch what you haven't seen
+Bulk operations are two-phase (`BulkActionService`): the dry run records the exact
+fingerprint set it observed behind a one-shot token; execute acts **only** on that set.
+Messages that arrived after the dry run are ignored by construction. Additional guards:
+
+- Hard cap: the scan window is `QUEUELENS_MAX_BULK_SIZE` (default 500); one batch executes
+  at a time (an asyncio lock serializes executions).
+- Per-message independence: each message publishes-before-acks on its own; an unroutable
+  publish fails and requeues *that* message and the batch continues. A channel-level broker
+  failure aborts the whole batch and the broker requeues everything unacked.
+- Duplicates are skipped and reported (`skipped_duplicate`), never guessed at — same
+  ambiguity rule as single actions, degraded gracefully instead of aborting the batch.
+- Tokens expire (`QUEUELENS_BULK_DRY_RUN_TTL_SECONDS`) and live in process memory; an app
+  restart voids them and execution fails safe with "run the dry-run again".
+- Audit: one event per fingerprint plus a `bulk_<action>` envelope (`success`/`partial`).
 
 ### 6. Audit is a precondition, not a log line
 Every action writes a `started` audit event **before** touching the broker and a

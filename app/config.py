@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     max_message_size_bytes: int = 1_048_576
     refetch_window_size: int = 100
     replay_targets_json: str = "{}"
+    max_bulk_size: int = 500
+    bulk_dry_run_ttl_seconds: int = 600
     masking_enabled: bool = True
     masked_fields: str = (
         "password,token,access_token,refresh_token,authorization,api_key,secret,email,phone"

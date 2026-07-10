@@ -28,6 +28,8 @@ inspect DLQ safely -> understand the message -> replay / park / delete safely ->
   with `x-queuelens-*` provenance headers stamped on every replayed message
 - **Park & delete** — park moves a message to `{queue}.parking` (created on demand);
   both require explicit confirmation
+- **Bulk operations** — replay/park/delete many messages with a mandatory dry-run first,
+  hard caps, per-message results, and duplicates skipped rather than guessed at
 - **Sensitive-field masking** — values under configurable keys (`password`, `token`, `email`, …)
   render as `***`; display-only, replay payloads are never modified
 - **Audit log** — every action writes an attempt event before execution and an outcome event after
@@ -96,6 +98,10 @@ Interactive OpenAPI docs are served by the app itself at `/docs`.
 
 ![Action result](docs/screenshots/action-result.png)
 
+**Bulk actions** — dry-run first, then execute on exactly what the dry run counted:
+
+![Bulk actions](docs/screenshots/bulk-actions.png)
+
 **Audit log** — attempt and outcome events for every action:
 
 ![Audit log](docs/screenshots/audit.png)
@@ -116,7 +122,8 @@ target format. A replay target can also be entered per action in the message det
 
 ## Known limitations (Phase 1)
 
-- Single-message actions only — bulk operations are deferred
+- Bulk operations act on the scan window (up to `QUEUELENS_MAX_BULK_SIZE` from the head of
+  the queue), not the whole queue
 - Preview capped at `QUEUELENS_MAX_PREVIEW_MESSAGES` messages (the UI says so when it happens)
 - HTTP Basic Auth only
 - SQLite audit store (PostgreSQL deferred for teams needing stronger concurrency and retention)
@@ -127,9 +134,8 @@ target format. A replay target can also be entered per action in the message det
 
 ## Roadmap
 
-1. Bulk operations (dry-run preview, per-message results, partial-failure summary)
-2. Full pagination beyond the preview window
-3. PostgreSQL audit store, alerts, metrics, RBAC
+1. Full pagination beyond the preview window
+2. PostgreSQL audit store, alerts, metrics, RBAC
 
 ## Development
 

@@ -176,3 +176,102 @@ async def test_browse_park_replay_delete_against_real_broker(tmp_path) -> None:
             for queue_name in (work, dlq, replay_target, parking, missing_target):
                 with contextlib.suppress(Exception):
                     await cleanup.queue_delete(queue_name)
+
+
+@pytest.mark.asyncio
+async def test_bulk_dry_run_and_execute_against_real_broker(tmp_path) -> None:
+    suffix = uuid.uuid4().hex[:8]
+    dlq = f"it.bulk.dlq.{suffix}"
+    parking = f"{dlq}.parking"
+
+    connection = await aio_pika.connect_robust(AMQP_URL)
+    channel = await connection.channel()
+    try:
+        await channel.declare_queue(dlq, durable=True)
+        # three unique messages matching the filter, one that does not match,
+        # and two byte-identical duplicates that must be skipped
+        for index in range(3):
+            await channel.default_exchange.publish(
+                aio_pika.Message(
+                    body=f'{{"tenant": "acme", "n": {index}}}'.encode(),
+                    message_id=f"bulk-{index}",
+                ),
+                routing_key=dlq,
+            )
+        await channel.default_exchange.publish(
+            aio_pika.Message(body=b'{"tenant": "globex"}', message_id="other"),
+            routing_key=dlq,
+        )
+        for _ in range(2):
+            # aio-pika auto-generates message_id, so byte-identical duplicates
+            # need an explicit shared id to collide on fingerprint
+            await channel.default_exchange.publish(
+                aio_pika.Message(body=b'{"tenant": "acme", "dup": true}', message_id="dup"),
+                routing_key=dlq,
+            )
+
+        app = create_app(_settings(tmp_path))
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                preview = (
+                    await client.post(
+                        "/api/messages/bulk/dry-run",
+                        json={
+                            "source_queue": dlq,
+                            "action": "park",
+                            "payload_contains": '"tenant": "acme"',
+                        },
+                    )
+                ).json()
+                assert preview["message_count"] == 5  # 3 unique + 2 duplicates
+                assert preview["unique_fingerprints"] == 4
+                assert preview["duplicate_fingerprints"] == 1
+
+                executed = await client.post(
+                    "/api/messages/bulk/execute",
+                    json={"batch_id": preview["batch_id"], "confirm": True},
+                )
+                assert executed.status_code == 200
+                summary = executed.json()["summary"]
+                assert summary == {
+                    "fingerprints_requested": 4,
+                    "succeeded": 3,
+                    "failed": 0,
+                    "skipped_duplicates": 1,
+                    "not_found": 0,
+                }
+
+                # 3 parked; the non-matching message and both duplicates remain
+                remaining = (await client.get(f"/api/queues/{dlq}/messages")).json()["messages"]
+                assert len(remaining) == 3
+                parked_queue = await channel.declare_queue(parking, passive=True)
+                parked_ids = set()
+                for _ in range(3):
+                    parked = await parked_queue.get(timeout=5)
+                    parked_ids.add(parked.message_id)
+                    await parked.ack()
+                assert parked_ids == {"bulk-0", "bulk-1", "bulk-2"}
+
+                # token is one-shot
+                again = await client.post(
+                    "/api/messages/bulk/execute",
+                    json={"batch_id": preview["batch_id"], "confirm": True},
+                )
+                assert again.status_code == 404
+
+                # audit: envelope + one event per fingerprint
+                events = (await client.get(f"/api/audit?source_queue={dlq}")).json()["events"]
+                envelope = [e for e in events if e["action"] == "bulk_park"]
+                per_message = [e for e in events if e["action"] == "park"]
+                assert len(envelope) == 1
+                assert envelope[0]["result"] == "success"
+                assert envelope[0]["metadata"]["succeeded"] == 3
+                assert len(per_message) == 4  # 3 success + 1 skipped_duplicate
+    finally:
+        async with contextlib.AsyncExitStack() as stack:
+            stack.push_async_callback(connection.close)
+            cleanup = await connection.channel()
+            for queue_name in (dlq, parking):
+                with contextlib.suppress(Exception):
+                    await cleanup.queue_delete(queue_name)

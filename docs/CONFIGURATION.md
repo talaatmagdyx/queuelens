@@ -39,6 +39,8 @@ The AMQP user needs read/write/configure on the inspected queues: browsing reque
 | `QUEUELENS_MAX_PREVIEW_MESSAGES` | `100` | Messages fetched per queue preview |
 | `QUEUELENS_MAX_MESSAGE_SIZE_BYTES` | `1048576` | Payloads larger than this are truncated in responses (the message itself is untouched) |
 | `QUEUELENS_REFETCH_WINDOW_SIZE` | `100` | How many messages detail lookup and actions re-scan to find a fingerprint. Raise it for deep queues — actions can only act on messages within this window |
+| `QUEUELENS_MAX_BULK_SIZE` | `500` | Scan window and hard cap for bulk operations (dry-run and execute) |
+| `QUEUELENS_BULK_DRY_RUN_TTL_SECONDS` | `600` | How long a bulk dry-run token stays executable |
 
 ## Masking
 
