@@ -37,7 +37,10 @@
       <h4><b>●</b> Broker <span id="side-broker-word">…</span></h4>
       <p id="side-broker-host">connecting…</p>
       <p id="side-broker-vhost"></p>
-      <p id="side-broker-latency"></p>
+      <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 0.4rem">
+        <p id="side-broker-latency" style="margin: 0.12rem 0 0"></p>
+        <svg id="latency-spark" width="72" height="26" viewBox="0 0 72 26" preserveAspectRatio="none"><polyline fill="none" stroke="currentColor" stroke-width="1.6" points=""/></svg>
+      </div>
     </div>
     <div class="side-widget w-safety">
       <h4>🛡 Safety First</h4>
@@ -133,7 +136,23 @@ async function pollBroker() {
     side.dataset.state = state;
     document.getElementById('side-broker-word').textContent = up ? 'Live' : 'Down';
     document.getElementById('side-broker-latency').textContent = 'latency: ' + latency + 'ms';
+    drawSparkline(latency);
   }
+}
+
+function drawSparkline(latency) {
+  const samples = JSON.parse(localStorage.getItem('ql-latency') || '[]');
+  samples.push(latency);
+  while (samples.length > 12) samples.shift();
+  localStorage.setItem('ql-latency', JSON.stringify(samples));
+  const svg = document.getElementById('latency-spark');
+  if (!svg || samples.length < 2) return;
+  const max = Math.max(...samples, 1);
+  const points = samples.map((value, index) =>
+    (index * (72 / (samples.length - 1))).toFixed(1) + ','
+    + (24 - (value / max) * 20 + 1).toFixed(1)).join(' ');
+  svg.querySelector('polyline').setAttribute('points', points);
+  svg.style.color = 'var(--green)';
 }
 
 async function loadBrokerInfo() {

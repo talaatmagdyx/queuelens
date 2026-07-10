@@ -826,3 +826,9 @@ input::placeholder { color: var(--muted); }
 .badge.n-warning { color: var(--amber); border-color: var(--amber-line); background: var(--amber-soft); }
 .badge.n-info { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
 .badge.n-success { color: var(--green); border-color: var(--green-line); background: var(--green-soft); }
+
+/* recent-action names with colored icons */
+.action-name { font-weight: 600; font-size: 0.85rem; color: var(--text-bright); white-space: nowrap; }
+.action-name.a-replay, .action-name.a-bulk_replay { color: var(--accent); }
+.action-name.a-park, .action-name.a-bulk_park { color: var(--purple); }
+.action-name.a-delete, .action-name.a-bulk_delete { color: var(--red); }

@@ -40,7 +40,7 @@
   {% if queues %}
   <div class="table-wrap">
   <table><thead><tr><th>Queue</th><th>Type</th><th>Messages</th><th>Ready</th><th>Consumers</th><th>Status</th><th></th></tr></thead>
-  <tbody>{% for queue in queues %}<tr data-href="/queues/{{ queue.name | urlencode }}"><td><a href="/queues/{{ queue.name | urlencode }}" class="mono">{{ queue.name }}</a></td><td><span class="badge k-{{ queue.kind }}">{{ 'DLQ · Retry' if queue.kind == 'retry' else queue.kind }}</span></td><td class="mono"{% if queue.severity == 'attention' %} style="color: var(--red); font-weight: 700"{% endif %}>{{ queue.messages }}</td><td class="mono">{{ queue.messages_ready }}</td><td class="mono">{{ queue.consumers }}</td><td><span class="badge dot s-{{ queue.status }}">{{ {'attention': 'Needs Attention', 'warning': 'Warning', 'low': 'Low', 'empty': 'Empty', 'parking': 'Parking'}.get(queue.status, queue.status) }}</span></td><td><a class="button row-open" href="/queues/{{ queue.name | urlencode }}">Open ›</a></td></tr>{% endfor %}</tbody></table>
+  <tbody>{% for queue in queues %}<tr data-href="/queues/{{ queue.name | urlencode }}"><td><a href="/queues/{{ queue.name | urlencode }}" class="mono">{{ queue.name }}</a></td><td>{% if queue.kind == 'retry' %}<span class="badge k-dlq">DLQ</span> <span class="badge k-retry">retry</span>{% else %}<span class="badge k-{{ queue.kind }}">{{ queue.kind }}</span>{% endif %}</td><td class="mono"{% if queue.severity == 'attention' %} style="color: var(--red); font-weight: 700"{% endif %}>{{ queue.messages }}</td><td class="mono">{{ queue.messages_ready }}</td><td class="mono">{{ queue.consumers }}</td><td><span class="badge dot s-{{ queue.status }}">{{ {'attention': 'Needs Attention', 'warning': 'Warning', 'low': 'Low', 'empty': 'Empty', 'parking': 'Parking'}.get(queue.status, queue.status) }}</span></td><td><a class="button primary row-open" href="/queues/{{ queue.name | urlencode }}">Open ›</a></td></tr>{% endfor %}</tbody></table>
   </div>
   <p class="muted small">Showing {{ queues | length }} of {{ queues | length }} DLQ queues</p>
   {% else %}
@@ -62,7 +62,7 @@
   </div>
   <div class="table-wrap">
   <table><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Queue</th><th>Target</th><th>Result</th></tr></thead>
-  <tbody>{% for event in recent_events %}<tr><td class="mono">{{ event.timestamp[11:19] if event.timestamp else '—' }}</td><td class="mono">{{ event.username }}</td><td class="mono">{{ event.action }}</td><td class="mono">{{ event.source_queue or '—' }}</td><td class="mono">{{ event.target_queue or (event.target_exchange ~ ' / ' ~ event.target_routing_key if event.target_exchange else '—') }}</td><td><span class="badge b-{{ event.result }}">{{ event.result }}</span></td></tr>{% endfor %}</tbody></table>
+  <tbody>{% for event in recent_events %}{% set icons = {'replay': '▶', 'park': '⚑', 'delete': '🗑', 'bulk_replay': '▶', 'bulk_park': '⚑', 'bulk_delete': '🗑', 'bulk': '▶'} %}<tr><td class="mono">{{ event.timestamp[11:19] if event.timestamp else '—' }}</td><td class="mono">{{ event.username }}</td><td><span class="action-name a-{{ event.action }}">{{ icons.get(event.action, '•') }} {{ event.action | replace('_', ' ') | title }}</span></td><td class="mono">{{ event.source_queue or '—' }}</td><td class="mono">{{ event.target_queue or (event.target_exchange ~ ' / ' ~ event.target_routing_key if event.target_exchange else '—') }}</td><td><span class="badge b-{{ event.result }}">{{ event.result }}</span></td></tr>{% endfor %}</tbody></table>
   </div>
 </section>
 {% endif %}
