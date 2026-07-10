@@ -37,6 +37,7 @@ class QueueService:
     def _to_queue_info(raw: dict[str, Any], dead_letter_targets: set[str]) -> QueueInfo:
         arguments = raw.get("arguments") or {}
         name = str(raw.get("name", ""))
+        is_dlq = QueueService._looks_like_dlq(name, dead_letter_targets)
         return QueueInfo(
             name=name,
             vhost=str(raw.get("vhost", "/")),
@@ -46,8 +47,8 @@ class QueueService:
             consumers=int(raw.get("consumers", 0)),
             durable=bool(raw.get("durable", False)),
             arguments=arguments,
-            is_dlq=QueueService._looks_like_dlq(name, dead_letter_targets),
-            kind=QueueService._classify(name),
+            is_dlq=is_dlq,
+            kind=QueueService._classify(name) if is_dlq else "normal",
         )
 
     @staticmethod
@@ -82,6 +83,16 @@ def _severity(messages: int) -> str:
     return "attention"
 
 
+def _status(queue: QueueInfo) -> str:
+    """One operator-facing word per queue. DLQ-family queues get severity;
+    normal queues are active (consuming) or idle."""
+    if queue.kind == "parking":
+        return "parking"
+    if queue.is_dlq:
+        return _severity(queue.messages)
+    return "active" if queue.consumers > 0 else "idle"
+
+
 def queues_to_dicts(queues: Sequence[QueueInfo]) -> list[dict[str, Any]]:
     return [
         {
@@ -96,6 +107,7 @@ def queues_to_dicts(queues: Sequence[QueueInfo]) -> list[dict[str, Any]]:
             "is_dlq": queue.is_dlq,
             "kind": queue.kind,
             "severity": _severity(queue.messages),
+            "status": _status(queue),
         }
         for queue in queues
     ]

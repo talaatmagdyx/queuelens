@@ -1,14 +1,18 @@
 {% extends "base.html" %}
 {% block title %}Audit Log · QueueLens{% endblock %}
 {% block content %}
-<p class="overline">Flight Recorder</p>
 <h1>Audit Log</h1>
-<p class="muted">Every action writes an attempt event before execution and an outcome after.</p>
+<p class="subtitle">Every action writes an attempt event before execution and an outcome after.</p>
 <section class="card">
-  <h2>Latest events</h2>
+  <div class="card-head">
+    <div><h2>Latest Events</h2>
+    <p class="card-sub">Most recent first</p></div>
+  </div>
   {% if events %}
-  <table><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Queue</th><th>Result</th></tr></thead>
-  <tbody>{% for event in events %}<tr><td class="mono">{{ event.timestamp }}</td><td class="mono">{{ event.username }}</td><td class="mono">{{ event.action }}</td><td class="mono">{{ event.source_queue or '—' }}</td><td><span class="badge b-{{ event.result }}">{{ event.result }}</span></td></tr>{% endfor %}</tbody></table>
+  <div class="table-wrap">
+  <table><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Queue</th><th>Target</th><th>Result</th></tr></thead>
+  <tbody>{% for event in events %}<tr><td class="mono">{{ event.timestamp[:19] if event.timestamp else '—' }}</td><td class="mono">{{ event.username }}</td><td class="mono">{{ event.action }}</td><td class="mono">{{ event.source_queue or '—' }}</td><td class="mono">{{ event.target_queue or (event.target_exchange ~ ' / ' ~ event.target_routing_key if event.target_exchange else '—') }}</td><td><span class="badge b-{{ event.result }}">{{ event.result }}</span></td></tr>{% endfor %}</tbody></table>
+  </div>
   {% else %}<p class="empty">No audit events yet.</p>{% endif %}
 </section>
 {% endblock %}

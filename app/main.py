@@ -94,8 +94,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     management = RabbitMQManagementClient(app.state.settings)
     app.state.management_client = management
     app.state.queue_service = QueueService(management)
-    # base.html renders the environment badge on every page
+    # base.html renders the environment badge and sidebar identity on every page
     web.templates.env.globals["app_environment"] = app.state.settings.environment
+    web.templates.env.globals["admin_username"] = app.state.settings.admin_username
     _register_error_handlers(app)
     app.include_router(health.router)
     app.include_router(metrics.router)

@@ -6,51 +6,139 @@
   <title>{% block title %}QueueLens{% endblock %}</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+  <script>
+    (function () {
+      const saved = localStorage.getItem('ql-theme');
+      if (saved === 'dark') document.documentElement.dataset.theme = 'dark';
+    })();
+  </script>
 </head>
 <body>
-  <header class="topbar">
-    <a href="/" class="brand">Queue<em>Lens</em></a>
-    <span class="broker-status" id="broker-status" data-state="unknown"><i></i><span>BROKER …</span></span>
-    <span class="env-badge env-{{ app_environment | default('development') | lower }}">{{ app_environment | default('development') | upper }}</span>
-    <nav><a href="/">Dashboard</a><a href="/audit">Audit Log</a></nav>
-  </header>
-  <main class="container">{% block content %}{% endblock %}</main>
-  <footer class="footer">
-    <span>QueueLens — safe replay for dead letters</span>
-    <span>publish-before-ack · audit-everything</span>
-  </footer>
-  <script>
-  async function pollBroker() {
-    const el = document.getElementById('broker-status');
-    if (!el) return;
-    try {
-      const response = await fetch('/ready');
-      el.dataset.state = response.ok ? 'up' : 'down';
-      el.querySelector('span').textContent = response.ok ? 'BROKER LIVE' : 'BROKER DOWN';
-    } catch (error) {
-      el.dataset.state = 'down';
-      el.querySelector('span').textContent = 'BROKER DOWN';
-    }
-  }
-  pollBroker();
-  setInterval(pollBroker, 15000);
+<div class="shell">
+  <aside class="sidebar">
+    <a href="/" class="side-brand"><i>
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="4" width="9" height="8" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M12.5 6l2-1.5v7L12.5 10" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+    </i>Queue<em>Lens</em></a>
+    <div class="side-label">Main</div>
+    <nav class="side-nav">
+      <a href="/" data-nav="dashboard"><svg width="15" height="15" viewBox="0 0 15 15" fill="none"><rect x="1" y="1" width="5.5" height="5.5" rx="1.2" stroke="currentColor" stroke-width="1.4"/><rect x="8.5" y="1" width="5.5" height="5.5" rx="1.2" stroke="currentColor" stroke-width="1.4"/><rect x="1" y="8.5" width="5.5" height="5.5" rx="1.2" stroke="currentColor" stroke-width="1.4"/><rect x="8.5" y="8.5" width="5.5" height="5.5" rx="1.2" stroke="currentColor" stroke-width="1.4"/></svg>Dashboard</a>
+      <a href="/queues" data-nav="queues"><svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M1.5 3.5h12M1.5 7.5h12M1.5 11.5h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Queues</a>
+      <a href="/queues#parking" data-nav="parking"><svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M3 13.5V2.5A1 1 0 0 1 4 1.5h5a3.5 3.5 0 0 1 0 7H3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Parking</a>
+      <a href="/audit" data-nav="audit"><svg width="15" height="15" viewBox="0 0 15 15" fill="none"><rect x="2.5" y="1.5" width="10" height="12" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 5h5M5 8h5M5 11h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Audit Log</a>
+    </nav>
+    <div class="side-widget w-broker" id="side-broker" data-state="unknown">
+      <h4><b>●</b> Broker <span id="side-broker-word">…</span></h4>
+      <p id="side-broker-host">connecting…</p>
+      <p id="side-broker-vhost"></p>
+      <p id="side-broker-latency"></p>
+    </div>
+    <div class="side-widget w-safety">
+      <h4>🛡 Safety First</h4>
+      <ul>
+        <li>Non-destructive browsing</li>
+        <li>Publish-before-ack</li>
+        <li>Audit everything</li>
+        <li>Messages never lost</li>
+      </ul>
+    </div>
+    <div class="side-user">
+      <span class="avatar">{{ (admin_username | default('op'))[:2] | upper }}</span>
+      <div><b>{{ admin_username | default('operator') }}</b><span>Operator</span></div>
+    </div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <span class="pill broker" id="broker-status" data-state="unknown"><i></i><span>BROKER …</span></span>
+      <span class="pill env env-{{ app_environment | default('development') | lower }}">{{ app_environment | default('development') | upper }}</span>
+      <span class="top-meta" id="broker-version" hidden>RabbitMQ <b></b></span>
+      <span class="top-meta" id="broker-vhost" hidden>vhost: <b></b></span>
+      <span class="top-right">
+        <span class="top-meta">Last refreshed: <b id="refreshed-ago">0s ago</b></span>
+        <button type="button" onclick="location.reload()">⟳ Refresh</button>
+        <button type="button" class="icon-button" id="theme-toggle" title="Toggle dark mode">◐</button>
+      </span>
+    </header>
+    <main class="container">{% block content %}{% endblock %}</main>
+  </div>
+</div>
+<script>
+document.getElementById('theme-toggle').addEventListener('click', () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme === 'dark';
+  if (dark) { delete root.dataset.theme; localStorage.setItem('ql-theme', 'light'); }
+  else { root.dataset.theme = 'dark'; localStorage.setItem('ql-theme', 'dark'); }
+});
 
-  function colorizeJson(pre) {
-    const escaped = pre.textContent
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    pre.innerHTML = escaped.replace(
-      /("(?:[^"\\]|\\.)*")(\s*:)?|\b(true|false|null)\b|(-?\d+\.?\d*(?:[eE][+-]?\d+)?)/g,
-      (match, str, colon, keyword, number) => {
-        if (str) {
-          return colon
-            ? '<span class="j-key">' + str + '</span>' + colon
-            : '<span class="j-str">' + str + '</span>';
-        }
-        if (keyword) return '<span class="j-kw">' + keyword + '</span>';
-        return '<span class="j-num">' + number + '</span>';
-      });
+const pageLoadedAt = Date.now();
+setInterval(() => {
+  const seconds = Math.round((Date.now() - pageLoadedAt) / 1000);
+  const el = document.getElementById('refreshed-ago');
+  if (el) el.textContent = seconds + 's ago';
+}, 1000);
+
+(function markActiveNav() {
+  const path = location.pathname;
+  let key = 'dashboard';
+  if (path.startsWith('/queues') || path.startsWith('/messages')) key = 'queues';
+  if (path.startsWith('/audit')) key = 'audit';
+  if (location.hash === '#parking') key = 'parking';
+  const link = document.querySelector('.side-nav a[data-nav="' + key + '"]');
+  if (link) link.classList.add('active');
+})();
+
+async function pollBroker() {
+  const pill = document.getElementById('broker-status');
+  const side = document.getElementById('side-broker');
+  const started = performance.now();
+  let up = false;
+  try {
+    const response = await fetch('/ready');
+    up = response.ok;
+  } catch (error) { up = false; }
+  const latency = Math.round(performance.now() - started);
+  const state = up ? 'up' : 'down';
+  if (pill) { pill.dataset.state = state; pill.querySelector('span').textContent = up ? 'BROKER LIVE' : 'BROKER DOWN'; }
+  if (side) {
+    side.dataset.state = state;
+    document.getElementById('side-broker-word').textContent = up ? 'Live' : 'Down';
+    document.getElementById('side-broker-latency').textContent = 'latency: ' + latency + 'ms';
   }
-  document.querySelectorAll('pre.code-json').forEach(colorizeJson);
-  </script>
+}
+
+async function loadBrokerInfo() {
+  try {
+    const info = await (await fetch('/api/broker')).json();
+    if (info.rabbitmq_version) {
+      const v = document.getElementById('broker-version');
+      v.hidden = false; v.querySelector('b').textContent = info.rabbitmq_version;
+    }
+    const vh = document.getElementById('broker-vhost');
+    vh.hidden = false; vh.querySelector('b').textContent = info.vhost;
+    document.getElementById('side-broker-host').textContent = info.host;
+    document.getElementById('side-broker-vhost').textContent = 'vhost: ' + info.vhost;
+  } catch (error) { /* login page or broker info unavailable */ }
+}
+
+pollBroker();
+setInterval(pollBroker, 15000);
+loadBrokerInfo();
+
+function colorizeJson(pre) {
+  const escaped = pre.textContent
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  pre.innerHTML = escaped.replace(
+    /("(?:[^"\\]|\\.)*")(\s*:)?|\b(true|false|null)\b|(-?\d+\.?\d*(?:[eE][+-]?\d+)?)/g,
+    (match, str, colon, keyword, number) => {
+      if (str) {
+        return colon
+          ? '<span class="j-key">' + str + '</span>' + colon
+          : '<span class="j-str">' + str + '</span>';
+      }
+      if (keyword) return '<span class="j-kw">' + keyword + '</span>';
+      return '<span class="j-num">' + number + '</span>';
+    });
+}
+document.querySelectorAll('pre.code-json').forEach(colorizeJson);
+</script>
 </body>
 </html>

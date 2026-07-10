@@ -204,3 +204,35 @@ async def test_queue_page_warns_when_preview_is_capped() -> None:
 
     assert response.status_code == 200
     assert "Showing 2 of 4812 messages" in response.text
+
+
+@pytest.mark.asyncio
+async def test_queues_index_lists_all_queues_with_kind_and_status() -> None:
+    app = create_app(Settings(auth_enabled=False))
+
+    class FakeQueueService:
+        async def list_queues(self, dlq_only: bool = False) -> list[QueueInfo]:
+            assert dlq_only is False
+            def q(name: str, messages: int, consumers: int, is_dlq: bool, kind: str) -> QueueInfo:
+                return QueueInfo(
+                    name=name, vhost="/", messages=messages, messages_ready=messages,
+                    messages_unacked=0, consumers=consumers, durable=True,
+                    is_dlq=is_dlq, kind=kind,
+                )
+            return [
+                q("orders.dlq", 121, 0, True, "dlq"),
+                q("orders.dlq.parking", 4, 0, True, "parking"),
+                q("orders.created", 0, 3, False, "normal"),
+            ]
+
+    app.state.queue_service = FakeQueueService()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/queues")
+
+    assert response.status_code == 200
+    assert "orders.dlq.parking" in response.text
+    assert "orders.created" in response.text
+    assert 'k-parking' in response.text
+    assert 'k-normal' in response.text
+    assert 's-active' in response.text  # consumer-backed normal queue

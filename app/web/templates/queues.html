@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Queues · QueueLens{% endblock %}
+{% block content %}
+<h1>Queues</h1>
+<p class="subtitle">Browse and inspect queues. Message counts are real-time from the
+  RabbitMQ Management API. <span class="mono">{{ broker }}</span></p>
+<div class="stats">
+  <div class="stat"><span class="tile t-blue"><svg width="17" height="17" viewBox="0 0 15 15" fill="none"><path d="M1.5 3.5h12M1.5 7.5h12M1.5 11.5h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+    <div><b>{{ queues | length }}</b><span>Total Queues</span></div></div>
+  <div class="stat"><span class="tile t-red"><svg width="17" height="17" viewBox="0 0 15 15" fill="none"><rect x="1.5" y="3" width="12" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M1.5 5.5l6 3.5 6-3.5" stroke="currentColor" stroke-width="1.5"/></svg></span>
+    <div><b>{{ dlq_count }}</b><span>DLQ Queues</span></div></div>
+  <div class="stat"><span class="tile t-amber"><svg width="17" height="17" viewBox="0 0 15 15" fill="none"><path d="M2.5 12.5v-4M7.5 12.5v-9M12.5 12.5v-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+    <div><b>{{ queues | sum(attribute='messages_ready') }}</b><span>Messages Ready</span></div></div>
+  <div class="stat"><span class="tile t-green"><svg width="17" height="17" viewBox="0 0 15 15" fill="none"><circle cx="5" cy="5" r="2.4" stroke="currentColor" stroke-width="1.5"/><path d="M1.5 13c.5-2.4 1.8-3.6 3.5-3.6S8 10.6 8.5 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+    <div><b>{{ with_consumers }}</b><span>Queues with Consumers</span></div></div>
+  <div class="stat"><span class="tile t-purple"><svg width="17" height="17" viewBox="0 0 15 15" fill="none"><rect x="1.5" y="3" width="12" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M4.5 7.5h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+    <div><b>{{ with_messages }}</b><span>Queues with Messages</span></div></div>
+</div>
+<section class="card">
+  <div class="filters">
+    <label>Search <input type="search" id="q-search" placeholder="Search queues…"></label>
+    <label>Type
+      <select id="q-type">
+        <option value="">All Types</option>
+        <option value="dlq">DLQ</option>
+        <option value="retry">Retry</option>
+        <option value="parking">Parking</option>
+        <option value="normal">Normal</option>
+      </select>
+    </label>
+    <label>Status
+      <select id="q-status">
+        <option value="">All Statuses</option>
+        <option value="attention">Needs Attention</option>
+        <option value="warning">Warning</option>
+        <option value="low">Low</option>
+        <option value="parking">Parking</option>
+        <option value="active">Active</option>
+        <option value="idle">Idle</option>
+        <option value="empty">Empty</option>
+      </select>
+    </label>
+    <button type="button" onclick="clearFilters()">Clear Filters</button>
+  </div>
+  <div class="tabs" id="q-tabs">
+    <button class="active" data-tab="all">All Queues<span class="count" id="c-all"></span></button>
+    <button data-tab="dlq">DLQ Queues<span class="count" id="c-dlq"></span></button>
+    <button data-tab="messages">With Messages<span class="count" id="c-messages"></span></button>
+    <button data-tab="noconsumers">No Consumers<span class="count" id="c-noconsumers"></span></button>
+  </div>
+  <div class="table-wrap">
+  <table id="q-table"><thead><tr><th>Queue Name</th><th>Type</th><th>Messages</th><th>Ready</th><th>Unacked</th><th>Consumers</th><th>Status</th><th></th></tr></thead>
+  <tbody>{% for queue in queues %}<tr data-href="/queues/{{ queue.name | urlencode }}"
+      data-name="{{ queue.name }}" data-kind="{{ queue.kind }}" data-status="{{ queue.status }}"
+      data-dlq="{{ 1 if queue.is_dlq else 0 }}" data-messages="{{ queue.messages }}" data-consumers="{{ queue.consumers }}">
+    <td><a href="/queues/{{ queue.name | urlencode }}" class="mono">{{ queue.name }}</a></td>
+    <td><span class="badge k-{{ queue.kind }}">{{ queue.kind }}</span></td>
+    <td class="mono"{% if queue.severity == 'attention' %} style="color: var(--red); font-weight: 700"{% endif %}>{{ queue.messages }}</td>
+    <td class="mono">{{ queue.messages_ready }}</td>
+    <td class="mono">{{ queue.messages_unacked }}</td>
+    <td class="mono">{{ queue.consumers }}</td>
+    <td><span class="badge dot s-{{ queue.status }}">{{ {'attention': 'Needs Attention', 'warning': 'Warning', 'low': 'Low', 'empty': 'Empty', 'parking': 'Parking', 'active': 'Active', 'idle': 'Idle'}.get(queue.status, queue.status) }}</span></td>
+    <td><a class="button row-open" href="/queues/{{ queue.name | urlencode }}">View</a></td>
+  </tr>{% endfor %}</tbody></table>
+  </div>
+  <div class="pager" id="q-pager"><span id="q-count"></span></div>
+</section>
+<div class="banner">
+  <span>ⓘ Counts are from the RabbitMQ Management API and update on refresh. Message preview
+    is limited per queue.</span>
+  <span class="spacer"></span>
+  <a class="plain-link" href="https://github.com/talaatmagdyx/queuelens/blob/main/docs/API.md" target="_blank" rel="noopener">Learn more ↗</a>
+</div>
+<script>
+const PAGE_SIZE = 10;
+let currentTab = location.hash === '#parking' ? 'parking' : 'all';
+let currentPage = 1;
+
+const rows = Array.from(document.querySelectorAll('#q-table tbody tr'));
+
+function matches(row) {
+  const search = document.getElementById('q-search').value.trim().toLowerCase();
+  const type = document.getElementById('q-type').value;
+  const status = document.getElementById('q-status').value;
+  if (search && !row.dataset.name.toLowerCase().includes(search)) return false;
+  if (type && row.dataset.kind !== type) return false;
+  if (status && row.dataset.status !== status) return false;
+  if (currentTab === 'dlq' && row.dataset.dlq !== '1') return false;
+  if (currentTab === 'parking' && row.dataset.kind !== 'parking') return false;
+  if (currentTab === 'messages' && Number(row.dataset.messages) === 0) return false;
+  if (currentTab === 'noconsumers' && Number(row.dataset.consumers) > 0) return false;
+  return true;
+}
+
+function render() {
+  const visible = rows.filter(matches);
+  rows.forEach(row => { row.style.display = 'none'; });
+  const pages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  if (currentPage > pages) currentPage = pages;
+  visible.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+    .forEach(row => { row.style.display = ''; });
+  const start = visible.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0;
+  const end = Math.min(currentPage * PAGE_SIZE, visible.length);
+  const pager = document.getElementById('q-pager');
+  pager.replaceChildren();
+  const count = document.createElement('span');
+  count.textContent = 'Showing ' + start + ' to ' + end + ' of ' + visible.length + ' queues';
+  pager.append(count);
+  for (let p = 1; p <= pages; p++) {
+    const button = document.createElement('button');
+    button.textContent = p;
+    if (p === currentPage) button.className = 'active';
+    button.onclick = () => { currentPage = p; render(); };
+    pager.append(button);
+  }
+}
+
+function refreshCounts() {
+  document.getElementById('c-all').textContent = rows.length;
+  document.getElementById('c-dlq').textContent = rows.filter(r => r.dataset.dlq === '1').length;
+  document.getElementById('c-messages').textContent = rows.filter(r => Number(r.dataset.messages) > 0).length;
+  document.getElementById('c-noconsumers').textContent = rows.filter(r => Number(r.dataset.consumers) === 0).length;
+}
+
+function clearFilters() {
+  document.getElementById('q-search').value = '';
+  document.getElementById('q-type').value = '';
+  document.getElementById('q-status').value = '';
+  currentPage = 1;
+  render();
+}
+
+document.querySelectorAll('#q-tabs button').forEach(button => {
+  button.addEventListener('click', () => {
+    document.querySelectorAll('#q-tabs button').forEach(b => b.classList.remove('active'));
+    button.classList.add('active');
+    currentTab = button.dataset.tab;
+    currentPage = 1;
+    render();
+  });
+});
+['q-search', 'q-type', 'q-status'].forEach(id => {
+  document.getElementById(id).addEventListener('input', () => { currentPage = 1; render(); });
+});
+document.querySelectorAll('tr[data-href]').forEach(row => {
+  row.addEventListener('click', event => {
+    if (event.target.closest('a')) return;
+    location.href = row.dataset.href;
+  });
+});
+if (currentTab === 'parking') {
+  document.getElementById('q-type').value = 'parking';
+  currentTab = 'all';
+}
+refreshCounts();
+render();
+</script>
+{% endblock %}

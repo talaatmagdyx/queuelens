@@ -43,6 +43,10 @@ class RabbitMQManagementClient:
             raise RuntimeError("RabbitMQ Management client has not started")
         return self._client
 
+    async def overview(self) -> dict[str, Any]:
+        response = await self.client.get("/api/overview")
+        return cast(dict[str, Any], await self._json_or_raise(response))
+
     async def list_queues(self) -> list[dict[str, Any]]:
         vhost = quote(self._settings.rabbitmq_vhost, safe="")
         response = await self.client.get(f"/api/queues/{vhost}")

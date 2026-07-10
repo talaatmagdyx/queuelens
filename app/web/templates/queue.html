@@ -1,32 +1,41 @@
 {% extends "base.html" %}
 {% block title %}{{ queue.name }} · QueueLens{% endblock %}
 {% block content %}
-<p class="overline">Queue Manifest</p>
-<h1>{{ queue.name }}</h1>
+<p class="crumbs"><a href="/queues">Queues</a> › <b>{{ queue.name }}</b> › Messages</p>
+<h1>Messages <span class="badge k-{{ queue.kind }}">{{ queue.kind }}</span></h1>
+<p class="subtitle">Browse messages safely. Messages are fetched with requeue (non-destructive).</p>
 <div class="kv">
+  <div><span>Messages Ready</span><b>{{ queue.messages_ready }}</b></div>
   <div><span>Total</span><b>{{ queue.messages }}</b></div>
-  <div><span>Ready</span><b>{{ queue.messages_ready }}</b></div>
   <div><span>Unacked</span><b>{{ queue.messages_unacked }}</b></div>
   <div><span>Consumers</span><b>{{ queue.consumers }}</b></div>
   <div><span>Durable</span><b>{{ 'yes' if queue.durable else 'no' }}</b></div>
 </div>
 <section class="card">
-  <h2>Messages</h2>
+  <div class="card-head">
+    <div><h2>Messages</h2>
+    <p class="card-sub">Click a message to inspect payload, headers, and x-death history.</p></div>
+  </div>
   {% if queue.messages > messages|length %}
   <p class="notice">Showing {{ messages | length }} of {{ queue.messages }} messages —
     this is a preview, not the whole queue. Raise <code>QUEUELENS_MAX_PREVIEW_MESSAGES</code>
     to preview more.</p>
   {% endif %}
-  {% if messages %}<table><thead><tr><th><input type="checkbox" id="select-all" onchange="toggleAll(this)" aria-label="Select all messages"></th><th>Fingerprint</th><th>Payload</th><th>Routing key</th><th>Size</th><th></th></tr></thead>
-  <tbody>{% for message in messages %}<tr><td><input type="checkbox" class="msg-select" data-fingerprint="{{ message.fingerprint }}" onchange="updateSelectionCount()" aria-label="Select message {{ message.fingerprint[:12] }}"></td><td class="mono">{{ message.fingerprint[:12] }}</td><td><span class="badge b-{{ message.payload_format }}">{{ message.payload_format }}</span></td><td class="mono">{{ message.routing_key }}</td><td class="mono">{{ message.payload_size }}</td><td><a href="/messages/{{ queue.name | urlencode }}/{{ message.fingerprint }}">Inspect →</a></td></tr>{% endfor %}</tbody></table>
+  {% if messages %}
+  <div class="table-wrap">
+  <table><thead><tr><th><input type="checkbox" id="select-all" onchange="toggleAll(this)" aria-label="Select all messages"></th><th>Message ID</th><th>Payload Type</th><th>Size</th><th>x-death</th><th>Preview</th><th></th></tr></thead>
+  <tbody>{% for message in messages %}<tr data-href="/messages/{{ queue.name | urlencode }}/{{ message.fingerprint }}"><td><input type="checkbox" class="msg-select" data-fingerprint="{{ message.fingerprint }}" onchange="updateSelectionCount()" aria-label="Select message {{ message.fingerprint[:12] }}"></td><td class="mono">{{ message.message_id or message.fingerprint[:12] }}</td><td><span class="badge b-{{ message.payload_format }}">{{ message.payload_format }}</span></td><td class="mono">{{ message.payload_size }} B</td><td class="mono">{{ message.x_death | length or '—' }}</td><td class="mono muted">{{ (message.payload | tojson) | truncate(40, True) }}</td><td><a class="button row-open" href="/messages/{{ queue.name | urlencode }}/{{ message.fingerprint }}">View</a></td></tr>{% endfor %}</tbody></table>
+  </div>
   {% else %}<p class="empty">No messages returned.</p>{% endif %}
 </section>
 {% if messages %}
 <section class="card">
-  <h2>Bulk actions</h2>
-  <p class="muted">Applies to messages in the current scan window. Every bulk action starts
-    with a dry run; execution only touches the messages the dry run counted.
-    <span id="selection-count"></span></p>
+  <div class="card-head">
+    <div><h2>Bulk Actions</h2>
+    <p class="card-sub">Applies to messages in the current scan window. Every bulk action starts
+      with a dry run; execution only touches the messages the dry run counted.
+      <span id="selection-count"></span></p></div>
+  </div>
   <div class="bulk-form">
     <label>Action
       <select id="bulk-action">
@@ -170,6 +179,13 @@ async function bulkExecute() {
   links.append(refresh, audit);
   resultBox.append(links);
 }
+
+document.querySelectorAll('tr[data-href]').forEach(row => {
+  row.addEventListener('click', event => {
+    if (event.target.closest('a') || event.target.closest('input')) return;
+    location.href = row.dataset.href;
+  });
+});
 </script>
 {% endif %}
 {% endblock %}

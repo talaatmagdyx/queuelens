@@ -51,10 +51,32 @@ async def dashboard(
         context={
             "queues": queue_dicts,
             "largest": max(queue_dicts, key=lambda q: q["messages"], default=None),
+            "no_consumers": sum(1 for q in queue_dicts if q["consumers"] == 0),
             "recent_events": recent_events,
             "failed_today": failed_today,
             "broker": _broker_display(settings.rabbitmq_url, settings.rabbitmq_vhost),
             "preview_limit": settings.max_preview_messages,
+        },
+    )
+
+
+@router.get("/queues", response_class=HTMLResponse)
+async def queues_index(
+    request: Request,
+    _username: str = Depends(get_current_username),
+) -> HTMLResponse:
+    settings = request.app.state.settings
+    queues = await cast(QueueService, request.app.state.queue_service).list_queues()
+    queue_dicts = queues_to_dicts(queues)
+    return templates.TemplateResponse(
+        request=request,
+        name="queues.html",
+        context={
+            "queues": queue_dicts,
+            "dlq_count": sum(1 for q in queue_dicts if q["is_dlq"]),
+            "with_consumers": sum(1 for q in queue_dicts if q["consumers"] > 0),
+            "with_messages": sum(1 for q in queue_dicts if q["messages"] > 0),
+            "broker": _broker_display(settings.rabbitmq_url, settings.rabbitmq_vhost),
         },
     )
 

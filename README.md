@@ -136,19 +136,23 @@ Interactive OpenAPI docs are served by the app itself at `/docs`.
 
 ## Screenshots
 
-**DLQ dashboard** — source queues with dead-letter config are not misreported as DLQs:
+**DLQ Recovery Dashboard** — risk-sorted queues with type and severity badges, live broker
+status, recent actions, and failure counts:
 
 ![Dashboard](docs/screenshots/dashboard.png)
 
-**Queue view** — non-destructive preview with payload format and size:
+**Dark mode** — one toggle, persisted per browser:
 
-![Queue detail](docs/screenshots/queue.png)
+![Dashboard (dark)](docs/screenshots/dashboard-dark.png)
 
-**Message detail** — payload, headers, and parsed `x-death` history:
+**Queues** — every queue on the broker with search, type/status filters, and tabs:
+
+![Queues](docs/screenshots/queue.png)
+
+**Message detail** — payload / headers / properties / parsed `x-death` tabs with syntax
+coloring, a summary panel, and safe actions:
 
 ![Message detail](docs/screenshots/message-detail.png)
-
-![x-death](docs/screenshots/x-death.png)
 
 **Actions** — replay target per action, with a clear result and audit link:
 
