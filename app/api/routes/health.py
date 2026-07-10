@@ -35,6 +35,40 @@ async def broker(
     }
 
 
+@router.get("/api/broker/test")
+async def broker_test(
+    request: Request,
+    _username: str = Depends(get_current_username),
+) -> dict[str, object]:
+    """Live connectivity check: Management API round-trip plus AMQP state."""
+    import time
+
+    connection = request.app.state.rabbitmq_connection
+    started = time.perf_counter()
+    management_ok = False
+    detail: dict[str, object] = {}
+    try:
+        overview = await request.app.state.management_client.overview()
+        management_ok = True
+        detail = {
+            "rabbitmq_version": overview.get("rabbitmq_version"),
+            "cluster_name": overview.get("cluster_name"),
+            "queues": (overview.get("object_totals") or {}).get("queues"),
+            "nodes": len(overview.get("listeners") or []) or None,
+        }
+    except Exception as error:
+        detail = {"error": str(error) or "Management API unreachable"}
+    latency_ms = round((time.perf_counter() - started) * 1000)
+    amqp_ok = bool(connection.is_started and connection.is_connected)
+    return {
+        "ok": management_ok and amqp_ok,
+        "management_api": management_ok,
+        "amqp": amqp_ok,
+        "latency_ms": latency_ms,
+        **detail,
+    }
+
+
 @router.get("/ready")
 async def ready(request: Request) -> JSONResponse:
     if not getattr(request.app.state, "ready", False):

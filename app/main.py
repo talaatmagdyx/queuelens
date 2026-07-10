@@ -97,6 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # base.html renders the environment badge and sidebar identity on every page
     web.templates.env.globals["app_environment"] = app.state.settings.environment
     web.templates.env.globals["admin_username"] = app.state.settings.admin_username
+    web.templates.env.globals["app_version"] = app.version
     _register_error_handlers(app)
     app.include_router(health.router)
     app.include_router(metrics.router)

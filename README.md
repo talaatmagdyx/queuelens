@@ -162,9 +162,13 @@ coloring, a summary panel, and safe actions:
 
 ![Bulk actions](docs/screenshots/bulk-actions.png)
 
-**Audit log** — attempt and outcome events for every action:
+**Audit log** — stats, filters, CSV export, per-action durations, and a details panel:
 
 ![Audit log](docs/screenshots/audit.png)
+
+**Configuration** — read-only view of the running config with a live connection test:
+
+![Configuration](docs/screenshots/configuration.png)
 
 ## Configuration
 

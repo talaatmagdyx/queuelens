@@ -96,6 +96,7 @@ async def execute(
 
     summary = cast(dict[str, int], outcome["summary"])
     bulk_action = f"bulk_{batch.action}"
+    elapsed_ms = round((time.perf_counter() - started_at) * 1000)
     OPERATION_SECONDS.labels(action=bulk_action).observe(time.perf_counter() - started_at)
     envelope_result = "success" if summary["failed"] == 0 else "partial"
     ACTIONS.labels(action=bulk_action, result=envelope_result).inc()
@@ -131,7 +132,7 @@ async def execute(
             target_exchange=batch.target.exchange if batch.target else None,
             target_routing_key=batch.target.routing_key if batch.target else None,
             result="success" if summary["failed"] == 0 else "partial",
-            metadata={"batch_id": body.batch_id, **summary},
+            metadata={"batch_id": body.batch_id, "duration_ms": elapsed_ms, **summary},
         )
     )
     return outcome

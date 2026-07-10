@@ -648,3 +648,82 @@ input::placeholder { color: var(--muted); }
 @media (prefers-reduced-motion: reduce) {
   .pill.broker i { animation: none; }
 }
+
+/* ---------- notifications bell ---------- */
+
+.bell-wrap { position: relative; }
+.bell-count {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  background: var(--red);
+  color: #fff;
+  font-style: normal;
+  font-size: 0.62rem;
+  font-weight: 700;
+  border-radius: 999px;
+  min-width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+}
+.bell-panel {
+  position: absolute;
+  right: 0;
+  top: 42px;
+  width: 330px;
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.14);
+  z-index: 30;
+  overflow: hidden;
+}
+.bell-head { padding: 0.7rem 1rem 0.5rem; font-weight: 700; color: var(--text-bright); display: flex; flex-direction: column; }
+.bell-item { display: block; padding: 0.55rem 1rem; text-decoration: none; border-top: 1px solid var(--line); }
+.bell-item:hover { background: var(--bg-hover); }
+.bell-item b { display: block; font-size: 0.82rem; color: var(--text-bright); }
+.bell-item span { font-size: 0.75rem; color: var(--muted); font-family: var(--mono); }
+.bell-item.level-alert b::before { content: "▲ "; color: var(--red); }
+.bell-item.level-warn b::before { content: "● "; color: var(--amber); }
+
+/* ---------- login split ---------- */
+
+.login-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  max-width: 860px;
+  margin: 8vh auto;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+@media (max-width: 760px) { .login-split { grid-template-columns: 1fr; } }
+.login-brand {
+  background: linear-gradient(160deg, #0b1c3d, #0b0e1a);
+  color: #b6c4e0;
+  padding: 2.4rem 2.2rem;
+}
+.login-brand h2 { font-size: 1.5rem; margin: 0.8rem 0 0.6rem; }
+.login-brand p { margin: 0.35rem 0; font-size: 0.9rem; }
+.login-brand ul { margin: 1rem 0 0; padding-left: 1.1rem; font-size: 0.85rem; }
+.login-brand li { margin: 0.3rem 0; }
+.login-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.login-form { background: var(--bg-panel); padding: 2.4rem 2.2rem; display: flex; flex-direction: column; gap: 0.6rem; }
+.login-form h1 { margin: 0; }
+.login-form .button { align-self: flex-start; }
+
+/* audit detail grid keeps aside compact */
+#detail-aside .icon-button { width: 28px; height: 28px; font-size: 0.8rem; }

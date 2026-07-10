@@ -1,18 +1,197 @@
 {% extends "base.html" %}
 {% block title %}Audit Log · QueueLens{% endblock %}
 {% block content %}
-<h1>Audit Log</h1>
-<p class="subtitle">Every action writes an attempt event before execution and an outcome after.</p>
+<div class="detail-grid" id="audit-grid" style="grid-template-columns: minmax(0, 1fr)">
+<div>
+<div class="card-head">
+  <div><h1>Audit Log</h1>
+  <p class="subtitle">Complete history of actions performed in QueueLens (latest 500 events).</p></div>
+  <button type="button" onclick="exportCsv()">⭳ Export CSV</button>
+</div>
+<div class="stats">
+  <div class="stat"><span class="tile t-blue"><svg width="17" height="17" viewBox="0 0 15 15" fill="none"><rect x="2.5" y="1.5" width="10" height="12" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 5h5M5 8h5M5 11h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+    <div><b>{{ stats.total }}</b><span>Events (window)</span></div></div>
+  <div class="stat"><span class="tile t-green"><svg width="17" height="17" viewBox="0 0 15 15" fill="none"><circle cx="7.5" cy="7.5" r="6" stroke="currentColor" stroke-width="1.5"/><path d="M4.8 7.7l1.8 1.8 3.6-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+    <div><b>{{ stats.succeeded }}</b><span>Successful{% if stats.success_rate is not none %} · {{ stats.success_rate }}%{% endif %}</span></div></div>
+  <div class="stat {% if stats.failed %}stat-alert{% endif %}"><span class="tile t-red"><svg width="17" height="17" viewBox="0 0 15 15" fill="none"><circle cx="7.5" cy="7.5" r="6" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 5.5l4 4M9.5 5.5l-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+    <div><b>{{ stats.failed }}</b><span>Failed / Partial</span></div></div>
+  <div class="stat"><span class="tile t-purple"><svg width="17" height="17" viewBox="0 0 15 15" fill="none"><circle cx="5" cy="5" r="2.4" stroke="currentColor" stroke-width="1.5"/><path d="M1.5 13c.5-2.4 1.8-3.6 3.5-3.6S8 10.6 8.5 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+    <div><b>{{ stats.users }}</b><span>Unique Users</span></div></div>
+</div>
 <section class="card">
-  <div class="card-head">
-    <div><h2>Latest Events</h2>
-    <p class="card-sub">Most recent first</p></div>
+  <div class="filters">
+    <label>Search <input type="search" id="a-search" placeholder="Search by queue, user, action…"></label>
+    <label>Action
+      <select id="a-action"><option value="">All Actions</option>
+        <option>replay</option><option>park</option><option>delete</option>
+        <option>bulk_replay</option><option>bulk_park</option><option>bulk_delete</option>
+      </select>
+    </label>
+    <label>Result
+      <select id="a-result"><option value="">All Results</option>
+        <option>success</option><option>failed</option><option>started</option>
+        <option>partial</option><option>skipped_duplicate</option><option>not_found</option>
+      </select>
+    </label>
+    <button type="button" onclick="clearAuditFilters()">Clear Filters</button>
   </div>
   {% if events %}
   <div class="table-wrap">
-  <table><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Queue</th><th>Target</th><th>Result</th></tr></thead>
-  <tbody>{% for event in events %}<tr><td class="mono">{{ event.timestamp[:19] if event.timestamp else '—' }}</td><td class="mono">{{ event.username }}</td><td class="mono">{{ event.action }}</td><td class="mono">{{ event.source_queue or '—' }}</td><td class="mono">{{ event.target_queue or (event.target_exchange ~ ' / ' ~ event.target_routing_key if event.target_exchange else '—') }}</td><td><span class="badge b-{{ event.result }}">{{ event.result }}</span></td></tr>{% endfor %}</tbody></table>
+  <table id="a-table"><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Queue</th><th>Target / Destination</th><th>Result</th><th>Duration</th><th></th></tr></thead>
+  <tbody>{% for event in events %}<tr data-payload='{{ event | tojson }}'
+      data-haystack="{{ (event.username ~ ' ' ~ event.action ~ ' ' ~ (event.source_queue or '') ~ ' ' ~ (event.target_queue or '') ~ ' ' ~ event.result) | lower }}"
+      data-action="{{ event.action }}" data-result="{{ event.result }}">
+    <td class="mono">{{ event.timestamp[:19] if event.timestamp else '—' }}</td>
+    <td class="mono">{{ event.username }}</td>
+    <td class="mono">{{ event.action }}</td>
+    <td class="mono">{{ event.source_queue or '—' }}</td>
+    <td class="mono">{{ event.target_queue or (event.target_exchange ~ ' / ' ~ event.target_routing_key if event.target_exchange else '—') }}</td>
+    <td><span class="badge b-{{ event.result }}">{{ event.result }}</span></td>
+    <td class="mono">{{ (event.metadata.duration_ms ~ 'ms') if event.metadata and event.metadata.duration_ms is defined else '—' }}</td>
+    <td><button type="button" class="row-open button" onclick="showDetails(this)">👁</button></td>
+  </tr>{% endfor %}</tbody></table>
   </div>
+  <div class="pager" id="a-pager"></div>
   {% else %}<p class="empty">No audit events yet.</p>{% endif %}
 </section>
+</div>
+<aside id="detail-aside" hidden>
+  <section class="card summary-card">
+    <div class="card-head"><h2>Action Details</h2>
+      <button type="button" class="icon-button" onclick="hideDetails()">✕</button></div>
+    <div id="detail-body"></div>
+  </section>
+</aside>
+</div>
+<script>
+const PAGE_SIZE = 15;
+let currentPage = 1;
+const rows = Array.from(document.querySelectorAll('#a-table tbody tr'));
+
+function matches(row) {
+  const search = document.getElementById('a-search').value.trim().toLowerCase();
+  const action = document.getElementById('a-action').value;
+  const result = document.getElementById('a-result').value;
+  if (search && !row.dataset.haystack.includes(search)) return false;
+  if (action && row.dataset.action !== action) return false;
+  if (result && row.dataset.result !== result) return false;
+  return true;
+}
+
+function render() {
+  const visible = rows.filter(matches);
+  rows.forEach(row => { row.style.display = 'none'; });
+  const pages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  if (currentPage > pages) currentPage = pages;
+  visible.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+    .forEach(row => { row.style.display = ''; });
+  const pager = document.getElementById('a-pager');
+  if (!pager) return;
+  pager.replaceChildren();
+  const start = visible.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0;
+  const info = document.createElement('span');
+  info.textContent = 'Showing ' + start + ' to '
+    + Math.min(currentPage * PAGE_SIZE, visible.length) + ' of ' + visible.length + ' events';
+  pager.append(info);
+  for (let p = 1; p <= pages && p <= 20; p++) {
+    const button = document.createElement('button');
+    button.textContent = p;
+    if (p === currentPage) button.className = 'active';
+    button.onclick = () => { currentPage = p; render(); };
+    pager.append(button);
+  }
+}
+
+function clearAuditFilters() {
+  ['a-search', 'a-action', 'a-result'].forEach(id => { document.getElementById(id).value = ''; });
+  currentPage = 1;
+  render();
+}
+
+['a-search', 'a-action', 'a-result'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('input', () => { currentPage = 1; render(); });
+});
+
+function kvRow(parent, label, value, mono) {
+  if (value === null || value === undefined || value === '') return;
+  const div = document.createElement('div');
+  div.className = 'kv-row';
+  const span = document.createElement('span');
+  span.textContent = label;
+  const b = document.createElement('b');
+  b.textContent = String(value);
+  if (!mono) b.style.fontFamily = 'var(--sans)';
+  div.append(span, b);
+  parent.append(div);
+}
+
+function showDetails(button) {
+  const row = button.closest('tr');
+  const event = JSON.parse(row.dataset.payload);
+  const body = document.getElementById('detail-body');
+  body.replaceChildren();
+  const badge = document.createElement('span');
+  badge.className = 'badge b-' + event.result;
+  badge.textContent = event.result;
+  body.append(badge);
+  kvRow(body, 'Action', event.action, true);
+  kvRow(body, 'Time', event.timestamp ? event.timestamp.slice(0, 19) : null, true);
+  kvRow(body, 'User', event.username, true);
+  kvRow(body, 'Source Queue', event.source_queue, true);
+  kvRow(body, 'Target',
+    event.target_queue || (event.target_exchange
+      ? event.target_exchange + ' / ' + (event.target_routing_key || '') : null), true);
+  kvRow(body, 'Fingerprint', event.message_fingerprint, true);
+  kvRow(body, 'Duration',
+    event.metadata && event.metadata.duration_ms !== undefined
+      ? event.metadata.duration_ms + 'ms' : null, true);
+  kvRow(body, 'Batch', event.metadata ? event.metadata.batch_id : null, true);
+  kvRow(body, 'Error', event.error_message, true);
+  if (event.metadata && Object.keys(event.metadata).length) {
+    const pre = document.createElement('pre');
+    pre.textContent = JSON.stringify(event.metadata, null, 2);
+    pre.style.marginTop = '0.6rem';
+    body.append(pre);
+  }
+  if (event.message_fingerprint && event.source_queue) {
+    const link = document.createElement('a');
+    link.className = 'button';
+    link.style.marginTop = '0.7rem';
+    link.href = '/messages/' + encodeURIComponent(event.source_queue) + '/' + event.message_fingerprint;
+    link.textContent = 'View Message 👁';
+    body.append(link);
+  }
+  document.getElementById('detail-aside').hidden = false;
+  document.getElementById('audit-grid').style.gridTemplateColumns = '';
+}
+
+function hideDetails() {
+  document.getElementById('detail-aside').hidden = true;
+  document.getElementById('audit-grid').style.gridTemplateColumns = 'minmax(0, 1fr)';
+}
+
+function exportCsv() {
+  const header = ['time', 'user', 'action', 'queue', 'target', 'result', 'duration_ms', 'error'];
+  const lines = [header.join(',')];
+  rows.filter(matches).forEach(row => {
+    const event = JSON.parse(row.dataset.payload);
+    const target = event.target_queue
+      || (event.target_exchange ? event.target_exchange + '/' + (event.target_routing_key || '') : '');
+    const values = [event.timestamp || '', event.username, event.action, event.source_queue || '',
+      target, event.result,
+      event.metadata && event.metadata.duration_ms !== undefined ? event.metadata.duration_ms : '',
+      event.error_message || ''];
+    lines.push(values.map(value => '"' + String(value).replace(/"/g, '""') + '"').join(','));
+  });
+  const blob = new Blob([lines.join('\n')], {type: 'text/csv'});
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'queuelens-audit.csv';
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+render();
+</script>
 {% endblock %}

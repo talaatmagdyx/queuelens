@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Configuration · QueueLens{% endblock %}
+{% block content %}
+<h1>Configuration</h1>
+<p class="subtitle">Current connection, safety defaults, and limits. QueueLens is configured
+  through <code>QUEUELENS_*</code> environment variables — values here are read-only.</p>
+<div class="detail-grid">
+  <div>
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Broker Connection</h2>
+        <p class="card-sub">How QueueLens connects to RabbitMQ and its Management API.</p></div>
+        <button type="button" class="primary" id="test-connection" onclick="testConnection()">⛁ Test Connection</button>
+      </div>
+      <div class="table-wrap"><table><tbody>
+        {% for key, value in connection.items() %}
+        <tr><th style="width: 240px">{{ key }}</th><td class="mono">{{ value }}</td></tr>
+        {% endfor %}
+        <tr><th>Passwords</th><td class="mono">•••••••• (set via environment)</td></tr>
+      </tbody></table></div>
+      <div id="test-result" class="action-result" hidden></div>
+    </section>
+    <section class="card">
+      <h2>Limits &amp; Windows</h2>
+      <div class="table-wrap"><table><tbody>
+        {% for key, value in limits.items() %}
+        <tr><th style="width: 240px">{{ key }}</th><td class="mono">{{ value }}</td></tr>
+        {% endfor %}
+      </tbody></table></div>
+    </section>
+    <section class="card">
+      <h2>Masking</h2>
+      <div class="table-wrap"><table><tbody>
+        {% for key, value in masking.items() %}
+        <tr><th style="width: 240px">{{ key }}</th><td class="mono">{{ value }}</td></tr>
+        {% endfor %}
+      </tbody></table></div>
+      <p class="muted small">Masking is display-only — replayed messages always carry the
+        original payload. See the documentation for details.</p>
+    </section>
+    <section class="card">
+      <h2>General</h2>
+      <div class="table-wrap"><table><tbody>
+        {% for key, value in general.items() %}
+        <tr><th style="width: 240px">{{ key }}</th><td class="mono">{{ value }}</td></tr>
+        {% endfor %}
+        <tr><th>Version</th><td class="mono">v{{ app_version }}</td></tr>
+      </tbody></table></div>
+      <p class="muted small">To change any value, set the corresponding environment variable
+        and restart —
+        <a class="plain-link" href="https://github.com/talaatmagdyx/queuelens/blob/main/docs/CONFIGURATION.md" target="_blank" rel="noopener">full reference ↗</a></p>
+    </section>
+  </div>
+  <aside>
+    <section class="card summary-card">
+      <div class="card-head"><h2>Connection Status</h2><span class="badge" id="conn-badge">checking…</span></div>
+      <div id="conn-body"><p class="muted small">Running connection test…</p></div>
+    </section>
+    <section class="card summary-card">
+      <h2>Safety Defaults</h2>
+      <div class="kv-row"><span>Publish-before-ack</span><b style="color: var(--green)">Enabled</b></div>
+      <div class="kv-row"><span>Non-destructive browsing</span><b style="color: var(--green)">Enabled</b></div>
+      <div class="kv-row"><span>Audit everything</span><b style="color: var(--green)">Enabled</b></div>
+      <div class="kv-row"><span>Bulk dry-run required</span><b style="color: var(--green)">Enabled</b></div>
+      <p class="muted small">These are structural guarantees, not toggles —
+        <a class="plain-link" href="https://github.com/talaatmagdyx/queuelens/blob/main/docs/SAFETY.md" target="_blank" rel="noopener">safety model ↗</a></p>
+    </section>
+  </aside>
+</div>
+<script>
+function statusRow(parent, label, value) {
+  if (value === null || value === undefined) return;
+  const div = document.createElement('div');
+  div.className = 'kv-row';
+  const span = document.createElement('span');
+  span.textContent = label;
+  const b = document.createElement('b');
+  b.textContent = String(value);
+  div.append(span, b);
+  parent.append(div);
+}
+
+async function testConnection() {
+  const badge = document.getElementById('conn-badge');
+  const body = document.getElementById('conn-body');
+  const result = document.getElementById('test-result');
+  badge.className = 'badge';
+  badge.textContent = 'checking…';
+  let info = {ok: false};
+  try { info = await (await fetch('/api/broker/test')).json(); } catch (error) {}
+  badge.className = 'badge ' + (info.ok ? 'b-success' : 'b-failed');
+  badge.textContent = info.ok ? 'Healthy' : 'Unhealthy';
+  body.replaceChildren();
+  statusRow(body, 'Management API', info.management_api ? 'Connected' : 'Unreachable');
+  statusRow(body, 'AMQP connection', info.amqp ? 'Connected' : 'Down');
+  statusRow(body, 'Latency', info.latency_ms + 'ms');
+  statusRow(body, 'Broker version', info.rabbitmq_version);
+  statusRow(body, 'Cluster', info.cluster_name);
+  statusRow(body, 'Queues', info.queues);
+  if (result) {
+    result.hidden = false;
+    result.className = 'action-result ' + (info.ok ? 'success' : 'error');
+    result.replaceChildren();
+    const h = document.createElement('h3');
+    h.textContent = info.ok
+      ? 'Connection successful — ' + info.latency_ms + 'ms round-trip'
+      : 'Connection problem: ' + (info.error || 'see status panel');
+    result.append(h);
+  }
+}
+testConnection();
+</script>
+{% endblock %}

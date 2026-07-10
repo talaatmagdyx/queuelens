@@ -72,7 +72,8 @@ async def _run_action(
     try:
         result = await operation()
     except Exception as error:
-        OPERATION_SECONDS.labels(action=action).observe(time.perf_counter() - started_at)
+        elapsed_ms = round((time.perf_counter() - started_at) * 1000)
+        OPERATION_SECONDS.labels(action=action).observe(elapsed_ms / 1000)
         ACTIONS.labels(action=action, result="failed").inc()
         await audit.record(
             AuditEntry(
@@ -83,6 +84,7 @@ async def _run_action(
                 message_fingerprint=fingerprint,
                 result="failed",
                 error_message=str(error),
+                metadata={"duration_ms": elapsed_ms},
             )
         )
         if isinstance(error, LookupError):
@@ -103,7 +105,8 @@ async def _run_action(
         if isinstance(error, ValueError):
             raise HTTPException(status_code=400, detail=str(error)) from error
         raise HTTPException(status_code=502, detail="Message operation failed") from error
-    OPERATION_SECONDS.labels(action=action).observe(time.perf_counter() - started_at)
+    elapsed_ms = round((time.perf_counter() - started_at) * 1000)
+    OPERATION_SECONDS.labels(action=action).observe(elapsed_ms / 1000)
     ACTIONS.labels(action=action, result="success").inc()
     await audit.record(
         AuditEntry(
@@ -113,6 +116,7 @@ async def _run_action(
             source_queue=source_queue,
             message_fingerprint=fingerprint,
             result="success",
+            metadata={"duration_ms": elapsed_ms},
         )
     )
     return result

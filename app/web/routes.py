@@ -134,9 +134,63 @@ async def audit_log(
     request: Request,
     _username: str = Depends(get_current_username),
 ) -> HTMLResponse:
-    events = await request.app.state.audit_repository.list(limit=100)
+    events = await request.app.state.audit_repository.list(limit=500)
+    results = [str(event["result"]) for event in events]
+    succeeded = results.count("success")
+    failed = results.count("failed") + results.count("partial")
+    outcomes = succeeded + failed
     return templates.TemplateResponse(
         request=request,
         name="audit.html",
-        context={"events": events},
+        context={
+            "events": events,
+            "stats": {
+                "total": len(events),
+                "succeeded": succeeded,
+                "failed": failed,
+                "success_rate": round(100 * succeeded / outcomes, 1) if outcomes else None,
+                "users": len({event["username"] for event in events}),
+            },
+        },
+    )
+
+
+@router.get("/config", response_class=HTMLResponse)
+async def configuration(
+    request: Request,
+    _username: str = Depends(get_current_username),
+) -> HTMLResponse:
+    settings = request.app.state.settings
+    amqp = urlparse(settings.rabbitmq_url)
+    return templates.TemplateResponse(
+        request=request,
+        name="config.html",
+        context={
+            "connection": {
+                "Management API URL": settings.rabbitmq_management_url,
+                "AMQP host": f"{amqp.hostname or 'rabbitmq'}"
+                + (f":{amqp.port}" if amqp.port else ""),
+                "Virtual host": settings.rabbitmq_vhost,
+                "AMQP user": amqp.username or "guest",
+                "Management user": settings.rabbitmq_management_username,
+                "Operation timeout": f"{settings.rabbitmq_operation_timeout_seconds:g}s",
+            },
+            "limits": {
+                "Message preview limit": settings.max_preview_messages,
+                "Payload display limit": f"{settings.max_message_size_bytes} B",
+                "Re-fetch window": settings.refetch_window_size,
+                "Bulk scan window": settings.max_bulk_size,
+                "Bulk dry-run TTL": f"{settings.bulk_dry_run_ttl_seconds}s",
+            },
+            "masking": {
+                "Masking enabled": "yes" if settings.masking_enabled else "no",
+                "Masked fields": ", ".join(settings.masked_field_names) or "—",
+            },
+            "general": {
+                "Application": settings.app_name,
+                "Environment": settings.environment,
+                "Auth enabled": "yes" if settings.auth_enabled else "no",
+                "Audit store": settings.database_url.split("://")[0],
+            },
+        },
     )
