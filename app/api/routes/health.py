@@ -62,6 +62,8 @@ async def exchanges(
         "exchanges": [
             {"name": item.get("name", ""), "type": item.get("type", "direct")}
             for item in raw
+            # internal exchanges (e.g. amq.rabbitmq.trace) refuse direct publishes
+            if not item.get("internal", False)
         ]
     }
 

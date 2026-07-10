@@ -382,3 +382,28 @@ async def test_config_api_is_read_only_and_never_leaks_secrets(tmp_path) -> None
     assert "password" in body["masked_fields"]
     assert "super-secret-pw" not in response.text
     assert "mgmt-secret" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_exchanges_api_hides_internal_exchanges(tmp_path) -> None:
+    app = create_app(
+        Settings(auth_enabled=False, database_url=f"sqlite+aiosqlite:///{tmp_path}/e.db")
+    )
+
+    class FakeManagementClient:
+        async def list_exchanges(self) -> list[dict[str, object]]:
+            return [
+                {"name": "", "type": "direct"},
+                {"name": "amq.topic", "type": "topic", "internal": False},
+                {"name": "amq.rabbitmq.trace", "type": "topic", "internal": True},
+            ]
+
+    app.state.management_client = FakeManagementClient()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/exchanges")
+
+    assert response.status_code == 200
+    names = [e["name"] for e in response.json()["exchanges"]]
+    assert "amq.topic" in names
+    assert "amq.rabbitmq.trace" not in names
