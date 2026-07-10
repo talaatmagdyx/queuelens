@@ -1,7 +1,7 @@
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from aio_pika.exceptions import DeliveryError
 from aiormq.exceptions import ChannelNotFoundEntity
@@ -209,3 +209,105 @@ async def delete(
             fingerprint=body.fingerprint,
         ),
     )
+
+
+class PublishRequest(BaseModel):
+    exchange: str = ""  # "" publishes via the default exchange straight to a queue
+    routing_key: str = Field(min_length=1)
+    payload: str = Field(max_length=1_048_576)
+    mark_test: bool = True
+    confirm: bool = False
+
+
+@router.post("/publish")
+async def publish(
+    request: Request,
+    body: PublishRequest,
+    username: str = Depends(get_current_username),
+) -> dict[str, object]:
+    """Publish a hand-written test message (Composer). Mandatory publish — unroutable
+    messages raise instead of being dropped, and every attempt is audited."""
+    import json as jsonlib
+
+    from aio_pika import Message
+
+    if not body.confirm:
+        raise HTTPException(status_code=400, detail="Publish confirmation is required")
+    try:
+        jsonlib.loads(body.payload)
+        content_type = "application/json"
+    except ValueError:
+        content_type = "text/plain"
+    headers: dict[str, Any] = {
+        "x-queuelens-published-by": username,
+        "x-queuelens-published-at": datetime.now(UTC).isoformat(),
+    }
+    if body.mark_test:
+        headers["x-queuelens-test"] = True
+    target = (
+        ReplayTarget(type="exchange", exchange=body.exchange, routing_key=body.routing_key)
+        if body.exchange
+        else ReplayTarget(type="queue", queue=body.routing_key)
+    )
+    target_fields: dict[str, str | None] = {
+        "target_type": target.type,
+        "target_queue": target.queue,
+        "target_exchange": target.exchange,
+        "target_routing_key": target.routing_key,
+    }
+    audit = request.app.state.audit_repository
+
+    async def _record(result: str, error: str | None = None, **meta: object) -> None:
+        await audit.record(
+            AuditEntry(
+                username=username,
+                action="publish",
+                timestamp=datetime.now(UTC),
+                result=result,
+                error_message=error,
+                metadata={"content_type": content_type, "test": body.mark_test, **meta},
+                **target_fields,
+            )
+        )
+
+    started_at = time.perf_counter()
+    try:
+        connection = request.app.state.rabbitmq_connection
+        async with connection.channel() as channel:
+            message = Message(
+                body=body.payload.encode("utf-8"),
+                headers=headers,
+                content_type=content_type,
+            )
+            if body.exchange:
+                exchange = await channel.get_exchange(body.exchange, ensure=True)
+                await exchange.publish(message, routing_key=body.routing_key)
+            else:
+                await cast(Any, channel).declare_queue(body.routing_key, passive=True)
+                await channel.default_exchange.publish(message, routing_key=body.routing_key)
+    except Exception as error:
+        elapsed_ms = round((time.perf_counter() - started_at) * 1000)
+        ACTIONS.labels(action="publish", result="failed").inc()
+        await _record("failed", str(error), duration_ms=elapsed_ms)
+        if isinstance(error, ChannelNotFoundEntity):
+            raise HTTPException(
+                status_code=404,
+                detail="Target not found; check the exchange and routing key / queue",
+            ) from error
+        if isinstance(error, DeliveryError):
+            raise HTTPException(
+                status_code=400,
+                detail="Message was unroutable; the exchange does not route this key to any queue",
+            ) from error
+        if isinstance(error, ValueError):
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        raise HTTPException(status_code=502, detail="Publish failed") from error
+    elapsed_ms = round((time.perf_counter() - started_at) * 1000)
+    ACTIONS.labels(action="publish", result="success").inc()
+    await _record("success", duration_ms=elapsed_ms, headers_added=headers)
+    return {
+        "status": "success",
+        "content_type": content_type,
+        "target": {"exchange": body.exchange or None, "routing_key": body.routing_key},
+        "duration_ms": elapsed_ms,
+    }

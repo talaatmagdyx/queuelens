@@ -78,7 +78,7 @@
           </div>
           <DataTable rowKey="name" sortKey="messages"
             columns={[
-              { key: 'name', label: 'Queue Name', render: (r) => <a href="#" onClick={(e) => { e.preventDefault(); nav('messages', { queue: r.name }); }} style={{ color: 'var(--text-link)', fontWeight: 600, textDecoration: 'none' }}>{r.name}</a> },
+              { key: 'name', label: 'Queue Name', render: (r) => <a href="#" onClick={(e) => { e.preventDefault(); nav('queuedetail', { queue: r.name }); }} style={{ color: 'var(--text-link)', fontWeight: 600, textDecoration: 'none' }}>{r.name}</a> },
               { key: 'type', label: 'Type', render: (r) => (
                 <span style={{ display: 'inline-flex', gap: 6 }}>
                   <Badge tone={TYPE_TONE[r.type]}>{r.type}</Badge>

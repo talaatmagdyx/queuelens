@@ -1,3 +1,4 @@
+from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Request
@@ -92,6 +93,72 @@ async def config(
         "masked_fields": list(settings.masked_field_names),
         "replay_targets": sorted(settings.replay_targets),
     }
+
+
+@router.get("/api/topology")
+async def topology(
+    request: Request,
+    _username: str = Depends(get_current_username),
+) -> dict[str, object]:
+    """Exchanges, bindings, and queues (with dead-letter args) for the topology view."""
+    client = request.app.state.management_client
+    exchanges_raw = await client.list_exchanges()
+    bindings_raw = await client.list_bindings()
+    queues_raw = await client.list_queues()
+    return {
+        "exchanges": [
+            {"name": e.get("name", ""), "type": e.get("type", "direct")}
+            for e in exchanges_raw
+            if e.get("name") and not e.get("internal", False)
+        ],
+        "bindings": [
+            {
+                "source": b.get("source", ""),
+                "destination": b.get("destination", ""),
+                "destination_type": b.get("destination_type", "queue"),
+                "routing_key": b.get("routing_key", ""),
+            }
+            for b in bindings_raw
+        ],
+        "queues": [
+            {
+                "name": q.get("name", ""),
+                "consumers": q.get("consumers", 0),
+                "messages": q.get("messages", 0),
+                "dlx": (q.get("arguments") or {}).get("x-dead-letter-exchange"),
+                "dlx_routing_key": (q.get("arguments") or {}).get("x-dead-letter-routing-key"),
+            }
+            for q in queues_raw
+        ],
+    }
+
+
+@router.get("/api/alert-rules")
+async def alert_rules(
+    _username: str = Depends(get_current_username),
+) -> dict[str, object]:
+    """Read-only view of the packaged Prometheus alert rules (deploy/prometheus/alerts.yml)."""
+    import yaml
+
+    path = Path(__file__).resolve().parents[3] / "deploy" / "prometheus" / "alerts.yml"
+    if not path.exists():
+        return {"rules": [], "source": None}
+    parsed = yaml.safe_load(path.read_text())
+    rules = []
+    for group in (parsed or {}).get("groups", []):
+        for rule in group.get("rules", []):
+            annotations = rule.get("annotations") or {}
+            rules.append(
+                {
+                    "name": rule.get("alert", ""),
+                    "expr": rule.get("expr", ""),
+                    "for": rule.get("for", "0m"),
+                    "severity": (rule.get("labels") or {}).get("severity", "warning"),
+                    "summary": annotations.get("summary", ""),
+                    "description": annotations.get("description", ""),
+                }
+            )
+    return {"rules": rules, "source": "deploy/prometheus/alerts.yml"}
 
 
 @router.get("/api/broker/test")

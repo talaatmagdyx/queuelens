@@ -5,6 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 
 COPY pyproject.toml README.md ./
 COPY app ./app
+COPY deploy/prometheus ./deploy/prometheus
 RUN pip install --no-cache-dir . && mkdir -p /app/data
 
 EXPOSE 8000

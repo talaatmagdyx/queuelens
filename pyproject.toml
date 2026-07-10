@@ -16,6 +16,7 @@ dependencies = [
   "prometheus-client>=0.21,<1",
   "pydantic-settings>=2.6,<3",
   "python-multipart>=0.0.20,<1",
+  "pyyaml>=6,<7",
   "sqlalchemy[asyncio]>=2.0,<3",
   "uvicorn[standard]>=0.32,<1",
 ]
@@ -26,6 +27,7 @@ dev = [
   "pytest>=8.3,<9",
   "pytest-asyncio>=0.24,<1",
   "ruff>=0.8,<1",
+  "types-pyyaml>=6,<7",
 ]
 
 [tool.setuptools.packages.find]

@@ -407,3 +407,109 @@ async def test_exchanges_api_hides_internal_exchanges(tmp_path) -> None:
     names = [e["name"] for e in response.json()["exchanges"]]
     assert "amq.topic" in names
     assert "amq.rabbitmq.trace" not in names
+
+
+@pytest.mark.asyncio
+async def test_topology_and_alert_rules_endpoints(tmp_path) -> None:
+    app = create_app(
+        Settings(auth_enabled=False, database_url=f"sqlite+aiosqlite:///{tmp_path}/t.db")
+    )
+
+    class FakeManagementClient:
+        async def list_exchanges(self) -> list[dict[str, object]]:
+            return [
+                {"name": "", "type": "direct"},
+                {"name": "orders.exchange", "type": "topic"},
+                {"name": "amq.rabbitmq.trace", "type": "topic", "internal": True},
+            ]
+
+        async def list_bindings(self) -> list[dict[str, object]]:
+            return [
+                {"source": "orders.exchange", "destination": "orders.q",
+                 "destination_type": "queue", "routing_key": "orders.#"},
+            ]
+
+        async def list_queues(self) -> list[dict[str, object]]:
+            return [
+                {
+                    "name": "orders.q", "consumers": 2, "messages": 5,
+                    "arguments": {
+                        "x-dead-letter-exchange": "",
+                        "x-dead-letter-routing-key": "orders.dlq",
+                    },
+                },
+            ]
+
+    app.state.management_client = FakeManagementClient()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        topo = await client.get("/api/topology")
+        rules = await client.get("/api/alert-rules")
+
+    assert topo.status_code == 200
+    body = topo.json()
+    # internal + default exchanges are hidden
+    assert [e["name"] for e in body["exchanges"]] == ["orders.exchange"]
+    assert body["bindings"][0]["routing_key"] == "orders.#"
+    assert body["queues"][0]["dlx_routing_key"] == "orders.dlq"
+    assert rules.status_code == 200
+    names = [r["name"] for r in rules.json()["rules"]]
+    assert "QueueLensBrokerDown" in names
+    assert all(r["severity"] in ("critical", "warning", "info") for r in rules.json()["rules"])
+
+
+@pytest.mark.asyncio
+async def test_publish_requires_confirm_and_audits_success(tmp_path) -> None:
+    from contextlib import asynccontextmanager
+
+    app = create_app(
+        Settings(auth_enabled=False, database_url=f"sqlite+aiosqlite:///{tmp_path}/p.db")
+    )
+    await app.state.database.start()
+    published: list[tuple[bytes, str]] = []
+
+    class FakeExchange:
+        async def publish(self, message: object, routing_key: str) -> None:
+            published.append((message.body, routing_key))  # type: ignore[attr-defined]
+
+    class FakeChannel:
+        default_exchange = FakeExchange()
+
+        async def declare_queue(self, name: str, **_kwargs: object) -> None:
+            if name == "ghost.q":
+                from aiormq.exceptions import ChannelNotFoundEntity
+
+                raise ChannelNotFoundEntity(f"no queue '{name}'")
+
+    class FakeConnection:
+        @asynccontextmanager
+        async def channel(self):
+            yield FakeChannel()
+
+    app.state.rabbitmq_connection = FakeConnection()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        unconfirmed = await client.post(
+            "/api/messages/publish",
+            json={"routing_key": "orders.q", "payload": "{}"},
+        )
+        ok = await client.post(
+            "/api/messages/publish",
+            json={"routing_key": "orders.q", "payload": '{"n": 1}', "confirm": True},
+        )
+        missing = await client.post(
+            "/api/messages/publish",
+            json={"routing_key": "ghost.q", "payload": "{}", "confirm": True},
+        )
+        audit = await client.get("/api/audit?limit=5")
+    await app.state.database.close()
+
+    assert unconfirmed.status_code == 400
+    assert ok.status_code == 200
+    assert ok.json()["content_type"] == "application/json"
+    assert published == [(b'{"n": 1}', "orders.q")]
+    assert missing.status_code == 404
+    events = audit.json()["events"]
+    assert events[0]["action"] == "publish" and events[0]["result"] == "failed"
+    assert events[1]["action"] == "publish" and events[1]["result"] == "success"
+    assert events[1]["target_queue"] == "orders.q"

@@ -58,6 +58,7 @@ window.QL.screens = window.QL.screens || {};
       && e.metadata.headers_added['x-queuelens-action'];
     if (stamped === 'replay_move' || stamped === 'replay_copy') return stamped;
     var action = (e.action || '').replace(/^bulk_/, '');
+    if (action === 'publish') return 'publish';
     if (action === 'replay') {
       return (e.metadata && e.metadata.mode) === 'copy' ? 'replay_copy' : 'replay_move';
     }
@@ -120,6 +121,40 @@ window.QL.screens = window.QL.screens || {};
   window.QL.fetchQueueInfo = function (name) {
     var result = getJson('/api/queues/' + encodeURIComponent(name));
     return result ? result.queue : null;
+  };
+
+  window.QL.fetchTopology = function () {
+    return getJson('/api/topology') || { exchanges: [], bindings: [], queues: [] };
+  };
+
+  window.QL.fetchAlertRules = function () {
+    var result = getJson('/api/alert-rules') || {};
+    return { rules: result.rules || [], source: result.source || null };
+  };
+
+  // Messages currently held in parking queues, with park metadata from headers.
+  window.QL.fetchParked = function () {
+    var rows = [];
+    var all = (getJson('/api/queues') || { queues: [] }).queues;
+    all.filter(function (q) { return q.kind === 'parking'; }).forEach(function (q) {
+      var msgs = (getJson('/api/queues/' + encodeURIComponent(q.name) + '/messages') || {}).messages || [];
+      msgs.forEach(function (m) {
+        var h = m.headers || {};
+        rows.push({
+          id: m.message_id || m.fingerprint.slice(0, 12),
+          fingerprint: m.fingerprint,
+          parkingQueue: q.name,
+          source: h['x-queuelens-source-queue'] || q.name.replace(/\.parking$/, ''),
+          by: h['x-queuelens-replayed-by'] || h['x-queuelens-user'] || '\u2014',
+          at: h['x-queuelens-parked-at'] ? String(h['x-queuelens-parked-at']).slice(0, 19).replace('T', ' ') : '\u2014',
+          age: h['x-queuelens-parked-at'] ? rel(String(h['x-queuelens-parked-at'])) : '\u2014',
+          type: (m.payload_format || 'json').toUpperCase(),
+          size: human(m.payload_size),
+          msg: mapMessage(m),
+        });
+      });
+    });
+    return rows;
   };
 
   window.QL.fetchConfig = function () { return getJson('/api/config') || {}; };

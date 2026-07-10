@@ -17,6 +17,7 @@
     replay_copy: { icon: 'copy', color: 'var(--blue-600)', label: 'Replay (Copy)' },
     park: { icon: 'flag', color: 'var(--purple-600)', label: 'Park' },
     delete: { icon: 'trash-2', color: 'var(--red-600)', label: 'Delete' },
+    publish: { icon: 'send', color: 'var(--green-700)', label: 'Publish (Test)' },
   };
   const RESULT_TONE = { Success: 'success', Started: 'warning', Failed: 'danger' };
   const RESULT_ICON = { Success: { n: 'check-circle', c: 'var(--green-600)' }, Started: { n: 'clock', c: 'var(--amber-600)' }, Failed: { n: 'x-circle', c: 'var(--red-600)' } };
@@ -47,7 +48,7 @@
           ) : (
           <DataTable rowKey="name" sortKey="messages"
             columns={[
-              { key: 'name', label: 'Queue', render: (r) => <a href="#" onClick={(e) => { e.preventDefault(); nav('messages', { queue: r.name }); }} style={{ color: 'var(--text-link)', fontWeight: 600, textDecoration: 'none' }}>{r.name}</a> },
+              { key: 'name', label: 'Queue', render: (r) => <a href="#" onClick={(e) => { e.preventDefault(); nav('queuedetail', { queue: r.name }); }} style={{ color: 'var(--text-link)', fontWeight: 600, textDecoration: 'none' }}>{r.name}</a> },
               { key: 'type', label: 'Type', render: (r) => (
                 <span style={{ display: 'inline-flex', gap: 6 }}>
                   <Badge tone={TYPE_TONE[r.type]}>{r.type}</Badge>
