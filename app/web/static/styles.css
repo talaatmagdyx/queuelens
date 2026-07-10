@@ -19,3 +19,11 @@ pre { overflow: auto; background: #f0f4f8; padding: 1rem; border-radius: .25rem;
 .replay-target input { border: 1px solid #bcccdc; border-radius: .25rem; padding: .35rem .5rem; }
 button { padding: .5rem .9rem; border: 1px solid #bcccdc; border-radius: .25rem; background: white; cursor: pointer; }
 button:hover { background: #f0f4f8; }
+.action-result { margin-top: 1rem; padding: 1rem 1.25rem; border-radius: .375rem; border: 1px solid; }
+.action-result h3 { margin: 0 0 .5rem; font-size: 1rem; text-transform: capitalize; }
+.action-result p { margin: .25rem 0; }
+.action-result.success { background: #eefbf3; border-color: #9ae2b8; color: #14532d; }
+.action-result.error { background: #fdf1f1; border-color: #f0b4b4; color: #7f1d1d; }
+.action-links { margin-top: .6rem !important; }
+.action-links a { margin-right: 1rem; font-weight: 600; color: inherit; }
+.action-links .muted { color: inherit; opacity: .75; }
