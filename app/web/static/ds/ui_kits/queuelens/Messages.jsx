@@ -68,7 +68,7 @@
     const [confirmDelete, setConfirmDelete] = React.useState(false);
     const [view, setView] = React.useState(null);
     const [deletedNote, setDeletedNote] = React.useState(0);
-    const [search, setSearch] = React.useState('');
+    const [search, setSearch] = React.useState(linked ? linked.fingerprint.slice(0, 16) : '');
     const [typeFilter, setTypeFilter] = React.useState('All Payload Types');
     const [deleting, setDeleting] = React.useState(false);
     const queueRow = D.queues.find((q) => q.name === queue) || { messages: rows.length, ready: rows.length, consumers: 0, rate: null, last: '—', type: 'DLQ' };
@@ -112,7 +112,7 @@
       if (view && !VIEWS[view](r)) return false;
       if (typeFilter !== 'All Payload Types' && r.type !== typeFilter) return false;
       if (search) {
-        const haystack = (r.id + ' ' + r.payloadText + ' ' + r.headersText).toLowerCase();
+        const haystack = (r.id + ' ' + r.fingerprint + ' ' + r.payloadText + ' ' + r.headersText).toLowerCase();
         if (!haystack.includes(search.toLowerCase())) return false;
       }
       return true;
