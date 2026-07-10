@@ -101,6 +101,8 @@ window.QL.screens = window.QL.screens || {};
       preview: JSON.stringify(m.payload).slice(0, 30) + '…',
       payloadText: typeof m.payload === 'string' ? m.payload : JSON.stringify(m.payload, null, 2),
       headersText: Object.keys(m.headers || {}).length ? JSON.stringify(m.headers, null, 2) : '(no headers)',
+      propsText: Object.keys(m.properties || {}).length
+        ? JSON.stringify(m.properties, null, 2) : '(no properties)',
       xdeathList: mapXDeath(m.x_death),
       xdeathRaw: m.x_death || [],
     };

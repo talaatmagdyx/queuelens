@@ -72,7 +72,7 @@
           { label: 'Size', value: msg.size },
           { label: 'Payload Type', value: <Badge tone={PAYLOAD_TONE[msg.type] || 'neutral'}>{msg.type}</Badge> },
           { label: 'x-death Count', value: String(msg.xdeath) },
-          { label: 'Source Queue', value: <Badge tone="danger" uppercase={false}>payments.retry.dlq</Badge> },
+          { label: 'Source Queue', value: <Badge tone="danger" uppercase={false}>{msg.queue || '\u2014'}</Badge> },
         ]} />
         <div style={{ marginTop: 16 }}>
           <Tabs active={tab} onChange={setTab} tabs={[
@@ -80,8 +80,8 @@
             { id: 'props', label: 'Properties' }, { id: 'xdeath', label: 'x-death' }]} style={{ gap: 18 }} />
           <div style={{ marginTop: 12 }}>
             {tab === 'payload' && <CodeBlock code={payload} copy maxHeight={280} />}
-            {tab === 'headers' && <CodeBlock code={'x-death: [3 entries]\nx-first-death-exchange: email.exchange\nx-first-death-queue: email.retry\nx-first-death-reason: rejected'} maxHeight={280} />}
-            {tab === 'props' && <CodeBlock code={'content_type: application/json\ndelivery_mode: 2 (persistent)\npriority: 0\nmessage_id: a1b2c3d4-e5f6-11ee'} maxHeight={280} />}
+            {tab === 'headers' && <CodeBlock code={msg.headersText || '(no headers)'} maxHeight={280} />}
+            {tab === 'props' && <CodeBlock code={msg.propsText || '(no properties)'} maxHeight={280} />}
             {tab === 'xdeath' && <XDeathTable rows={xdeath} />}
           </div>
         </div>
