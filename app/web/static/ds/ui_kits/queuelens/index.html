@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <title>QueueLens</title>
-<link rel="stylesheet" href="../../styles.css">
+<link rel="stylesheet" href="../../styles.css?v=0.5.0">
 <script src="/static/vendor/react.production.min.js"></script>
 <script src="/static/vendor/react-dom.production.min.js"></script>
 <script src="/static/vendor/babel.min.js"></script>
 <script src="/static/vendor/lucide.js"></script>
-<script src="../../ds-loader.js"></script>
+<script src="../../ds-loader.js?v=0.5.0"></script>
 <style>
   html, body { margin: 0; background: var(--slate-50); font-family: var(--font-ui); }
   * { box-sizing: border-box; }
@@ -20,18 +20,19 @@
 <script>
 window.__loadDS('../../');
 window.QL = window.QL || {};
+setTimeout(function () { location.reload(); }, 30000); // auto-refresh: data layer is fetched at load
 </script>
-<script src="data.js"></script>
-<script type="text/babel" src="shared.jsx"></script>
-<script type="text/babel" src="Login.jsx"></script>
-<script type="text/babel" src="Dashboard.jsx"></script>
-<script type="text/babel" src="Queues.jsx"></script>
-<script type="text/babel" src="Messages.jsx"></script>
-<script type="text/babel" src="Wizard.jsx"></script>
-<script type="text/babel" src="AuditLog.jsx"></script>
-<script type="text/babel" src="Configuration.jsx"></script>
-<script type="text/babel" src="Users.jsx"></script>
-<script type="text/babel" src="Notifications.jsx"></script>
+<script src="data.js?v=0.5.0"></script>
+<script type="text/babel" src="shared.jsx?v=0.5.0"></script>
+<script type="text/babel" src="Login.jsx?v=0.5.0"></script>
+<script type="text/babel" src="Dashboard.jsx?v=0.5.0"></script>
+<script type="text/babel" src="Queues.jsx?v=0.5.0"></script>
+<script type="text/babel" src="Messages.jsx?v=0.5.0"></script>
+<script type="text/babel" src="Wizard.jsx?v=0.5.0"></script>
+<script type="text/babel" src="AuditLog.jsx?v=0.5.0"></script>
+<script type="text/babel" src="Configuration.jsx?v=0.5.0"></script>
+<script type="text/babel" src="Users.jsx?v=0.5.0"></script>
+<script type="text/babel" src="Notifications.jsx?v=0.5.0"></script>
 <script type="text/babel">
 const { SidebarNav, TopBar, Alert } = window.__NS;
 const S = window.QL.screens;
@@ -122,7 +123,7 @@ function App() {
         user={{ initials: (window.QL.user || 'ad').slice(0, 2).toUpperCase(), name: window.QL.user || 'admin', role: 'Administrator' }}
       />
       <div style={{ flex: 1, minWidth: 0, position: 'relative', background: 'var(--surface-page)' }}>
-        <TopBar userName={window.QL.user || 'admin'} notifications={window.QL.alertCount || 0} onBell={() => setBellOpen(!bellOpen)}
+        <TopBar version={B.api} userName={window.QL.user || 'admin'} notifications={window.QL.alertCount || 0} onBell={() => setBellOpen(!bellOpen)}
           envs={ENVS} activeEnv={envId} onEnvChange={switchEnv}
           vhosts={envObj.vhosts} vhost={vhost} onVhostChange={setVhost}
           brokerLive={brokerLive} onBrokerToggle={() => setBrokerLive(!brokerLive)}

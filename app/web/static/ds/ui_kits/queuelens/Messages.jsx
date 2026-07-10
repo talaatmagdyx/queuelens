@@ -15,14 +15,24 @@
     );
   }
 
-  const JOURNEY = [
-    { t: '10:24:15', label: 'Landed in payments.retry.dlq', icon: 'alert-triangle', color: 'var(--red-600)', sub: 'x-death: maxlen (email.retry)' },
-    { t: '10:22:40', label: 'Rejected by consumer', icon: 'x-circle', color: 'var(--red-600)', sub: 'email.processed · requeue=false' },
-    { t: '10:22:31', label: 'TTL expired in email.retry', icon: 'clock', color: 'var(--amber-600)', sub: 'ttl 30s' },
-    { t: '10:21:12', label: 'Published to email.exchange', icon: 'send', color: 'var(--blue-600)', sub: 'rk email.processed · orders-api' },
-  ];
+  const REASON_META = {
+    rejected: { icon: 'x-circle', color: 'var(--red-600)', label: 'Rejected by consumer' },
+    expired: { icon: 'clock', color: 'var(--amber-600)', label: 'TTL expired' },
+    maxlen: { icon: 'alert-triangle', color: 'var(--amber-600)', label: 'Queue length limit hit' },
+    delivery_limit: { icon: 'alert-triangle', color: 'var(--red-600)', label: 'Delivery limit reached' },
+  };
 
-  function Journey() {
+  function Journey({ msg }) {
+    const events = (msg.xdeathList || []).map((d) => {
+      const meta = REASON_META[d.reason] || { icon: 'corner-down-right', color: 'var(--slate-500)', label: d.reason };
+      return { t: d.time, label: meta.label + ' in ' + d.queue, icon: meta.icon, color: meta.color, sub: 'x-death: ' + d.reason + ' · count ' + d.count };
+    });
+    if (!events.length) {
+      return <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '8px 2px' }}>
+        No dead-letter history recorded for this message — it was published to this queue directly.
+      </div>;
+    }
+    const JOURNEY = events;
     return (
       <div style={{ padding: '4px 0 0 4px' }}>
         {JOURNEY.map((e, i) => (
@@ -52,24 +62,60 @@
     const [confirmDelete, setConfirmDelete] = React.useState(false);
     const [view, setView] = React.useState(null);
     const [deletedNote, setDeletedNote] = React.useState(0);
-    const msg = rows.find((m) => m.id === selected) || rows[0] || D.messages[0];
+    const [search, setSearch] = React.useState('');
+    const [typeFilter, setTypeFilter] = React.useState('All Payload Types');
+    const [deleting, setDeleting] = React.useState(false);
+    const queueRow = D.queues.find((q) => q.name === queue) || { messages: rows.length, ready: rows.length, consumers: 0, rate: null, last: '—', type: 'DLQ' };
+    const QUEUE_TONE = { DLQ: 'danger', PARKING: 'success', NORMAL: 'info' };
+    const msg = rows.find((m) => m.id === selected) || rows[0] || D.messages[0] || {};
     const allChecked = rows.length > 0 && checked.length === rows.length;
     const toggle = (id) => { setConfirmDelete(false); setChecked((c) => c.includes(id) ? c.filter((x) => x !== id) : [...c, id]); };
     const toggleAll = () => { setConfirmDelete(false); setChecked(allChecked ? [] : rows.map((r) => r.id)); };
     const clearSel = () => { setChecked([]); setConfirmDelete(false); };
     const bulkNav = (mode) => nav('replay', { msg: rows.find((r) => r.id === checked[0]) || msg, mode, count: checked.length });
-    const doDelete = () => {
-      const del = rows.filter((r) => checked.includes(r.id));
-      window.QL.trash = [
-        ...del.map((r) => ({ id: r.id, source: queue, by: 'admin', at: 'Just now', expires: '24h 0m', size: r.size, type: r.type })),
-        ...(window.QL.trash || []),
-      ];
-      setRows((rs) => rs.filter((r) => !checked.includes(r.id)));
-      setDeletedNote(del.length);
-      clearSel();
+    const api = async (path, body) => {
+      const response = await fetch(path, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      let detail = {};
+      try { detail = await response.json(); } catch (e) {}
+      if (!response.ok) throw new Error(detail.detail || ('HTTP ' + response.status));
+      return detail;
+    };
+    const doDelete = async () => {
+      // Real deletion through the bulk API: dry-run on exactly the selected
+      // fingerprints, then execute the returned one-shot batch.
+      const fingerprints = rows.filter((r) => checked.includes(r.id)).map((r) => r.fingerprint);
+      setDeleting(true);
+      try {
+        const preview = await api('/api/messages/bulk/dry-run',
+          { source_queue: queue, action: 'delete', fingerprints });
+        await api('/api/messages/bulk/execute', { batch_id: preview.batch_id, confirm: true });
+        setRows((rs) => rs.filter((r) => !checked.includes(r.id)));
+        setDeletedNote(fingerprints.length);
+        clearSel();
+      } catch (error) {
+        window.alert('Delete failed: ' + error.message);
+      } finally { setDeleting(false); }
+    };
+    const deleteOne = async () => {
+      if (!window.confirm('Delete this message from ' + queue + '? This cannot be undone.')) return;
+      try {
+        await api('/api/messages/delete', { source_queue: queue, fingerprint: msg.fingerprint, confirm: true });
+        setRows((rs) => rs.filter((r) => r.id !== msg.id));
+        setDeletedNote(1);
+      } catch (error) { window.alert('Delete failed: ' + error.message); }
     };
     const VIEWS = { 'x-death ≥ 3': (r) => r.xdeath >= 3, 'BASE64 payloads': (r) => r.type === 'BASE64', 'JSON only': (r) => r.type === 'JSON' };
-    const visibleRows = view ? rows.filter(VIEWS[view]) : rows;
+    const visibleRows = rows.filter((r) => {
+      if (view && !VIEWS[view](r)) return false;
+      if (typeFilter !== 'All Payload Types' && r.type !== typeFilter) return false;
+      if (search) {
+        const haystack = (r.id + ' ' + r.payloadText + ' ' + r.headersText).toLowerCase();
+        if (!haystack.includes(search.toLowerCase())) return false;
+      }
+      return true;
+    });
     return (
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -80,28 +126,29 @@
           <PageHeader title="Messages"
             after={<span style={{ display: 'inline-flex', gap: 8 }}>
               <span style={{ padding: '5px 12px', borderRadius: 8, background: 'var(--slate-100)', fontSize: 13.5, fontWeight: 600, color: 'var(--slate-700)' }}>{queue}</span>
-              <StatusPill tone="danger" dot>DLQ · retry</StatusPill>
+              <StatusPill tone={QUEUE_TONE[queueRow.type] || 'info'} dot>{queueRow.type}{queueRow.retry ? ' · retry' : ''}</StatusPill>
             </span>}
             subtitle="Browse messages safely. Messages are fetched with requeue (non-destructive)." />
 
           <Card pad={false} style={{ marginBottom: 18 }}>
             <div style={{ display: 'flex', divide: '1px' }}>
-              <Stat label="Messages Ready" value="121" />
-              <Stat label="Consumers" value="0" />
-              <Stat label="Message Rate (in)" value="0.12" unit="/s" />
-              <Stat label="Last Message" value="2m ago" />
-              <Stat label="Preview Limit" value="100" info />
+              <Stat label="Messages Ready" value={String(queueRow.ready)} />
+              <Stat label="Consumers" value={String(queueRow.consumers)} />
+              <Stat label="Message Rate (in)" value={queueRow.rate != null ? String(queueRow.rate) : '—'} unit={queueRow.rate != null ? '/s' : undefined} />
+              <Stat label="Last Message" value={queueRow.last} />
+              <Stat label="Preview Limit" value={String(rows.length)} info />
             </div>
           </Card>
 
-          <Alert tone="info" style={{ marginBottom: 18 }}>Showing the latest 100 messages (preview limit). More messages may exist.</Alert>
+          {queueRow.messages > rows.length && (
+            <Alert tone="info" style={{ marginBottom: 18 }}>Showing the latest {rows.length} messages (preview limit) of {queueRow.messages} in the queue.</Alert>
+          )}
 
           <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-            <div style={{ flex: 1 }}><SearchInput placeholder="Search in payload, headers…" /></div>
-            <div style={{ width: 170 }}><Select options={['All Payload Types', 'JSON', 'TEXT', 'BASE64']} /></div>
-            <div style={{ width: 120 }}><Select options={['All', 'x-death > 2']} /></div>
-            <Button variant="ghost">Clear Filters</Button>
-            <Button icon="refresh-cw">Refresh</Button>
+            <div style={{ flex: 1 }}><SearchInput placeholder="Search in payload, headers…" value={search} onChange={setSearch} /></div>
+            <div style={{ width: 170 }}><Select options={['All Payload Types', 'JSON', 'TEXT', 'BASE64']} value={typeFilter} onChange={setTypeFilter} /></div>
+            <Button variant="ghost" onClick={() => { setSearch(''); setTypeFilter('All Payload Types'); setView(null); }}>Clear Filters</Button>
+            <Button icon="refresh-cw" onClick={() => location.reload()}>Refresh</Button>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
@@ -118,8 +165,8 @@
 
           {deletedNote > 0 && (
             <Alert tone="info" icon="trash-2" style={{ marginBottom: 18 }}
-              action={<a href="#" onClick={(e) => { e.preventDefault(); nav('parking'); }} style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-link)', textDecoration: 'none' }}>View Recently Deleted</a>}>
-              {deletedNote} {deletedNote === 1 ? 'message' : 'messages'} moved to Recently Deleted — restorable for 24 hours.
+              action={<a href="#" onClick={(e) => { e.preventDefault(); nav('audit'); }} style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-link)', textDecoration: 'none' }}>View Audit Log</a>}>
+              {deletedNote} {deletedNote === 1 ? 'message' : 'messages'} deleted permanently. Every deletion is recorded in the audit log.
             </Alert>
           )}
 
@@ -133,7 +180,7 @@
                     <span style={{ fontSize: 12.5, color: 'var(--slate-600)' }}>This cannot be undone. Consider parking instead.</span>
                     <div style={{ flex: 1 }} />
                     <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(false)}>Cancel</Button>
-                    <Button variant="dangerSolid" size="sm" icon="trash-2" onClick={doDelete}>Delete {checked.length}</Button>
+                    <Button variant="dangerSolid" size="sm" icon="trash-2" onClick={doDelete} disabled={deleting}>{deleting ? 'Deleting…' : 'Delete ' + checked.length}</Button>
                   </React.Fragment>
                 ) : (
                   <React.Fragment>
@@ -166,10 +213,9 @@
               ]}
               rows={visibleRows} />
             <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderTop: '1px solid var(--slate-100)' }}>
-              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{view ? `View “${view}” · showing ${visibleRows.length} of ${rows.length} fetched` : `Showing 1 to ${rows.length} of 121 messages`}</span>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{view || search || typeFilter !== 'All Payload Types' ? `Filtered · showing ${visibleRows.length} of ${rows.length} fetched` : `Showing 1 to ${rows.length} of ${queueRow.messages} messages`}</span>
               <div style={{ flex: 1 }} />
-              <Pagination page={1} pageCount={2} />
-              <div style={{ width: 120, marginLeft: 10 }}><Select options={['100 / page', '50 / page', '25 / page']} /></div>
+              <Pagination page={1} pageCount={1} />
             </div>
           </Card>
         </div>
@@ -191,24 +237,28 @@
                 { id: 'payload', label: 'Payload' }, { id: 'headers', label: 'Headers' },
                 { id: 'xdeath', label: 'x-death' }, { id: 'journey', label: 'Journey' }]} style={{ gap: 16 }} />
               <div style={{ marginTop: 12 }}>
-                {tab === 'payload' && <CodeBlock code={D.payload} maxHeight={300} />}
-                {tab === 'headers' && <CodeBlock code={'x-death: [3 entries]\nx-first-death-exchange: email.exchange\nx-first-death-queue: email.retry\nx-first-death-reason: rejected'} maxHeight={300} />}
-                {tab === 'xdeath' && <XDeathTable rows={D.xdeath} />}
-                {tab === 'journey' && <Journey />}
+                {tab === 'payload' && <CodeBlock code={msg.payloadText || '{}'} maxHeight={300} />}
+                {tab === 'headers' && <CodeBlock code={msg.headersText || '(no headers)'} maxHeight={300} />}
+                {tab === 'xdeath' && ((msg.xdeathList || []).length
+                  ? <XDeathTable rows={msg.xdeathList} />
+                  : <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '8px 2px' }}>No x-death entries — this message has never been dead-lettered.</div>)}
+                {tab === 'journey' && <Journey msg={msg} />}
               </div>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 16 }}>
               <Button size="sm" disabled={!canAct} onClick={() => nav('replay', { msg, mode: 'move' })}>Replay (Move)</Button>
               <Button size="sm" variant="secondary" disabled={!canAct} onClick={() => nav('replay', { msg, mode: 'copy' })} style={{ color: 'var(--text-link)' }}>Replay (Copy)</Button>
               <Button size="sm" variant="park" icon="flag" disabled={!canAct} onClick={() => nav('replay', { msg, mode: 'park' })}>Park</Button>
-              <Button size="sm" variant="danger" icon="trash-2" disabled={!canDelete}>Delete</Button>
+              <Button size="sm" variant="danger" icon="trash-2" disabled={!canDelete} onClick={deleteOne}>Delete</Button>
             </div>
             <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--slate-100)' }}>
               <div style={{ display: 'flex', alignItems: 'center', fontSize: 14, fontWeight: 600, color: 'var(--text-heading)' }}>
                 Message Fingerprint <Icon name="chevron-down" size={15} color="var(--slate-400)" style={{ marginLeft: 'auto' }} />
               </div>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginTop: 8, padding: '5px 10px', background: 'var(--slate-50)', border: '1px solid var(--border-default)', borderRadius: 6, fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--slate-700)' }}>
-                b7c9e5d2f4a1c8e7 <Icon name="copy" size={13} color="var(--slate-400)" />
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginTop: 8, padding: '5px 10px', background: 'var(--slate-50)', border: '1px solid var(--border-default)', borderRadius: 6, fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--slate-700)', cursor: 'pointer' }}
+                title="Copy full fingerprint"
+                onClick={() => navigator.clipboard && navigator.clipboard.writeText(msg.fingerprint || '')}>
+                {(msg.fingerprint || '').slice(0, 16)} <Icon name="copy" size={13} color="var(--slate-400)" />
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>x-death Count</div>
               <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--slate-900)', marginTop: 2 }}>{msg.xdeath}</div>

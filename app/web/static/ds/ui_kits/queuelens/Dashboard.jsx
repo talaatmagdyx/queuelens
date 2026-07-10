@@ -27,7 +27,7 @@
       <div>
         <PageHeader title="DLQ Recovery Dashboard" subtitle="Inspect failed RabbitMQ messages and recover them safely." />
         <Alert tone="info" action={<ArrowLink onClick={() => {}}>Learn more</ArrowLink>} style={{ marginBottom: 20 }}>
-          Auto-refresh is ON every 10 seconds&nbsp;&nbsp;·&nbsp;&nbsp;Message preview is limited to 100 per queue&nbsp;&nbsp;·&nbsp;&nbsp;Counts from Management API
+          Auto-refresh is ON every 30 seconds&nbsp;&nbsp;·&nbsp;&nbsp;Message preview is limited to 100 per queue&nbsp;&nbsp;·&nbsp;&nbsp;Counts from Management API
         </Alert>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(215px, 1fr))', gap: 14, marginBottom: 22 }}>
           <StatCard icon="database" tone="info" value={empty ? '0' : '4'} label="DLQ Queues" sublabel="Detected" />

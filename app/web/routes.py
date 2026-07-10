@@ -56,7 +56,16 @@ async def spa(
     return RedirectResponse(url="/static/ds/ui_kits/queuelens/index.html")
 
 
-@router.get("/", response_class=HTMLResponse)
+@router.get("/")
+async def root(
+    _username: str = Depends(get_current_username),
+) -> RedirectResponse:
+    """The design-kit console is the default UI; the server-rendered console
+    stays available at /classic (and its other routes) as a no-JS fallback."""
+    return RedirectResponse(url="/app")
+
+
+@router.get("/classic", response_class=HTMLResponse)
 async def dashboard(
     request: Request,
     _username: str = Depends(get_current_username),

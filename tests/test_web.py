@@ -30,7 +30,7 @@ async def test_login_and_dashboard_render_html() -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         login = await client.get("/login")
-        dashboard = await client.get("/")
+        dashboard = await client.get("/classic")
 
     assert login.status_code == 200
     assert "QueueLens" in login.text

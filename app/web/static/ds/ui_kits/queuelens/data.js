@@ -69,6 +69,7 @@ window.QL = window.QL || {};
       unacked: q.messages_unacked, consumers: q.consumers,
       status: STATUS_ALIAS[q.status] || q.status,
       qtype: q.queue_type,
+      rate: q.publish_rate != null ? q.publish_rate : null,
       last: q.idle_since ? rel(q.idle_since.replace(' ', 'T')) : '—',
     };
     if (q.kind === 'retry') row.retry = true;
@@ -82,6 +83,12 @@ window.QL = window.QL || {};
   var messagesRaw = defaultQueue
     ? ((getJson('/api/queues/' + encodeURIComponent(defaultQueue) + '/messages') || {}).messages || [])
     : [];
+  function mapXDeath(list) {
+    return (list || []).map(function (d, i) {
+      return { n: i + 1, reason: d.reason, queue: d.queue, count: d.count, time: d.time ? rel(d.time) : '—' };
+    });
+  }
+
   var messages = messagesRaw.map(function (m) {
     return {
       id: m.message_id || m.fingerprint.slice(0, 12),
@@ -91,14 +98,16 @@ window.QL = window.QL || {};
       size: human(m.payload_size),
       xdeath: (m.x_death || []).length,
       preview: JSON.stringify(m.payload).slice(0, 30) + '…',
+      payloadText: typeof m.payload === 'string' ? m.payload : JSON.stringify(m.payload, null, 2),
+      headersText: Object.keys(m.headers || {}).length ? JSON.stringify(m.headers, null, 2) : '(no headers)',
+      xdeathList: mapXDeath(m.x_death),
+      xdeathRaw: m.x_death || [],
     };
   });
 
   var first = messagesRaw[0];
   var payload = first ? JSON.stringify(first.payload, null, 2) : '{}';
-  var xdeath = ((first && first.x_death) || []).map(function (d, i) {
-    return { n: i + 1, reason: d.reason, queue: d.queue, count: d.count, time: d.time ? rel(d.time) : '—' };
-  });
+  var xdeath = mapXDeath(first && first.x_death);
 
   var auditRaw = (getJson('/api/audit?limit=100') || {}).events || [];
   var outcomes = auditRaw.filter(function (e) { return e.result !== 'started'; });

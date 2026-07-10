@@ -12,42 +12,69 @@
     const [tab, setTab] = React.useState('all');
     const [page, setPage] = React.useState(1);
     const [search, setSearch] = React.useState('');
+    const [typeFilter, setTypeFilter] = React.useState('All Types');
+    const [statusFilter, setStatusFilter] = React.useState('All Statuses');
+    const [consumersFilter, setConsumersFilter] = React.useState('All');
+    const [sortBy, setSortBy] = React.useState('Messages (desc)');
+    const STATUS_LABEL = { 'Needs Attention': 'attention', Warning: 'attention', Low: 'low', Active: 'active', Idle: 'idle', Parking: 'parking' };
+    const counts = {
+      all: D.queues.length,
+      dlq: D.queues.filter((q) => q.type !== 'NORMAL').length,
+      msg: D.queues.filter((q) => q.messages > 0).length,
+      noc: D.queues.filter((q) => q.consumers === 0).length,
+    };
+    const totals = {
+      ready: D.queues.reduce((sum, q) => sum + q.ready, 0),
+      withConsumers: D.queues.filter((q) => q.consumers > 0).length,
+    };
     const filtered = D.queues.filter((q) => {
       if (search && !q.name.includes(search.toLowerCase())) return false;
+      if (typeFilter !== 'All Types' && q.type !== typeFilter) return false;
+      if (statusFilter !== 'All Statuses' && q.status !== STATUS_LABEL[statusFilter]) return false;
+      if (consumersFilter === 'Yes' && q.consumers === 0) return false;
+      if (consumersFilter === 'No' && q.consumers > 0) return false;
       if (tab === 'dlq') return q.type !== 'NORMAL';
       if (tab === 'msg') return q.messages > 0;
       if (tab === 'noc') return q.consumers === 0;
       return true;
+    }).sort((a, b) => {
+      if (sortBy === 'Messages (asc)') return a.messages - b.messages;
+      if (sortBy === 'Name') return a.name.localeCompare(b.name);
+      return b.messages - a.messages;
     });
+    const PAGE_SIZE = 10;
+    const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+    const safePage = Math.min(page, pageCount);
+    const pageRows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
     return (
       <div>
         <PageHeader title="Queues" subtitle="Browse and inspect queues. Message counts are real-time from RabbitMQ Management API." />
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(215px, 1fr))', gap: 14, marginBottom: 22 }}>
-          <StatCard icon="database" tone="info" value="24" label="Total Queues" sublabel="All queues" />
-          <StatCard icon="inbox" tone="park" value="4" label="DLQ Queues" sublabel="Dead-letter queues" />
-          <StatCard icon="bar-chart-3" tone="warning" value="128" label="Messages Ready" sublabel="Across all queues" />
-          <StatCard icon="activity" tone="success" value="18" label="Queues with Consumers" sublabel="Receiving messages" />
-          <StatCard icon="mail-warning" tone="danger" value="6" label="Queues with Messages" sublabel="Ready to process" />
+          <StatCard icon="database" tone="info" value={String(counts.all)} label="Total Queues" sublabel="All queues" />
+          <StatCard icon="inbox" tone="park" value={String(counts.dlq)} label="DLQ Queues" sublabel="Dead-letter queues" />
+          <StatCard icon="bar-chart-3" tone="warning" value={String(totals.ready)} label="Messages Ready" sublabel="Across all queues" />
+          <StatCard icon="activity" tone="success" value={String(totals.withConsumers)} label="Queues with Consumers" sublabel="Receiving messages" />
+          <StatCard icon="mail-warning" tone="danger" value={String(counts.msg)} label="Queues with Messages" sublabel="Ready to process" />
         </div>
 
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
           <div style={{ width: 220 }}><SearchInput placeholder="Search queues…" value={search} onChange={setSearch} /></div>
-          <div style={{ width: 140 }}><FilterLabel>Type</FilterLabel><Select options={['All Types', 'DLQ', 'PARKING', 'NORMAL']} /></div>
-          <div style={{ width: 150 }}><FilterLabel>Status</FilterLabel><Select options={['All Statuses', 'Needs Attention', 'Low', 'Active', 'Idle']} /></div>
-          <div style={{ width: 120 }}><FilterLabel>Has Consumers</FilterLabel><Select options={['All', 'Yes', 'No']} /></div>
-          <div style={{ width: 170 }}><FilterLabel>Sort By</FilterLabel><Select options={['Messages (desc)', 'Messages (asc)', 'Name']} /></div>
+          <div style={{ width: 140 }}><FilterLabel>Type</FilterLabel><Select options={['All Types', 'DLQ', 'PARKING', 'NORMAL']} value={typeFilter} onChange={setTypeFilter} /></div>
+          <div style={{ width: 150 }}><FilterLabel>Status</FilterLabel><Select options={['All Statuses', 'Needs Attention', 'Low', 'Active', 'Idle', 'Parking']} value={statusFilter} onChange={setStatusFilter} /></div>
+          <div style={{ width: 120 }}><FilterLabel>Has Consumers</FilterLabel><Select options={['All', 'Yes', 'No']} value={consumersFilter} onChange={setConsumersFilter} /></div>
+          <div style={{ width: 170 }}><FilterLabel>Sort By</FilterLabel><Select options={['Messages (desc)', 'Messages (asc)', 'Name']} value={sortBy} onChange={setSortBy} /></div>
           <div style={{ flex: 1 }} />
-          <Button variant="ghost" onClick={() => setSearch('')}>Clear Filters</Button>
-          <Button icon="refresh-cw">Refresh</Button>
+          <Button variant="ghost" onClick={() => { setSearch(''); setTypeFilter('All Types'); setStatusFilter('All Statuses'); setConsumersFilter('All'); setSortBy('Messages (desc)'); }}>Clear Filters</Button>
+          <Button icon="refresh-cw" onClick={() => location.reload()}>Refresh</Button>
         </div>
 
         <Card pad={false}>
           <div style={{ padding: '14px 20px 0' }}>
             <Tabs active={tab} onChange={(t) => { setTab(t); setPage(1); }} tabs={[
-              { id: 'all', label: 'All Queues', count: 24 },
-              { id: 'dlq', label: 'DLQ Queues', count: 4 },
-              { id: 'msg', label: 'Queues with Messages', count: 6 },
-              { id: 'noc', label: 'Queues with No Consumers', count: 6 }]} />
+              { id: 'all', label: 'All Queues', count: counts.all },
+              { id: 'dlq', label: 'DLQ Queues', count: counts.dlq },
+              { id: 'msg', label: 'Queues with Messages', count: counts.msg },
+              { id: 'noc', label: 'Queues with No Consumers', count: counts.noc }]} />
           </div>
           <DataTable rowKey="name" sortKey="messages"
             columns={[
@@ -70,11 +97,11 @@
                   <IconButton icon="ellipsis-vertical" />
                 </span>) },
             ]}
-            rows={filtered} />
+            rows={pageRows} />
           <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderTop: '1px solid var(--slate-100)' }}>
-            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Showing 1 to {filtered.length} of 24 queues</span>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Showing {filtered.length ? (safePage - 1) * PAGE_SIZE + 1 : 0} to {Math.min(safePage * PAGE_SIZE, filtered.length)} of {filtered.length} queues</span>
             <div style={{ flex: 1 }} />
-            <Pagination page={page} pageCount={3} onChange={setPage} />
+            <Pagination page={safePage} pageCount={pageCount} onChange={setPage} />
           </div>
         </Card>
 
