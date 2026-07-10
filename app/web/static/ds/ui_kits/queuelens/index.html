@@ -85,7 +85,9 @@ function App() {
     dashboard: 'Dashboard', queues: 'Queues', messages: 'Messages', replay: 'Replay',
     parking: 'Parking', audit: 'Audit Log', config: 'Configuration', users: 'Users', notifications: 'Notifications',
   };
-  const activeNav = route.id === 'replay' ? (route.params.mode === 'park' ? 'parking' : 'replay') : route.id;
+  // Messages and the Replay/Park wizard are contextual screens reached from a queue,
+  // so they highlight their parent nav item instead of having sidebar entries.
+  const activeNav = ['messages', 'replay', 'parking'].includes(route.id) ? 'queues' : route.id;
 
   let screen = null;
   if (route.id === 'dashboard') screen = <S.Dashboard nav={nav} empty={(window.QL.data.queues || []).length === 0} />;
@@ -114,9 +116,6 @@ function App() {
           { label: 'Main', items: [
             { id: 'dashboard', label: 'Dashboard', icon: 'layout-grid' },
             { id: 'queues', label: 'Queues', icon: 'list' },
-            { id: 'messages', label: 'Messages', icon: 'mail' },
-            { id: 'replay', label: 'Replay', icon: 'code' },
-            { id: 'parking', label: 'Parking', icon: 'flag' },
             { id: 'audit', label: 'Audit Log', icon: 'clipboard-list' } ] },
           { label: 'Settings', items: [
             { id: 'config', label: 'Configuration', icon: 'settings' },
