@@ -11,6 +11,7 @@
   <header class="topbar">
     <a href="/" class="brand">Queue<em>Lens</em></a>
     <span class="broker-status" id="broker-status" data-state="unknown"><i></i><span>BROKER …</span></span>
+    <span class="env-badge env-{{ app_environment | default('development') | lower }}">{{ app_environment | default('development') | upper }}</span>
     <nav><a href="/">Dashboard</a><a href="/audit">Audit Log</a></nav>
   </header>
   <main class="container">{% block content %}{% endblock %}</main>

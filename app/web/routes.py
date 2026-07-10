@@ -1,5 +1,7 @@
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
@@ -14,6 +16,13 @@ router = APIRouter(tags=["web"])
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
+def _broker_display(rabbitmq_url: str, vhost: str) -> str:
+    parsed = urlparse(rabbitmq_url)  # never echo credentials from the URL
+    host = parsed.hostname or "rabbitmq"
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"{host}{port} · vhost {vhost}"
+
+
 @router.get("/login", response_class=HTMLResponse)
 async def login(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request=request, name="login.html", context={})
@@ -24,11 +33,29 @@ async def dashboard(
     request: Request,
     _username: str = Depends(get_current_username),
 ) -> HTMLResponse:
+    settings = request.app.state.settings
     queues = await cast(QueueService, request.app.state.queue_service).list_queues(dlq_only=True)
+    queue_dicts = queues_to_dicts(queues)
+    recent_events: list[dict[str, Any]] = []
+    failed_today = 0
+    try:
+        audit = request.app.state.audit_repository
+        recent_events = await audit.list(limit=8)
+        midnight = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        failed_today = await audit.count(result="failed", since=midnight)
+    except Exception:  # audit store unavailable must not take the dashboard down
+        pass
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
-        context={"queues": queues_to_dicts(queues)},
+        context={
+            "queues": queue_dicts,
+            "largest": max(queue_dicts, key=lambda q: q["messages"], default=None),
+            "recent_events": recent_events,
+            "failed_today": failed_today,
+            "broker": _broker_display(settings.rabbitmq_url, settings.rabbitmq_vhost),
+            "preview_limit": settings.max_preview_messages,
+        },
     )
 
 

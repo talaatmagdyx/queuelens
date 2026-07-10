@@ -2,20 +2,56 @@
 {% block title %}Dashboard · QueueLens{% endblock %}
 {% block content %}
 <p class="overline">DLQ Console</p>
-<h1>DLQ Dashboard</h1>
-<p class="muted">Every dead-letter queue this broker knows about, live.</p>
+<h1>DLQ Recovery Dashboard</h1>
+<p class="muted subtitle">Inspect failed RabbitMQ messages and recover them safely.
+  <span class="mono">{{ broker }}</span> ·
+  <span id="refresh-status">last refreshed just now</span> · auto-refresh on</p>
 {% if queues %}
 <div class="stats">
   <div class="stat"><b>{{ queues | length }}</b><span>Dead-letter queues</span></div>
   <div class="stat"><b>{{ queues | sum(attribute='messages') }}</b><span>Dead letters total</span></div>
-  <div class="stat"><b>{{ queues | sum(attribute='messages_ready') }}</b><span>Ready to inspect</span></div>
+  {% if largest and largest.messages > 0 %}
+  <div class="stat"><b>{{ largest.messages }}</b><span>Largest DLQ</span><i>{{ largest.name }}</i></div>
+  {% endif %}
+  <div class="stat {% if failed_today %}stat-alert{% endif %}"><b>{{ failed_today }}</b><span>Failed actions today</span></div>
 </div>
 {% endif %}
 <section class="card">
-  <h2>Detected DLQ queues</h2>
+  <h2>Queues needing attention</h2>
   {% if queues %}
-  <table><thead><tr><th>Queue</th><th>Messages</th><th>Ready</th><th>Consumers</th><th></th></tr></thead>
-  <tbody>{% for queue in queues %}<tr><td class="mono">{{ queue.name }}</td><td class="mono">{{ queue.messages }}</td><td class="mono">{{ queue.messages_ready }}</td><td class="mono">{{ queue.consumers }}</td><td><a href="/queues/{{ queue.name | urlencode }}">Open →</a></td></tr>{% endfor %}</tbody></table>
-  {% else %}<p class="empty">No DLQ queues detected.</p>{% endif %}
+  <table><thead><tr><th>Queue</th><th>Type</th><th>Messages</th><th>Ready</th><th>Consumers</th><th>Status</th><th></th></tr></thead>
+  <tbody>{% for queue in queues %}<tr data-href="/queues/{{ queue.name | urlencode }}"><td class="mono">{{ queue.name }}</td><td><span class="badge k-{{ queue.kind }}">{{ queue.kind }}</span></td><td class="mono">{{ queue.messages }}</td><td class="mono">{{ queue.messages_ready }}</td><td class="mono">{{ queue.consumers }}</td><td><span class="badge s-{{ queue.severity }}">{{ {'attention': 'needs attention', 'warning': 'warning', 'low': 'low', 'empty': 'empty'}[queue.severity] }}</span></td><td><a class="button row-open" href="/queues/{{ queue.name | urlencode }}">Open</a></td></tr>{% endfor %}</tbody></table>
+  <p class="muted small">Sorted by message count. Counts come from the RabbitMQ Management API;
+    message preview is limited to {{ preview_limit }} per queue.</p>
+  {% else %}
+  <div class="empty">
+    <p><strong>No DLQ queues detected.</strong></p>
+    <p>QueueLens is connected to RabbitMQ, but no dead-letter queues were found by name
+      convention or dead-letter bindings.</p>
+    <a class="button" href="">Refresh</a>
+  </div>
+  {% endif %}
 </section>
+{% if recent_events %}
+<section class="card">
+  <h2>Recent actions</h2>
+  <table><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Queue</th><th>Result</th></tr></thead>
+  <tbody>{% for event in recent_events %}<tr><td class="mono">{{ event.timestamp[11:19] if event.timestamp else '—' }}</td><td class="mono">{{ event.username }}</td><td class="mono">{{ event.action }}</td><td class="mono">{{ event.source_queue or '—' }}</td><td><span class="badge b-{{ event.result }}">{{ event.result }}</span></td></tr>{% endfor %}</tbody></table>
+  <p class="muted small"><a href="/audit" class="plain-link">Full audit log →</a></p>
+</section>
+{% endif %}
+<script>
+const loadedAt = Date.now();
+setInterval(() => {
+  const seconds = Math.round((Date.now() - loadedAt) / 1000);
+  document.getElementById('refresh-status').textContent = 'last refreshed ' + seconds + 's ago';
+}, 1000);
+setTimeout(() => location.reload(), 30000);
+document.querySelectorAll('tr[data-href]').forEach(row => {
+  row.addEventListener('click', event => {
+    if (event.target.closest('a')) return;
+    location.href = row.dataset.href;
+  });
+});
+</script>
 {% endblock %}

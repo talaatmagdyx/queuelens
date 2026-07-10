@@ -549,3 +549,69 @@ input::placeholder { color: var(--muted); }
   .card { animation: none; }
   .broker-status i { animation: none; }
 }
+
+/* ---------- operational density pass ---------- */
+
+.container { margin-top: 1.5rem; }
+.card { padding: 1.1rem 1.35rem; margin: 1.05rem 0; }
+.card::before, .card::after { opacity: 0.5; }
+h1 { font-size: 1.45rem; }
+.subtitle { margin: 0 0 0.4rem; font-size: 0.86rem; }
+.stats { margin: 0.9rem 0 0.1rem; gap: 0.8rem; }
+.stat { padding: 0.7rem 1rem; }
+.stat span { letter-spacing: 0.1em; }
+.stat i {
+  display: block;
+  font-style: normal;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--text);
+  margin-top: 0.1rem;
+  word-break: break-all;
+}
+.stat-alert { border-color: rgba(242, 112, 122, 0.5); }
+.stat-alert b { color: var(--red); }
+th { letter-spacing: 0.08em; }
+.small { font-size: 0.78rem; margin: 0.7rem 0 0; }
+.plain-link { color: var(--cyan); text-decoration: none; }
+.plain-link:hover { text-decoration: underline; }
+
+/* environment badge */
+.env-badge {
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  padding: 0.24rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--line-bright);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.env-badge.env-production {
+  color: #ffd9dd;
+  background: rgba(242, 112, 122, 0.18);
+  border-color: var(--red);
+  box-shadow: 0 0 12px rgba(242, 112, 122, 0.25);
+}
+.env-badge.env-staging { color: var(--amber); border-color: rgba(255, 180, 84, 0.5); }
+
+/* queue type + severity badges */
+.badge.k-dlq { color: var(--amber); border-color: rgba(255, 180, 84, 0.4); }
+.badge.k-parking { color: var(--cyan); border-color: rgba(89, 194, 255, 0.4); }
+.badge.k-retry { color: var(--green); border-color: rgba(127, 217, 98, 0.4); }
+.badge.s-attention { color: #ffd9dd; background: rgba(242, 112, 122, 0.2); border-color: var(--red); font-weight: 600; }
+.badge.s-warning { color: var(--amber); background: var(--amber-soft); border-color: rgba(255, 180, 84, 0.45); }
+.badge.s-low { color: var(--muted); }
+.badge.s-empty { color: var(--muted); opacity: 0.7; }
+
+/* rows that navigate */
+tr[data-href] { cursor: pointer; }
+.button.row-open { padding: 0.3rem 0.85rem; font-size: 0.66rem; }
+tbody tr:hover .row-open { border-color: var(--amber); color: var(--amber); }
+
+/* attention rows glow */
+tbody tr:has(.s-attention) { background: rgba(242, 112, 122, 0.04); box-shadow: inset 2px 0 0 var(--red); }
+
+/* quieter footer */
+.footer { font-size: 0.6rem; opacity: 0.55; margin-bottom: 1.2rem; }

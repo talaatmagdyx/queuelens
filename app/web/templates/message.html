@@ -17,6 +17,8 @@
 <section class="card"><h2>x-death</h2><pre class="code-json">{{ message.x_death | tojson(indent=2) }}</pre></section>
 <section class="card">
   <h2>Actions</h2>
+  <p class="muted small">Move replay and park publish first — the source message is removed
+    only after the publish succeeds. Every action writes an audit event.</p>
   <fieldset class="replay-target">
     <legend>Replay target (leave blank to use the configured target)</legend>
     <label>Queue <input id="target-queue" placeholder="queue name"></label>

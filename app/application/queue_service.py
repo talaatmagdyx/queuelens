@@ -15,6 +15,8 @@ class QueueService:
         queues = [self._to_queue_info(item, dead_letter_targets) for item in raw_queues]
         if dlq_only:
             queues = [queue for queue in queues if queue.is_dlq]
+        # riskiest first: the biggest backlog is where an operator starts
+        queues.sort(key=lambda queue: queue.messages, reverse=True)
         return queues
 
     async def get_queue(self, queue_name: str) -> QueueInfo:
@@ -45,6 +47,7 @@ class QueueService:
             durable=bool(raw.get("durable", False)),
             arguments=arguments,
             is_dlq=QueueService._looks_like_dlq(name, dead_letter_targets),
+            kind=QueueService._classify(name),
         )
 
     @staticmethod
@@ -54,7 +57,29 @@ class QueueService:
         # another queue dead-letters into.
         normalized_name = name.lower()
         name_match = any(token in normalized_name for token in (".dlq", "_dlq", "dead"))
-        return name_match or name in dead_letter_targets
+        parking = normalized_name.endswith((".parking", "_parking"))
+        return name_match or parking or name in dead_letter_targets
+
+    @staticmethod
+    def _classify(name: str) -> str:
+        """Operators treat these differently: a parking lot is deliberate
+        storage, a retry queue is in-flight recovery, a DLQ is the incident."""
+        normalized = name.lower()
+        if normalized.endswith((".parking", "_parking")):
+            return "parking"
+        if "retry" in normalized:
+            return "retry"
+        return "dlq"
+
+
+def _severity(messages: int) -> str:
+    if messages == 0:
+        return "empty"
+    if messages <= 10:
+        return "low"
+    if messages <= 100:
+        return "warning"
+    return "attention"
 
 
 def queues_to_dicts(queues: Sequence[QueueInfo]) -> list[dict[str, Any]]:
@@ -69,7 +94,8 @@ def queues_to_dicts(queues: Sequence[QueueInfo]) -> list[dict[str, Any]]:
             "durable": queue.durable,
             "arguments": queue.arguments,
             "is_dlq": queue.is_dlq,
+            "kind": queue.kind,
+            "severity": _severity(queue.messages),
         }
         for queue in queues
     ]
-

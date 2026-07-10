@@ -1,4 +1,6 @@
-from sqlalchemy import desc, select
+from datetime import datetime
+
+from sqlalchemy import desc, func, select
 
 from app.domain.models import AuditEntry
 from app.infrastructure.persistence.database import Database
@@ -55,6 +57,15 @@ class AuditRepository:
         async with self._database.session() as session:
             rows = (await session.scalars(statement)).all()
         return [self._to_dict(row) for row in rows]
+
+    async def count(self, *, result: str, since: datetime) -> int:
+        statement = (
+            select(func.count())
+            .select_from(AuditEventModel)
+            .where(AuditEventModel.result == result, AuditEventModel.timestamp >= since)
+        )
+        async with self._database.session() as session:
+            return int(await session.scalar(statement) or 0)
 
     @staticmethod
     def _to_dict(model: AuditEventModel) -> dict[str, object]:
