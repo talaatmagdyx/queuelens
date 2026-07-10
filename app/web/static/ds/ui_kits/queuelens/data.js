@@ -158,6 +158,7 @@ window.QL.screens = window.QL.screens || {};
   };
 
   window.QL.fetchConfig = function () { return getJson('/api/config') || {}; };
+  window.QL.config = window.QL.fetchConfig();
   window.QL.testConnection = function () { return getJson('/api/broker/test'); };
 
   // XHR rather than fetch: fetch() rejects relative URLs when the page URL carries
