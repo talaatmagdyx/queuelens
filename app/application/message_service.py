@@ -26,7 +26,7 @@ class MessageNotUniquelyIdentifiable(LookupError):
     """The best-effort fingerprint did not identify exactly one message."""
 
 
-MASKED_VALUE = "•••"
+MASKED_VALUE = "***"  # ASCII so Jinja's tojson doesn't escape it into • noise
 
 _EMPTY: frozenset[str] = frozenset()
 

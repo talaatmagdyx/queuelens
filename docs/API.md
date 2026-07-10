@@ -99,7 +99,7 @@ nothing is consumed (the broker's `redelivered` flag will be set).
   marker and `payload_truncated: true`.
 - Datetimes and raw bytes inside headers/properties/x-death are normalized to strings.
 - Values under configured sensitive keys (`QUEUELENS_MASKED_FIELDS`, matching ignores case
-  and `-`/`_`) render as `•••` in payloads, headers, and properties. Display-only — replay
+  and `-`/`_`) render as `***` in payloads, headers, and properties. Display-only — replay
   always uses the original message. Disable with `QUEUELENS_MASKING_ENABLED=false`.
 
 ### `GET /api/queues/{queue_name}/messages/{fingerprint}`

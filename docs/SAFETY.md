@@ -75,7 +75,7 @@ reconnection). Management API errors → `502`/`503`. No failure mode returns a 
 - **Scan-and-requeue is O(window) per action** and briefly holds the scanned messages
   unacked. Fine for operator workflows; bulk operations will need a different design.
 - **Masking is key-based and display-only.** Values under configured sensitive keys
-  (`QUEUELENS_MASKED_FIELDS`) render as `•••` in the UI and read API, but values containing
+  (`QUEUELENS_MASKED_FIELDS`) render as `***` in the UI and read API, but values containing
   secrets under other keys are not detected, and replayed messages carry the original,
   unmasked payload by design. Deploy inside a trusted network
   (see [OPERATIONS.md](OPERATIONS.md)).

@@ -29,7 +29,7 @@ inspect DLQ safely -> understand the message -> replay / park / delete safely ->
 - **Park & delete** — park moves a message to `{queue}.parking` (created on demand);
   both require explicit confirmation
 - **Sensitive-field masking** — values under configurable keys (`password`, `token`, `email`, …)
-  render as `•••`; display-only, replay payloads are never modified
+  render as `***`; display-only, replay payloads are never modified
 - **Audit log** — every action writes an attempt event before execution and an outcome event after
 - **Preview honesty** — the queue view says "showing 100 of 4,812" instead of pretending you saw everything
 - **Honest failure modes** — friendly 404 for unknown queues and ambiguous messages, 400 for

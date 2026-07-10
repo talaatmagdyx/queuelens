@@ -45,7 +45,7 @@ The AMQP user needs read/write/configure on the inspected queues: browsing reque
 | Variable | Default | Meaning |
 |---|---|---|
 | `QUEUELENS_MASKING_ENABLED` | `true` | Display-only masking of sensitive values in payloads, headers, and properties |
-| `QUEUELENS_MASKED_FIELDS` | `password,token,access_token,refresh_token,authorization,api_key,secret,email,phone` | Comma-separated key names whose values render as `•••` |
+| `QUEUELENS_MASKED_FIELDS` | `password,token,access_token,refresh_token,authorization,api_key,secret,email,phone` | Comma-separated key names whose values render as `***` |
 
 Key matching ignores case and `-`/`_` separators, so `api_key` also masks `API-Key` and
 `apiKey`. Masking is **display-only**: it applies where messages are rendered (UI and read
