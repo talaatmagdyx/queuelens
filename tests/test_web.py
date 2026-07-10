@@ -343,13 +343,16 @@ async def test_spa_route_and_users_api(tmp_path) -> None:
     )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        spa = await client.get("/app", follow_redirects=False)
+        spa = await client.get("/app")
+        root = await client.get("/", follow_redirects=False)
         users_api = await client.get("/api/users")
         kit_index = await client.get("/static/ds/ui_kits/queuelens/index.html")
         loader = await client.get("/static/ds/ds-loader.js")
 
-    assert spa.status_code == 307
-    assert spa.headers["location"] == "/static/ds/ui_kits/queuelens/index.html"
+    assert spa.status_code == 200
+    assert "/static/ds/ui_kits/queuelens/data.js" in spa.text
+    assert root.status_code == 307
+    assert root.headers["location"] == "/app"
     assert users_api.status_code == 200
     assert users_api.json()["accounts"][0]["role"] in ("Administrator", "Operator")
     assert kit_index.status_code == 200

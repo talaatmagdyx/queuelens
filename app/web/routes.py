@@ -4,7 +4,7 @@ from typing import Any, cast
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.application.message_service import MessageService, message_to_dict
@@ -46,14 +46,15 @@ async def login(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request=request, name="login.html", context={})
 
 
-@router.get("/app")
+@router.get("/app", response_class=HTMLResponse)
 async def spa(
     _username: str = Depends(get_current_username),
-) -> RedirectResponse:
+) -> FileResponse:
     """The claude.ai/design UI kit, served as a single-page app wired to the
-    live API. Auth here forces the Basic Auth prompt before the static SPA
-    loads, so its data layer inherits browser credentials."""
-    return RedirectResponse(url="/static/ds/ui_kits/queuelens/index.html")
+    live API. Served directly (asset URLs are absolute) so the address bar
+    stays /app; auth here forces the Basic Auth prompt before the SPA loads."""
+    index = Path(__file__).parent / "static" / "ds" / "ui_kits" / "queuelens" / "index.html"
+    return FileResponse(index, media_type="text/html")
 
 
 @router.get("/")
