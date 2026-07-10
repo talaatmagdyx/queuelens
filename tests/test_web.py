@@ -358,3 +358,27 @@ async def test_spa_route_and_users_api(tmp_path) -> None:
     assert kit_index.status_code == 200
     assert "data.js" in kit_index.text
     assert loader.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_config_api_is_read_only_and_never_leaks_secrets(tmp_path) -> None:
+    app = create_app(
+        Settings(
+            auth_enabled=False,
+            admin_password="super-secret-pw",
+            rabbitmq_management_password="mgmt-secret",
+            database_url=f"sqlite+aiosqlite:///{tmp_path}/c.db",
+        )
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/config")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["max_preview_messages"] == 100
+    assert body["max_bulk_size"] == 500
+    assert body["masking_enabled"] is True
+    assert "password" in body["masked_fields"]
+    assert "super-secret-pw" not in response.text
+    assert "mgmt-secret" not in response.text

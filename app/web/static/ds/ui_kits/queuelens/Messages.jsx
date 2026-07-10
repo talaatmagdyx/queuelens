@@ -76,16 +76,11 @@
     const toggle = (id) => { setConfirmDelete(false); setChecked((c) => c.includes(id) ? c.filter((x) => x !== id) : [...c, id]); };
     const toggleAll = () => { setConfirmDelete(false); setChecked(allChecked ? [] : rows.map((r) => r.id)); };
     const clearSel = () => { setChecked([]); setConfirmDelete(false); };
-    const bulkNav = (mode) => nav('replay', { msg: rows.find((r) => r.id === checked[0]) || msg, mode, count: checked.length });
-    const api = async (path, body) => {
-      const response = await fetch(path, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-      });
-      let detail = {};
-      try { detail = await response.json(); } catch (e) {}
-      if (!response.ok) throw new Error(detail.detail || ('HTTP ' + response.status));
-      return detail;
-    };
+    const bulkNav = (mode) => nav('replay', {
+      msg: rows.find((r) => r.id === checked[0]) || msg, mode, count: checked.length,
+      fingerprints: rows.filter((r) => checked.includes(r.id)).map((r) => r.fingerprint),
+    });
+    const api = window.QL.postJson;
     const doDelete = async () => {
       // Real deletion through the bulk API: dry-run on exactly the selected
       // fingerprints, then execute the returned one-shot batch.

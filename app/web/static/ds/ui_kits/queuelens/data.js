@@ -2,6 +2,7 @@
 // Loaded synchronously before the screens (same pattern as ds-loader.js),
 // so the kit renders live broker state instead of the design-time samples.
 window.QL = window.QL || {};
+window.QL.screens = window.QL.screens || {};
 
 (function () {
   function getJson(url) {
@@ -108,6 +109,38 @@ window.QL = window.QL || {};
     return raw.map(mapMessage);
   };
 
+  var exchangeCache = null;
+  window.QL.fetchExchanges = function () {
+    if (!exchangeCache) exchangeCache = (getJson('/api/exchanges') || {}).exchanges || [];
+    return exchangeCache;
+  };
+
+  window.QL.fetchQueueInfo = function (name) {
+    var result = getJson('/api/queues/' + encodeURIComponent(name));
+    return result ? result.queue : null;
+  };
+
+  window.QL.fetchConfig = function () { return getJson('/api/config') || {}; };
+  window.QL.testConnection = function () { return getJson('/api/broker/test'); };
+
+  // XHR rather than fetch: fetch() rejects relative URLs when the page URL carries
+  // basic-auth credentials (http://user:pass@host/), a common way to open QueueLens.
+  window.QL.postJson = function (path, body) {
+    return new Promise(function (resolve, reject) {
+      var x = new XMLHttpRequest();
+      x.open('POST', path);
+      x.setRequestHeader('Content-Type', 'application/json');
+      x.onload = function () {
+        var detail = {};
+        try { detail = JSON.parse(x.responseText); } catch (e) {}
+        if (x.status >= 200 && x.status < 300) resolve(detail);
+        else reject(new Error(detail.detail || ('HTTP ' + x.status)));
+      };
+      x.onerror = function () { reject(new Error('Network error')); };
+      x.send(JSON.stringify(body));
+    });
+  };
+
   var messagesRaw = defaultQueue
     ? ((getJson('/api/queues/' + encodeURIComponent(defaultQueue) + '/messages') || {}).messages || [])
     : [];
@@ -117,15 +150,20 @@ window.QL = window.QL || {};
   var payload = first ? JSON.stringify(first.payload, null, 2) : '{}';
   var xdeath = mapXDeath(first && first.x_death);
 
-  var auditRaw = (getJson('/api/audit?limit=100') || {}).events || [];
+  var auditRaw = (getJson('/api/audit?limit=500') || {}).events || [];
   var outcomes = auditRaw.filter(function (e) { return e.result !== 'started'; });
-  var audit = outcomes.map(function (e) {
+  var audit = outcomes.map(function (e, i) {
+    var meta = e.metadata || {};
     return {
+      key: (e.id || '') + '-' + i,
       time: e.timestamp ? e.timestamp.slice(0, 19).replace('T', ' ') : '—',
       user: e.username, action: kitAction(e), queue: e.source_queue || '—',
       target: target(e), result: kitResult(e.result),
-      duration: e.metadata && e.metadata.duration_ms != null
-        ? (e.metadata.duration_ms / 1000).toFixed(2) + 's' : '—',
+      duration: meta.duration_ms != null ? (meta.duration_ms / 1000).toFixed(2) + 's' : '—',
+      fingerprint: e.message_fingerprint || null,
+      headersAdded: meta.headers_added || null,
+      xdeathList: mapXDeath(meta.x_death),
+      error: meta.error || null,
     };
   });
 

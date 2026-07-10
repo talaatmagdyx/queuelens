@@ -7,19 +7,27 @@
   const LEVEL_TONE = { Alert: 'danger', Warning: 'warning', Info: 'info', Success: 'success' };
   const LEVEL_ICON = { Alert: { n: 'alert-triangle', c: 'var(--red-600)' }, Warning: { n: 'alert-triangle', c: 'var(--amber-600)' }, Info: { n: 'info', c: 'var(--blue-600)' }, Success: { n: 'check-circle', c: 'var(--green-600)' } };
 
+  const SOURCE_ROUTE = { 'Queue Monitor': 'queues', 'Audit Log': 'audit' };
+
   function Notifications({ nav }) {
     const [tab, setTab] = React.useState('all');
-    const rows = D.notifications.filter((n) => tab === 'all' || n.level.toLowerCase() === tab || (tab === 'alerts' && n.level === 'Alert'));
+    const [page, setPage] = React.useState(1);
+    const PAGE_SIZE = 10;
+    const all = D.notifications;
+    const countOf = (level) => all.filter((n) => n.level === level).length;
+    const rows = all.filter((n) => tab === 'all' || n.level.toLowerCase() === tab || (tab === 'alerts' && n.level === 'Alert'));
+    const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+    const safePage = Math.min(page, pageCount);
+    const pageRows = rows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
     return (
       <div>
-        <PageHeader title="Notifications" subtitle="Stay updated on important events and system activities."
-          actions={<span style={{ display: 'inline-flex', gap: 10 }}><Button variant="secondary" style={{ color: 'var(--text-link)' }}>Mark all as read</Button><IconButton icon="filter" size={38} /></span>} />
+        <PageHeader title="Notifications" subtitle="Stay updated on important events and system activities." />
         <Card pad={false}>
           <div style={{ padding: '14px 20px 0' }}>
-            <Tabs active={tab} onChange={setTab} tabs={[
-              { id: 'all', label: 'All', count: 3 }, { id: 'alerts', label: 'Alerts', count: 1 },
-              { id: 'warning', label: 'Warnings', count: 1 }, { id: 'info', label: 'Info', count: 1 },
-              { id: 'success', label: 'Success', count: 6 }]} />
+            <Tabs active={tab} onChange={(t) => { setTab(t); setPage(1); }} tabs={[
+              { id: 'all', label: 'All', count: all.length }, { id: 'alerts', label: 'Alerts', count: countOf('Alert') },
+              { id: 'warning', label: 'Warnings', count: countOf('Warning') }, { id: 'info', label: 'Info', count: countOf('Info') },
+              { id: 'success', label: 'Success', count: countOf('Success') }]} />
           </div>
           <DataTable rowKey="time"
             columns={[
@@ -28,14 +36,15 @@
               { key: 'title', label: 'Title', render: (r) => <span style={{ fontWeight: 600, color: 'var(--slate-900)' }}>{r.title}</span> },
               { key: 'message', label: 'Message' },
               { key: 'source', label: 'Source' },
-              { key: 'a', label: 'Actions', align: 'right', render: () => <Button variant="secondary" size="sm" style={{ color: 'var(--text-link)' }}>View</Button> },
+              { key: 'a', label: 'Actions', align: 'right', render: (r) => <Button variant="secondary" size="sm" style={{ color: 'var(--text-link)' }} onClick={() => nav(SOURCE_ROUTE[r.source] || 'dashboard')}>View</Button> },
             ]}
-            rows={rows} />
+            rows={pageRows} />
           <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderTop: '1px solid var(--slate-100)' }}>
-            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Showing 1 to {rows.length} of 12 notifications</span>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              {rows.length ? `Showing ${(safePage - 1) * PAGE_SIZE + 1} to ${Math.min(safePage * PAGE_SIZE, rows.length)} of ${rows.length} notifications` : 'No notifications'}
+            </span>
             <div style={{ flex: 1 }} />
-            <Pagination page={1} pageCount={2} />
-            <div style={{ width: 110, marginLeft: 10 }}><Select options={['10 / page']} /></div>
+            <Pagination page={safePage} pageCount={pageCount} onChange={setPage} />
           </div>
         </Card>
       </div>
@@ -48,7 +57,6 @@
       <div style={{ position: 'absolute', top: 52, right: 16, width: 360, background: 'var(--surface-raised)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-popover)', zIndex: 50, fontFamily: 'var(--font-ui)' }}>
         <div style={{ display: 'flex', alignItems: 'center', padding: '14px 16px', borderBottom: '1px solid var(--slate-100)' }}>
           <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-heading)', flex: 1 }}>Notifications</span>
-          <a href="#" onClick={(e) => e.preventDefault()} style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-link)', textDecoration: 'none' }}>Mark all as read</a>
         </div>
         {D.notifications.slice(0, 3).map((n) => {
           const ic = LEVEL_ICON[n.level];

@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <title>QueueLens</title>
-<link rel="stylesheet" href="/static/ds/styles.css?v=0.5.0">
+<link rel="stylesheet" href="/static/ds/styles.css?v=0.6.0">
 <script src="/static/vendor/react.production.min.js"></script>
 <script src="/static/vendor/react-dom.production.min.js"></script>
 <script src="/static/vendor/babel.min.js"></script>
 <script src="/static/vendor/lucide.js"></script>
-<script src="/static/ds/ds-loader.js?v=0.5.0"></script>
+<script src="/static/ds/ds-loader.js?v=0.6.0"></script>
 <style>
   html, body { margin: 0; background: var(--slate-50); font-family: var(--font-ui); }
   * { box-sizing: border-box; }
@@ -20,19 +20,23 @@
 <script>
 window.__loadDS('/static/ds/');
 window.QL = window.QL || {};
-setTimeout(function () { location.reload(); }, 30000); // auto-refresh: data layer is fetched at load
+// Auto-refresh (data layer is fetched at load) — but never yank the page out from
+// under a form or detail view: only reload while sitting on the dashboard.
+setInterval(function () {
+  var el = document.querySelector('[data-screen-label]');
+  if (el && el.getAttribute('data-screen-label') === 'Dashboard') location.reload();
+}, 30000);
 </script>
-<script src="/static/ds/ui_kits/queuelens/data.js?v=0.5.0"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/shared.jsx?v=0.5.0"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Login.jsx?v=0.5.0"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Dashboard.jsx?v=0.5.0"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Queues.jsx?v=0.5.0"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Messages.jsx?v=0.5.0"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Wizard.jsx?v=0.5.0"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/AuditLog.jsx?v=0.5.0"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Configuration.jsx?v=0.5.0"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Users.jsx?v=0.5.0"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Notifications.jsx?v=0.5.0"></script>
+<script src="/static/ds/ui_kits/queuelens/data.js?v=0.6.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/shared.jsx?v=0.6.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Dashboard.jsx?v=0.6.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Queues.jsx?v=0.6.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Messages.jsx?v=0.6.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Wizard.jsx?v=0.6.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/AuditLog.jsx?v=0.6.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Configuration.jsx?v=0.6.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Users.jsx?v=0.6.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Notifications.jsx?v=0.6.0"></script>
 <script type="text/babel">
 const { SidebarNav, TopBar, Alert } = window.__NS;
 const S = window.QL.screens;
@@ -62,11 +66,12 @@ function OfflineState({ envObj, onRetry, nav }) {
 }
 
 function App() {
-  const [route, setRoute] = React.useState({ id: 'login', params: {} });
+  // Auth is HTTP Basic, enforced by the server before this page loads — no in-app login step.
+  const [route, setRoute] = React.useState({ id: 'dashboard', params: {} });
   const [bellOpen, setBellOpen] = React.useState(false);
   const [envId, setEnvId] = React.useState(ENVS[0].id);
   const [vhost, setVhost] = React.useState(B.vhost || '/');
-  const [brokerLive, setBrokerLive] = React.useState(B.live !== false);
+  const brokerLive = B.live !== false;
   const [theme, setTheme] = React.useState(localStorage.getItem('ql_theme') || 'light');
   React.useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -75,8 +80,6 @@ function App() {
   const envObj = ENVS.find((e) => e.id === envId) || ENVS[0];
   const switchEnv = (id) => { setEnvId(id); setVhost(B.vhost || '/'); };
   const nav = (id, params = {}) => { setRoute({ id, params }); setBellOpen(false); window.scrollTo(0, 0); };
-
-  if (route.id === 'login') return <S.Login onSignIn={() => nav('dashboard')} />;
 
   const screenLabelMap = {
     dashboard: 'Dashboard', queues: 'Queues', messages: 'Messages', replay: 'Replay',
@@ -88,7 +91,7 @@ function App() {
   if (route.id === 'dashboard') screen = <S.Dashboard nav={nav} empty={(window.QL.data.queues || []).length === 0} />;
   else if (route.id === 'queues') screen = <S.Queues nav={nav} />;
   else if (route.id === 'messages') screen = <S.Messages nav={nav} queue={route.params.queue || window.QL.defaultQueue} />;
-  else if (route.id === 'replay' || route.id === 'parking') screen = <S.Wizard nav={nav} mode={route.params.mode || (route.id === 'parking' ? 'park' : 'move')} msg={route.params.msg || window.QL.data.messages[0]} count={route.params.count || 1} />;
+  else if (route.id === 'replay' || route.id === 'parking') screen = <S.Wizard nav={nav} mode={route.params.mode || (route.id === 'parking' ? 'park' : 'move')} msg={route.params.msg || window.QL.data.messages[0]} count={route.params.count || 1} fingerprints={route.params.fingerprints || null} />;
   else if (route.id === 'audit') screen = <S.AuditLog nav={nav} />;
   else if (route.id === 'config') screen = <S.Configuration nav={nav} envs={ENVS} activeEnv={envId} vhost={vhost} onEnvChange={switchEnv} />;
   else if (route.id === 'notifications') screen = <S.Notifications nav={nav} />;
@@ -100,7 +103,7 @@ function App() {
   );
 
   if (!brokerLive && !['config', 'users'].includes(route.id)) {
-    screen = <OfflineState envObj={envObj} onRetry={() => setBrokerLive(true)} nav={nav} />;
+    screen = <OfflineState envObj={envObj} onRetry={() => location.reload()} nav={nav} />;
   }
 
   return (
@@ -126,7 +129,7 @@ function App() {
         <TopBar version={B.api} userName={window.QL.user || 'admin'} notifications={window.QL.alertCount || 0} onBell={() => setBellOpen(!bellOpen)}
           envs={ENVS} activeEnv={envId} onEnvChange={switchEnv}
           vhosts={envObj.vhosts} vhost={vhost} onVhostChange={setVhost}
-          brokerLive={brokerLive} onBrokerToggle={() => setBrokerLive(!brokerLive)}
+          brokerLive={brokerLive}
           theme={theme} onThemeToggle={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
           lastRefreshed={brokerLive ? 'just now' : '—'} />
         {bellOpen && <window.QL.NotificationsPopover onViewAll={() => nav('notifications')} onClose={() => setBellOpen(false)} />}

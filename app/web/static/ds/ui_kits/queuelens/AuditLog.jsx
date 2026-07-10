@@ -1,40 +1,85 @@
-// Audit Log screen with Action Details panel.
+// Audit Log screen with Action Details panel — fully wired to live audit data.
 (function () {
   const { Icon, Badge, StatusPill, StatCard, Button, IconButton, DataTable, Select, SearchInput, Input, Pagination, KeyValue, CodeBlock } = window.__NS;
   const { PageHeader, Card, XDeathTable, ACTION_META, RESULT_TONE } = window.QL;
   const D = window.QL.data;
 
+  const ACTION_FILTER = { 'Replay (Move)': 'replay_move', 'Replay (Copy)': 'replay_copy', Park: 'park', Delete: 'delete' };
+  const pct = (n, total) => (total ? ((n / total) * 100).toFixed(1) + '%' : '—');
+
   function AuditLog({ nav }) {
-    const [sel, setSel] = React.useState(D.audit[0]);
+    const [sel, setSel] = React.useState(D.audit[0] || null);
     const [page, setPage] = React.useState(1);
+    const [pageSize, setPageSize] = React.useState(10);
+    const [q, setQ] = React.useState('');
+    const [actionF, setActionF] = React.useState('All Actions');
+    const [resultF, setResultF] = React.useState('All Results');
+    const [from, setFrom] = React.useState('');
+    const [to, setTo] = React.useState('');
+
+    const rows = React.useMemo(() => D.audit.filter((r) => {
+      if (q && !(r.queue + ' ' + r.user + ' ' + r.action + ' ' + r.target).toLowerCase().includes(q.toLowerCase())) return false;
+      if (actionF !== 'All Actions' && r.action !== ACTION_FILTER[actionF]) return false;
+      if (resultF !== 'All Results' && r.result !== resultF) return false;
+      if (from && r.time.slice(0, 10) < from) return false;
+      if (to && r.time.slice(0, 10) > to) return false;
+      return true;
+    }), [q, actionF, resultF, from, to]);
+
+    const total = D.audit.length;
+    const ok = D.audit.filter((r) => r.result === 'Success').length;
+    const failed = D.audit.filter((r) => r.result === 'Failed').length;
+    const started = D.audit.filter((r) => r.result === 'Started').length;
+    const uniqueUsers = new Set(D.audit.map((r) => r.user)).size;
+
+    const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+    const safePage = Math.min(page, pageCount);
+    const pageRows = rows.slice((safePage - 1) * pageSize, safePage * pageSize);
+    const filtersOn = q || from || to || actionF !== 'All Actions' || resultF !== 'All Results';
+
+    const exportCsv = () => {
+      const head = 'time,user,action,queue,target,result,duration';
+      const esc = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+      const body = rows.map((r) => [r.time, r.user, r.action, r.queue, r.target, r.result, r.duration].map(esc).join(','));
+      const blob = new Blob([[head].concat(body).join('\n')], { type: 'text/csv' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'queuelens-audit.csv';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    };
+
+    const clearFilters = () => { setQ(''); setActionF('All Actions'); setResultF('All Results'); setFrom(''); setTo(''); setPage(1); };
+
     return (
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <PageHeader title="Audit Log" subtitle="Complete history of all actions performed in QueueLens."
-            actions={<Button variant="secondary" icon="download">Export CSV</Button>} />
+            actions={<Button variant="secondary" icon="download" onClick={exportCsv}>Export CSV</Button>} />
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(215px, 1fr))', gap: 14, marginBottom: 20 }}>
-            <StatCard icon="database" tone="info" value="152" label="Total Actions" sublabel="All time" />
-            <StatCard icon="check-circle" tone="success" value="145" label="Successful" sublabel="95.4%" />
-            <StatCard icon="x-circle" tone="danger" value="5" label="Failed" sublabel="3.3%" />
-            <StatCard icon="clock" tone="warning" value="2" label="In Progress" sublabel="1.3%" />
-            <StatCard icon="users" tone="park" value="18" label="Unique Users" sublabel="All time" />
+            <StatCard icon="database" tone="info" value={String(total)} label="Total Actions" sublabel="Last 500" />
+            <StatCard icon="check-circle" tone="success" value={String(ok)} label="Successful" sublabel={pct(ok, total)} />
+            <StatCard icon="x-circle" tone="danger" value={String(failed)} label="Failed" sublabel={pct(failed, total)} />
+            <StatCard icon="clock" tone="warning" value={String(started)} label="In Progress" sublabel={pct(started, total)} />
+            <StatCard icon="users" tone="park" value={String(uniqueUsers)} label="Unique Users" sublabel="Last 500" />
           </div>
 
           <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-            <div style={{ flex: 1 }}><SearchInput placeholder="Search by queue, user, action…" /></div>
-            <div style={{ width: 140 }}><Select options={['All Actions', 'Replay (Move)', 'Replay (Copy)', 'Park', 'Delete']} /></div>
-            <div style={{ width: 130 }}><Select options={['All Results', 'Success', 'Failed']} /></div>
-            <div style={{ width: 130 }}><Input placeholder="From date" /></div>
-            <div style={{ width: 130 }}><Input placeholder="To date" /></div>
+            <div style={{ flex: 1 }}><SearchInput placeholder="Search by queue, user, action…" value={q} onChange={(v) => { setQ(v); setPage(1); }} /></div>
+            <div style={{ width: 140 }}><Select value={actionF} onChange={(v) => { setActionF(v); setPage(1); }} options={['All Actions', 'Replay (Move)', 'Replay (Copy)', 'Park', 'Delete']} /></div>
+            <div style={{ width: 130 }}><Select value={resultF} onChange={(v) => { setResultF(v); setPage(1); }} options={['All Results', 'Success', 'Failed']} /></div>
+            <div style={{ width: 145 }}><Input type="date" value={from} onChange={(v) => { setFrom(v); setPage(1); }} /></div>
+            <div style={{ width: 145 }}><Input type="date" value={to} onChange={(v) => { setTo(v); setPage(1); }} /></div>
           </div>
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginBottom: 18 }}>
-            <Button variant="ghost">Clear Filters</Button>
-            <Button>Apply Filters</Button>
-          </div>
+          {filtersOn && (
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginBottom: 18 }}>
+              <Button variant="ghost" onClick={clearFilters}>Clear Filters</Button>
+            </div>
+          )}
 
           <Card pad={false}>
-            <DataTable rowKey="time" sortKey="time" onRowClick={setSel} selectedKey={sel && sel.time}
+            <DataTable rowKey="key" sortKey="time" onRowClick={setSel} selectedKey={sel && sel.key}
               columns={[
                 { key: 'time', label: 'Time' },
                 { key: 'user', label: 'User' },
@@ -45,12 +90,18 @@
                 { key: 'duration', label: 'Duration' },
                 { key: 'd', label: 'Details', align: 'right', render: (r) => <IconButton icon="eye" size={28} onClick={() => setSel(r)} /> },
               ]}
-              rows={D.audit} />
+              rows={pageRows} />
             <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderTop: '1px solid var(--slate-100)' }}>
-              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Showing 1 to 10 of 152 actions</span>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                {rows.length
+                  ? `Showing ${(safePage - 1) * pageSize + 1} to ${Math.min(safePage * pageSize, rows.length)} of ${rows.length} actions`
+                  : 'No actions match the current filters'}
+              </span>
               <div style={{ flex: 1 }} />
-              <Pagination page={page} pageCount={16} onChange={setPage} />
-              <div style={{ width: 110, marginLeft: 10 }}><Select options={['10 / page', '25 / page']} /></div>
+              <Pagination page={safePage} pageCount={pageCount} onChange={setPage} />
+              <div style={{ width: 110, marginLeft: 10 }}>
+                <Select value={pageSize + ' / page'} onChange={(v) => { setPageSize(parseInt(v, 10)); setPage(1); }} options={['10 / page', '25 / page']} />
+              </div>
             </div>
           </Card>
         </div>
@@ -65,23 +116,33 @@
             <div style={{ marginTop: 14 }}>
               <KeyValue gap={12} items={[
                 { label: 'Action', value: (() => { const m = ACTION_META[sel.action]; return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: m.color, fontWeight: 600 }}><Icon name={m.icon} size={14} />{m.label}</span>; })() },
-                { label: 'Message ID', value: 'a1b2c3d4-e5f6-11ee-a1b2-0242ac120002', mono: true, copy: true },
+                sel.fingerprint ? { label: 'Fingerprint', value: sel.fingerprint.slice(0, 24) + '…', mono: true, copy: true } : null,
                 { label: 'Source Queue', value: <Badge tone="danger" uppercase={false}>{sel.queue}</Badge> },
                 { label: 'Target', value: <Badge tone="info" uppercase={false}>{sel.target}</Badge> },
                 { label: 'User', value: sel.user },
                 { label: 'Time', value: sel.time },
                 { label: 'Duration', value: sel.duration },
-                { label: 'Published First', value: 'Yes (publish-before-ack)' },
-              ]} />
+                sel.action !== 'delete' ? { label: 'Published First', value: 'Yes (publish-before-ack)' } : null,
+              ].filter(Boolean)} />
             </div>
-            <div style={{ marginTop: 16 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 8 }}>Headers Added</div>
-              <CodeBlock code={`x-queuelens-replayed: true\nx-queuelens-source-queue: ${sel.queue}\nx-queuelens-replayed-at: 2024-05-21T10:24:15.123Z\nx-queuelens-action: ${sel.action}\nx-queuelens-user: ${sel.user}`} />
-            </div>
-            <div style={{ marginTop: 16 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 8 }}>x-death (3)</div>
-              <XDeathTable rows={D.xdeath} />
-            </div>
+            {sel.error && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--danger-600, #dc2626)', marginBottom: 8 }}>Error</div>
+                <CodeBlock code={String(sel.error)} />
+              </div>
+            )}
+            {sel.headersAdded && Object.keys(sel.headersAdded).length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 8 }}>Headers Added</div>
+                <CodeBlock code={Object.entries(sel.headersAdded).map(([k, v]) => k + ': ' + v).join('\n')} />
+              </div>
+            )}
+            {sel.xdeathList.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 8 }}>x-death ({sel.xdeathList.length})</div>
+                <XDeathTable rows={sel.xdeathList} />
+              </div>
+            )}
             <Button variant="secondary" icon="eye" size="sm" style={{ marginTop: 16, color: 'var(--text-link)' }} onClick={() => nav('messages')}>View Message</Button>
           </aside>
         )}

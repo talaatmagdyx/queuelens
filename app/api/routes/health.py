@@ -66,6 +66,32 @@ async def exchanges(
     }
 
 
+@router.get("/api/config")
+async def config(
+    request: Request,
+    _username: str = Depends(get_current_username),
+) -> dict[str, object]:
+    """Read-only runtime configuration (env-var driven; secrets never included)."""
+    settings = request.app.state.settings
+    return {
+        "app_name": settings.app_name,
+        "environment": settings.environment,
+        "auth_enabled": settings.auth_enabled,
+        "management_url": settings.rabbitmq_management_url,
+        "vhost": settings.rabbitmq_vhost,
+        "connection_name": settings.rabbitmq_connection_name,
+        "operation_timeout_seconds": settings.rabbitmq_operation_timeout_seconds,
+        "max_preview_messages": settings.max_preview_messages,
+        "max_message_size_bytes": settings.max_message_size_bytes,
+        "refetch_window_size": settings.refetch_window_size,
+        "max_bulk_size": settings.max_bulk_size,
+        "bulk_dry_run_ttl_seconds": settings.bulk_dry_run_ttl_seconds,
+        "masking_enabled": settings.masking_enabled,
+        "masked_fields": list(settings.masked_field_names),
+        "replay_targets": sorted(settings.replay_targets),
+    }
+
+
 @router.get("/api/broker/test")
 async def broker_test(
     request: Request,
