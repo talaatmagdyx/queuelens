@@ -156,3 +156,51 @@ async def test_unknown_queue_page_returns_404_not_500() -> None:
     assert "Queue not found" in page.text
     assert api.status_code == 404
     assert api.json() == {"detail": "Queue not found"}
+
+
+@pytest.mark.asyncio
+async def test_queue_page_warns_when_preview_is_capped() -> None:
+    app = create_app(Settings(auth_enabled=False, max_preview_messages=2))
+    message = MessageRecord(
+        fingerprint="d" * 64,
+        source_queue="orders.dlq",
+        body=b"{}",
+        payload={},
+        payload_format="json",
+        payload_size=2,
+        content_type="application/json",
+        message_id="m-1",
+        correlation_id=None,
+        timestamp=None,
+        exchange="",
+        routing_key="orders.dlq",
+        headers={},
+        properties={},
+        redelivered=False,
+    )
+
+    class FakeQueueService:
+        async def get_queue(self, name: str) -> QueueInfo:
+            return QueueInfo(
+                name=name,
+                vhost="/",
+                messages=4812,
+                messages_ready=4812,
+                messages_unacked=0,
+                consumers=0,
+                durable=True,
+                is_dlq=True,
+            )
+
+    class FakeMessageService:
+        async def list_messages(self, _queue: str, limit: int) -> list[MessageRecord]:
+            return [message] * limit
+
+    app.state.queue_service = FakeQueueService()
+    app.state.message_service = FakeMessageService()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/queues/orders.dlq")
+
+    assert response.status_code == 200
+    assert "Showing 2 of 4812 messages" in response.text

@@ -5,6 +5,11 @@
 <p class="muted">{{ queue.messages }} total · {{ queue.messages_ready }} ready</p>
 <section class="card">
   <h2>Messages</h2>
+  {% if queue.messages > messages|length %}
+  <p class="notice">Showing {{ messages | length }} of {{ queue.messages }} messages —
+    this is a preview, not the whole queue. Raise <code>QUEUELENS_MAX_PREVIEW_MESSAGES</code>
+    to preview more.</p>
+  {% endif %}
   {% if messages %}<table><thead><tr><th>Fingerprint</th><th>Payload</th><th>Routing key</th><th>Size</th><th></th></tr></thead>
   <tbody>{% for message in messages %}<tr><td class="mono">{{ message.fingerprint[:12] }}</td><td>{{ message.payload_format }}</td><td>{{ message.routing_key }}</td><td>{{ message.payload_size }}</td><td><a href="/messages/{{ queue.name | urlencode }}/{{ message.fingerprint }}">Inspect</a></td></tr>{% endfor %}</tbody></table>
   {% else %}<p>No messages returned.</p>{% endif %}

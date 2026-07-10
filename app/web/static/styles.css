@@ -27,3 +27,5 @@ button:hover { background: #f0f4f8; }
 .action-links { margin-top: .6rem !important; }
 .action-links a { margin-right: 1rem; font-weight: 600; color: inherit; }
 .action-links .muted { color: inherit; opacity: .75; }
+.notice { background: #fff8e6; border: 1px solid #f0d48a; color: #713f12; padding: .6rem .9rem; border-radius: .25rem; }
+.notice code { font-family: ui-monospace, monospace; font-size: .85em; }
