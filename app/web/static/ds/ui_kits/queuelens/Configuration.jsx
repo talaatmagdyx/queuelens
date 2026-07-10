@@ -61,6 +61,7 @@
 
   function Configuration() {
     const CFG = React.useMemo(() => window.QL.fetchConfig(), []);
+    const live = React.useMemo(() => window.QL.testConnection() || {}, []);
     const [tab, setTab] = React.useState('conn');
     const [test, setTest] = React.useState(null);
     const [testing, setTesting] = React.useState(false);
@@ -176,20 +177,26 @@
             <SideRow icon="git-branch" label="Broker Version" value={B.api.replace('RabbitMQ ', '')} />
             <SideRow icon="server" label="Management API" value={CFG.management_url || '—'} />
             <SideRow icon="home" label="Virtual Host" value={B.vhost} />
-            <SideRow icon="list" label="Queue Count" value={String(D.queues.length)} />
-            <SideRow icon="clock" label="API Latency" value={B.latency} />
+            <SideRow icon="users" label="Cluster Name" value={live.cluster_name || '\u2014'} />
+            <SideRow icon="list" label="Queue Count" value={String(live.queues != null ? live.queues : D.queues.length)} />
+            <SideRow icon="clock" label="API Latency" value={live.latency_ms != null ? live.latency_ms + 'ms' : B.latency} />
+            <SideRow icon="badge-check" label="Last Check" value="just now" />
+            <Button variant="secondary" iconRight="external-link" style={{ width: '100%', marginTop: 10, color: 'var(--text-link)' }}
+              onClick={() => window.open(CFG.management_url, '_blank', 'noopener')}>View Broker Overview</Button>
           </Card>
           <Card title="Safety Defaults (Summary)">
             <CheckRow label="Publish-before-ack" right="Enabled" />
             <CheckRow label="Non-destructive browsing" right="Enabled" />
             <CheckRow label="Audit everything" right="Enabled" />
             <CheckRow label="Payload masking" right={CFG.masking_enabled ? 'Enabled' : 'Off'} />
+            <Button variant="secondary" iconRight="chevron-right" style={{ width: '100%', marginTop: 10 }} onClick={() => setTab('safety')}>View Safety Defaults</Button>
           </Card>
           <Card title="Limits (Summary)">
             <SideRow icon="eye" label="Message Preview Limit" value={String(CFG.max_preview_messages ?? '—')} />
             <SideRow icon="layers" label="Max Bulk Size" value={String(CFG.max_bulk_size ?? '—')} />
             <SideRow icon="clock" label="Operation Timeout" value={(CFG.operation_timeout_seconds ?? '—') + 's'} />
             <SideRow icon="timer" label="Dry-Run TTL" value={(CFG.bulk_dry_run_ttl_seconds ?? '—') + 's'} />
+            <Button variant="secondary" iconRight="chevron-right" style={{ width: '100%', marginTop: 10 }} onClick={() => setTab('limits')}>View Limits &amp; Timeouts</Button>
           </Card>
         </div>
       </div>
