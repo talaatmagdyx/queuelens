@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
 from app.application.message_service import MessageService, message_to_dict
 from app.auth.basic import get_current_username
+from app.observability.metrics import PREVIEW_REQUESTS
 
 router = APIRouter(prefix="/api/queues", tags=["messages"])
 
@@ -20,6 +21,7 @@ async def list_messages(
     limit: int = Query(default=100, ge=1, le=100),
 ) -> dict[str, object]:
     settings = request.app.state.settings
+    PREVIEW_REQUESTS.inc()
     messages = await _service(request).list_messages(queue_name, limit)
     return {
         "messages": [

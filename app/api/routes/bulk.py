@@ -1,3 +1,4 @@
+import time
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
@@ -9,6 +10,7 @@ from app.api.routes.actions import TargetRequest
 from app.application.bulk_service import BulkActionService, UnknownBulkBatch
 from app.auth.basic import get_current_username
 from app.domain.models import AuditEntry
+from app.observability.metrics import ACTIONS, OPERATION_SECONDS
 
 router = APIRouter(prefix="/api/messages/bulk", tags=["bulk"])
 
@@ -67,6 +69,7 @@ async def execute(
         "x-queuelens-replayed-at": datetime.now(UTC).isoformat(),
         "x-queuelens-replayed-by": username,
     }
+    started_at = time.perf_counter()
     try:
         batch, outcome = await service.execute(body.batch_id, replay_headers=replay_headers)
     except UnknownBulkBatch as error:
@@ -92,6 +95,18 @@ async def execute(
         raise HTTPException(status_code=502, detail="Bulk operation failed") from error
 
     summary = cast(dict[str, int], outcome["summary"])
+    bulk_action = f"bulk_{batch.action}"
+    OPERATION_SECONDS.labels(action=bulk_action).observe(time.perf_counter() - started_at)
+    envelope_result = "success" if summary["failed"] == 0 else "partial"
+    ACTIONS.labels(action=bulk_action, result=envelope_result).inc()
+    for label, count in (
+        ("success", summary["succeeded"]),
+        ("failed", summary["failed"]),
+        ("skipped_duplicate", summary["skipped_duplicates"]),
+        ("not_found", summary["not_found"]),
+    ):
+        if count:
+            ACTIONS.labels(action=batch.action, result=label).inc(count)
     for result in cast(list[dict[str, Any]], outcome["results"]):
         await audit.record(
             AuditEntry(

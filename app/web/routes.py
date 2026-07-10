@@ -8,6 +8,7 @@ from fastapi.templating import Jinja2Templates
 from app.application.message_service import MessageService, message_to_dict
 from app.application.queue_service import QueueService, queues_to_dicts
 from app.auth.basic import get_current_username
+from app.observability.metrics import PREVIEW_REQUESTS
 
 router = APIRouter(tags=["web"])
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -39,6 +40,7 @@ async def queue_detail(
 ) -> HTMLResponse:
     settings = request.app.state.settings
     queue = await cast(QueueService, request.app.state.queue_service).get_queue(queue_name)
+    PREVIEW_REQUESTS.inc()
     messages = await cast(MessageService, request.app.state.message_service).list_messages(
         queue_name, settings.max_preview_messages
     )

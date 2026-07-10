@@ -48,6 +48,31 @@ The app keeps serving during a broker outage: pages that need the broker return 
 clear message, and a background loop retries the initial connection every 5 s (aio-pika's
 robust connection handles reconnects after that).
 
+## Monitoring
+
+`GET /metrics` serves Prometheus metrics behind the same Basic Auth as the app:
+
+```yaml
+scrape_configs:
+  - job_name: queuelens
+    metrics_path: /metrics
+    basic_auth:
+      username: admin
+      password: change-me
+    static_configs:
+      - targets: ["queuelens.internal:8000"]
+```
+
+The two gauges (`queuelens_rabbitmq_ready`, `queuelens_dlq_messages{queue}`) are refreshed
+at scrape time from the live broker, so each scrape costs one Management API call. Counters
+(`queuelens_actions_total`, `queuelens_preview_requests_total`) and the operation-duration
+histogram accumulate in process — they reset on restart, as Prometheus counters are
+expected to.
+
+Ready-made alert rules (broker down, DLQ above threshold, DLQ growing, action failures)
+ship in [`deploy/prometheus/alerts.yml`](../deploy/prometheus/alerts.yml); tune the
+thresholds to your traffic.
+
 ## Audit store
 
 - SQLite at `QUEUELENS_DATABASE_URL` (compose: named volume `queuelens-data`).

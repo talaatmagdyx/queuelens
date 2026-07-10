@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import actions, audit, bulk, health, messages, queues
+from app.api.routes import actions, audit, bulk, health, messages, metrics, queues
 from app.application.action_service import ActionService
 from app.application.bulk_service import BulkActionService
 from app.application.message_service import MessageService
@@ -96,6 +96,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.queue_service = QueueService(management)
     _register_error_handlers(app)
     app.include_router(health.router)
+    app.include_router(metrics.router)
     app.include_router(queues.router)
     app.include_router(audit.router)
     app.include_router(messages.router)

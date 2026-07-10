@@ -1,3 +1,4 @@
+import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Literal, cast
@@ -10,6 +11,7 @@ from pydantic import BaseModel, Field
 from app.application.action_service import ActionService
 from app.auth.basic import get_current_username
 from app.domain.models import AuditEntry, ReplayTarget
+from app.observability.metrics import ACTIONS, OPERATION_SECONDS
 
 router = APIRouter(prefix="/api/messages", tags=["actions"])
 
@@ -66,9 +68,12 @@ async def _run_action(
             result="started",
         )
     )
+    started_at = time.perf_counter()
     try:
         result = await operation()
     except Exception as error:
+        OPERATION_SECONDS.labels(action=action).observe(time.perf_counter() - started_at)
+        ACTIONS.labels(action=action, result="failed").inc()
         await audit.record(
             AuditEntry(
                 username=username,
@@ -98,6 +103,8 @@ async def _run_action(
         if isinstance(error, ValueError):
             raise HTTPException(status_code=400, detail=str(error)) from error
         raise HTTPException(status_code=502, detail="Message operation failed") from error
+    OPERATION_SECONDS.labels(action=action).observe(time.perf_counter() - started_at)
+    ACTIONS.labels(action=action, result="success").inc()
     await audit.record(
         AuditEntry(
             username=username,

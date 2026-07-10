@@ -17,6 +17,20 @@ live; `503 {"status": "not_ready"}` otherwise (including mid-outage — connecti
 tracked via close/reconnect callbacks, not just socket state). Use this for load-balancer and
 Kubernetes readiness probes.
 
+### `GET /metrics`
+Prometheus metrics (requires Basic Auth like the rest of the app — configure
+`basic_auth` in your scrape job):
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `queuelens_rabbitmq_ready` | gauge | 1 when the AMQP connection is live (refreshed at scrape time) |
+| `queuelens_dlq_messages{queue}` | gauge | Messages in each detected DLQ (refreshed at scrape time) |
+| `queuelens_preview_requests_total` | counter | Queue previews served (UI + API) |
+| `queuelens_actions_total{action,result}` | counter | Actions by result; `bulk_<action>` rows are batch envelopes, plain rows count individual messages |
+| `queuelens_operation_duration_seconds{action}` | histogram | Broker operation duration |
+
+Example alert rules ship in [`deploy/prometheus/alerts.yml`](../deploy/prometheus/alerts.yml).
+
 ## Queues
 
 ### `GET /api/queues`

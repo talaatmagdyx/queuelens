@@ -1,0 +1,42 @@
+# Example Prometheus alert rules for QueueLens.
+# Scrape /metrics with basic_auth (see docs/OPERATIONS.md), then tune the
+# thresholds below to your traffic before shipping them to Alertmanager.
+
+groups:
+  - name: queuelens
+    rules:
+      - alert: QueueLensBrokerDown
+        expr: queuelens_rabbitmq_ready == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "QueueLens lost its RabbitMQ connection"
+          description: "queuelens_rabbitmq_ready has been 0 for 5 minutes."
+
+      - alert: DLQAboveThreshold
+        expr: queuelens_dlq_messages > 1000
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DLQ {{ $labels.queue }} holds more than 1000 messages"
+          description: "{{ $labels.queue }} has {{ $value }} dead letters."
+
+      - alert: DLQGrowing
+        expr: delta(queuelens_dlq_messages[30m]) > 100
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DLQ {{ $labels.queue }} is growing fast"
+          description: "{{ $labels.queue }} grew by {{ $value }} messages in 30 minutes."
+
+      - alert: QueueLensActionFailures
+        expr: increase(queuelens_actions_total{result="failed"}[15m]) > 3
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "QueueLens actions are failing"
+          description: "{{ $value }} failed actions in the last 15 minutes — check the audit log."
