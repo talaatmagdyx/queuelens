@@ -54,8 +54,12 @@
   function Messages({ nav, queue = 'payments.retry.dlq', role = 'Admin' }) {
     const canDelete = role === 'Admin';
     const canAct = role !== 'Viewer';
-    const [rows, setRows] = React.useState(D.messages);
-    const [selected, setSelected] = React.useState(D.messages[0].id);
+    const initialRows = React.useMemo(
+      () => (queue === window.QL.defaultQueue ? D.messages : window.QL.fetchMessages(queue)),
+      [queue]);
+    const [rows, setRows] = React.useState(initialRows);
+    React.useEffect(() => { setRows(initialRows); setChecked([]); }, [initialRows]);
+    const [selected, setSelected] = React.useState(initialRows[0] ? initialRows[0].id : null);
     const [panelOpen, setPanelOpen] = React.useState(true);
     const [tab, setTab] = React.useState('payload');
     const [checked, setChecked] = React.useState([]);

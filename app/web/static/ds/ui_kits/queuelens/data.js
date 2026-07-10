@@ -80,16 +80,13 @@ window.QL = window.QL || {};
   var defaultQueue = dlqs.length ? dlqs[0].name : (queuesRaw[0] ? queuesRaw[0].name : '');
   window.QL.defaultQueue = defaultQueue;
 
-  var messagesRaw = defaultQueue
-    ? ((getJson('/api/queues/' + encodeURIComponent(defaultQueue) + '/messages') || {}).messages || [])
-    : [];
   function mapXDeath(list) {
     return (list || []).map(function (d, i) {
       return { n: i + 1, reason: d.reason, queue: d.queue, count: d.count, time: d.time ? rel(d.time) : '—' };
     });
   }
 
-  var messages = messagesRaw.map(function (m) {
+  function mapMessage(m) {
     return {
       id: m.message_id || m.fingerprint.slice(0, 12),
       fingerprint: m.fingerprint, queue: m.queue,
@@ -103,7 +100,18 @@ window.QL = window.QL || {};
       xdeathList: mapXDeath(m.x_death),
       xdeathRaw: m.x_death || [],
     };
-  });
+  }
+
+  window.QL.fetchMessages = function (queue) {
+    if (!queue) return [];
+    var raw = (getJson('/api/queues/' + encodeURIComponent(queue) + '/messages') || {}).messages || [];
+    return raw.map(mapMessage);
+  };
+
+  var messagesRaw = defaultQueue
+    ? ((getJson('/api/queues/' + encodeURIComponent(defaultQueue) + '/messages') || {}).messages || [])
+    : [];
+  var messages = messagesRaw.map(mapMessage);
 
   var first = messagesRaw[0];
   var payload = first ? JSON.stringify(first.payload, null, 2) : '{}';
