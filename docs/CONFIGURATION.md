@@ -40,6 +40,19 @@ The AMQP user needs read/write/configure on the inspected queues: browsing reque
 | `QUEUELENS_MAX_MESSAGE_SIZE_BYTES` | `1048576` | Payloads larger than this are truncated in responses (the message itself is untouched) |
 | `QUEUELENS_REFETCH_WINDOW_SIZE` | `100` | How many messages detail lookup and actions re-scan to find a fingerprint. Raise it for deep queues — actions can only act on messages within this window |
 
+## Masking
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `QUEUELENS_MASKING_ENABLED` | `true` | Display-only masking of sensitive values in payloads, headers, and properties |
+| `QUEUELENS_MASKED_FIELDS` | `password,token,access_token,refresh_token,authorization,api_key,secret,email,phone` | Comma-separated key names whose values render as `•••` |
+
+Key matching ignores case and `-`/`_` separators, so `api_key` also masks `API-Key` and
+`apiKey`. Masking is **display-only**: it applies where messages are rendered (UI and read
+API) and never modifies the stored message or a replay payload. It is key-based — values
+containing secrets under unlisted keys are not detected. See
+[SAFETY.md](SAFETY.md#known-limits-phase-1-by-design).
+
 ## Replay targets
 
 | Variable | Default | Meaning |

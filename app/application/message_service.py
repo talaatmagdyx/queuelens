@@ -26,11 +26,18 @@ class MessageNotUniquelyIdentifiable(LookupError):
     """The best-effort fingerprint did not identify exactly one message."""
 
 
+MASKED_VALUE = "•••"
+
+_EMPTY: frozenset[str] = frozenset()
+
+
 def message_to_dict(
     message: MessageRecord,
     max_message_size_bytes: int | None = None,
+    masked_fields: tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    payload = message.payload
+    masked = frozenset(_normalize_key(field) for field in masked_fields)
+    payload: Any = _jsonable(message.payload, masked)
     payload_truncated = False
     if max_message_size_bytes is not None and message.payload_size > max_message_size_bytes:
         payload = f"[payload truncated at {max_message_size_bytes} bytes]"
@@ -48,22 +55,35 @@ def message_to_dict(
         "timestamp": message.timestamp.isoformat() if message.timestamp else None,
         "exchange": message.exchange,
         "routing_key": message.routing_key,
-        "headers": _jsonable(message.headers),
-        "properties": _jsonable(message.properties),
+        "headers": _jsonable(message.headers, masked),
+        "properties": _jsonable(message.properties, masked),
         "redelivered": message.redelivered,
         "x_death": _jsonable(message.x_death),
     }
 
 
-def _jsonable(value: Any) -> Any:
-    """Broker headers may carry datetimes (x-death "time") and raw bytes,
-    which Jinja's tojson cannot serialize."""
+def _normalize_key(key: str) -> str:
+    """Compare keys ignoring case and -/_ so "API-Key", "api_key", and
+    "apiKey" all match a configured "api_key"."""
+    return key.strip().lower().replace("-", "").replace("_", "")
+
+
+def _jsonable(value: Any, masked: frozenset[str] = _EMPTY) -> Any:
+    """Make broker data renderable and safe: datetimes (x-death "time") and
+    raw bytes become strings, and values under configured sensitive keys are
+    replaced. Display-only — the original message and replay payload are
+    built from MessageRecord, never from this dict."""
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     if isinstance(value, dict):
-        return {key: _jsonable(item) for key, item in value.items()}
+        return {
+            key: MASKED_VALUE
+            if masked and _normalize_key(str(key)) in masked
+            else _jsonable(item, masked)
+            for key, item in value.items()
+        }
     if isinstance(value, list | tuple):
-        return [_jsonable(item) for item in value]
+        return [_jsonable(item, masked) for item in value]
     return value

@@ -74,8 +74,11 @@ reconnection). Management API errors → `502`/`503`. No failure mode returns a 
   `QUEUELENS_REFETCH_WINDOW_SIZE`, a message beyond the window cannot be acted on.
 - **Scan-and-requeue is O(window) per action** and briefly holds the scanned messages
   unacked. Fine for operator workflows; bulk operations will need a different design.
-- **No payload masking yet.** DLQ payloads may contain secrets or PII — deploy inside a
-  trusted network only (see [OPERATIONS.md](OPERATIONS.md)).
+- **Masking is key-based and display-only.** Values under configured sensitive keys
+  (`QUEUELENS_MASKED_FIELDS`) render as `•••` in the UI and read API, but values containing
+  secrets under other keys are not detected, and replayed messages carry the original,
+  unmasked payload by design. Deploy inside a trusted network
+  (see [OPERATIONS.md](OPERATIONS.md)).
 - **Copy replay can duplicate.** By definition, copy leaves the original and creates a new
   message. Downstream consumers should be idempotent or use the
   `x-queuelens-original-fingerprint` header to deduplicate.

@@ -98,6 +98,9 @@ nothing is consumed (the broker's `redelivered` flag will be set).
 - Payloads larger than `QUEUELENS_MAX_MESSAGE_SIZE_BYTES` are replaced with a truncation
   marker and `payload_truncated: true`.
 - Datetimes and raw bytes inside headers/properties/x-death are normalized to strings.
+- Values under configured sensitive keys (`QUEUELENS_MASKED_FIELDS`, matching ignores case
+  and `-`/`_`) render as `•••` in payloads, headers, and properties. Display-only — replay
+  always uses the original message. Disable with `QUEUELENS_MASKING_ENABLED=false`.
 
 ### `GET /api/queues/{queue_name}/messages/{fingerprint}`
 Detail lookup by fingerprint (min length 8) within a bounded re-fetch window

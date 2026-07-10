@@ -26,6 +26,16 @@ class Settings(BaseSettings):
     max_message_size_bytes: int = 1_048_576
     refetch_window_size: int = 100
     replay_targets_json: str = "{}"
+    masking_enabled: bool = True
+    masked_fields: str = (
+        "password,token,access_token,refresh_token,authorization,api_key,secret,email,phone"
+    )
+
+    @property
+    def masked_field_names(self) -> tuple[str, ...]:
+        if not self.masking_enabled:
+            return ()
+        return tuple(field.strip() for field in self.masked_fields.split(",") if field.strip())
 
     @property
     def replay_targets(self) -> dict[str, dict[str, Any]]:

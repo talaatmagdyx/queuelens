@@ -19,10 +19,15 @@ async def list_messages(
     _username: str = Depends(get_current_username),
     limit: int = Query(default=100, ge=1, le=100),
 ) -> dict[str, object]:
+    settings = request.app.state.settings
     messages = await _service(request).list_messages(queue_name, limit)
     return {
         "messages": [
-            message_to_dict(message, request.app.state.settings.max_message_size_bytes)
+            message_to_dict(
+                message,
+                settings.max_message_size_bytes,
+                masked_fields=settings.masked_field_names,
+            )
             for message in messages
         ]
     }
@@ -35,16 +40,19 @@ async def get_message(
     fingerprint: str = Path(min_length=8),
     _username: str = Depends(get_current_username),
 ) -> dict[str, object]:
+    settings = request.app.state.settings
     try:
         message = await _service(request).get_message(
             queue_name,
             fingerprint,
-            request.app.state.settings.refetch_window_size,
+            settings.refetch_window_size,
         )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return {
         "message": message_to_dict(
-            message, request.app.state.settings.max_message_size_bytes
+            message,
+            settings.max_message_size_bytes,
+            masked_fields=settings.masked_field_names,
         )
     }

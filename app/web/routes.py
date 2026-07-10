@@ -37,16 +37,19 @@ async def queue_detail(
     queue_name: str,
     _username: str = Depends(get_current_username),
 ) -> HTMLResponse:
+    settings = request.app.state.settings
     queue = await cast(QueueService, request.app.state.queue_service).get_queue(queue_name)
     messages = await cast(MessageService, request.app.state.message_service).list_messages(
-        queue_name, request.app.state.settings.max_preview_messages
+        queue_name, settings.max_preview_messages
     )
     return templates.TemplateResponse(
         request=request,
         name="queue.html",
         context={
             "queue": queues_to_dicts([queue])[0],
-            "messages": [message_to_dict(m) for m in messages],
+            "messages": [
+                message_to_dict(m, masked_fields=settings.masked_field_names) for m in messages
+            ],
         },
     )
 
@@ -58,15 +61,18 @@ async def message_detail(
     fingerprint: str,
     _username: str = Depends(get_current_username),
 ) -> HTMLResponse:
+    settings = request.app.state.settings
     message = await cast(MessageService, request.app.state.message_service).get_message(
-        queue_name, fingerprint, request.app.state.settings.refetch_window_size
+        queue_name, fingerprint, settings.refetch_window_size
     )
     return templates.TemplateResponse(
         request=request,
         name="message.html",
         context={
             "message": message_to_dict(
-                message, request.app.state.settings.max_message_size_bytes
+                message,
+                settings.max_message_size_bytes,
+                masked_fields=settings.masked_field_names,
             )
         },
     )
