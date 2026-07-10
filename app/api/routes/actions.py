@@ -57,8 +57,17 @@ async def _run_action(
     source_queue: str,
     fingerprint: str,
     operation: Callable[[], Awaitable[dict[str, object]]],
+    target: ReplayTarget | None = None,
+    mode: str | None = None,
 ) -> dict[str, object]:
     audit = request.app.state.audit_repository
+    target_fields: dict[str, str | None] = {
+        "target_type": target.type if target else None,
+        "target_queue": target.queue if target else None,
+        "target_exchange": target.exchange if target else None,
+        "target_routing_key": target.routing_key if target else None,
+    }
+    mode_meta: dict[str, object] = {"mode": mode} if mode else {}
     await audit.record(
         AuditEntry(
             username=username,
@@ -67,6 +76,8 @@ async def _run_action(
             source_queue=source_queue,
             message_fingerprint=fingerprint,
             result="started",
+            metadata=dict(mode_meta),
+            **target_fields,
         )
     )
     started_at = time.perf_counter()
@@ -85,7 +96,8 @@ async def _run_action(
                 message_fingerprint=fingerprint,
                 result="failed",
                 error_message=str(error),
-                metadata={"duration_ms": elapsed_ms},
+                metadata={"duration_ms": elapsed_ms, **mode_meta},
+                **target_fields,
             )
         )
         if isinstance(error, LookupError):
@@ -109,7 +121,7 @@ async def _run_action(
     elapsed_ms = round((time.perf_counter() - started_at) * 1000)
     OPERATION_SECONDS.labels(action=action).observe(elapsed_ms / 1000)
     ACTIONS.labels(action=action, result="success").inc()
-    metadata: dict[str, object] = {"duration_ms": elapsed_ms}
+    metadata: dict[str, object] = {"duration_ms": elapsed_ms, **mode_meta}
     if result.get("headers_added"):
         metadata["headers_added"] = result["headers_added"]
     if result.get("x_death"):
@@ -123,6 +135,7 @@ async def _run_action(
             message_fingerprint=fingerprint,
             result="success",
             metadata=metadata,
+            **target_fields,
         )
     )
     return result
@@ -150,6 +163,8 @@ async def replay(
             username=username,
             annotate=body.annotate,
         ),
+        target=body.target.to_domain() if body.target else None,
+        mode=body.mode,
     )
 
 
@@ -171,6 +186,7 @@ async def park(
             source_queue=body.source_queue,
             fingerprint=body.fingerprint,
         ),
+        target=ReplayTarget(type="queue", queue=f"{body.source_queue}.parking"),
     )
 
 

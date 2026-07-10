@@ -43,6 +43,10 @@ class BulkActionService:
         self._batches: dict[str, BulkBatch] = {}
         self._lock = asyncio.Lock()  # one bulk execution at a time
 
+    def peek(self, batch_id: str) -> BulkBatch | None:
+        """Look up a dry-run batch without consuming it (for audit context)."""
+        return self._batches.get(batch_id)
+
     async def dry_run(
         self,
         *,

@@ -198,6 +198,9 @@ async def test_bulk_routes_confirmation_expiry_and_audit(tmp_path) -> None:
         async def dry_run(self, **_kwargs: object) -> dict[str, object]:
             return {"batch_id": "batch-1234", "message_count": 2}
 
+        def peek(self, _batch_id: str) -> None:
+            return None
+
         async def execute(self, batch_id: str, **_kwargs: object):
             if batch_id == "expired-1234":
                 raise UnknownBulkBatch("Unknown or expired dry-run batch")

@@ -58,7 +58,9 @@ window.QL.screens = window.QL.screens || {};
       && e.metadata.headers_added['x-queuelens-action'];
     if (stamped === 'replay_move' || stamped === 'replay_copy') return stamped;
     var action = (e.action || '').replace(/^bulk_/, '');
-    if (action === 'replay') return 'replay_move';
+    if (action === 'replay') {
+      return (e.metadata && e.metadata.mode) === 'copy' ? 'replay_copy' : 'replay_move';
+    }
     return action === 'park' || action === 'delete' ? action : 'replay_move';
   }
 

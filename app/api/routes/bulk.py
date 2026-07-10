@@ -58,9 +58,13 @@ async def dry_run(
                 action=f"bulk_{body.action}",
                 timestamp=datetime.now(UTC),
                 source_queue=body.source_queue,
+                target_type=body.target.type if body.target else None,
+                target_queue=body.target.queue if body.target else None,
+                target_exchange=body.target.exchange if body.target else None,
+                target_routing_key=body.target.routing_key if body.target else None,
                 result="failed",
                 error_message=str(error),
-                metadata={"stage": "dry_run"},
+                metadata={"stage": "dry_run", "mode": body.mode},
             )
         )
         if isinstance(error, ChannelNotFoundEntity):
@@ -89,6 +93,7 @@ async def execute(
         "x-queuelens-replayed-by": username,
     }
     started_at = time.perf_counter()
+    pending = service.peek(body.batch_id)  # batch context for failure audits
     try:
         batch, outcome = await service.execute(body.batch_id, replay_headers=replay_headers)
     except UnknownBulkBatch as error:
@@ -97,11 +102,21 @@ async def execute(
         await audit.record(
             AuditEntry(
                 username=username,
-                action="bulk",
+                action=f"bulk_{pending.action}" if pending else "bulk",
                 timestamp=datetime.now(UTC),
+                source_queue=pending.source_queue if pending else None,
+                target_type=pending.target.type if pending and pending.target else None,
+                target_queue=pending.target.queue if pending and pending.target else None,
+                target_exchange=pending.target.exchange if pending and pending.target else None,
+                target_routing_key=(
+                    pending.target.routing_key if pending and pending.target else None
+                ),
                 result="failed",
                 error_message=str(error),
-                metadata={"batch_id": body.batch_id},
+                metadata={
+                    "batch_id": body.batch_id,
+                    "mode": pending.operator_action if pending else None,
+                },
             )
         )
         if isinstance(error, ChannelNotFoundEntity):
@@ -151,7 +166,12 @@ async def execute(
             target_exchange=batch.target.exchange if batch.target else None,
             target_routing_key=batch.target.routing_key if batch.target else None,
             result="success" if summary["failed"] == 0 else "partial",
-            metadata={"batch_id": body.batch_id, "duration_ms": elapsed_ms, **summary},
+            metadata={
+                "batch_id": body.batch_id,
+                "duration_ms": elapsed_ms,
+                "mode": batch.operator_action,
+                **summary,
+            },
         )
     )
     return outcome
