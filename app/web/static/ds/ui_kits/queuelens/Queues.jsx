@@ -56,6 +56,7 @@
                 <span style={{ display: 'inline-flex', gap: 6 }}>
                   <Badge tone={TYPE_TONE[r.type]}>{r.type}</Badge>
                   {r.retry && <Badge tone="warning" uppercase={false}>retry</Badge>}
+                  {r.qtype && r.qtype !== 'classic' && <Badge tone={r.qtype === 'quorum' ? 'park' : 'info'} uppercase={false}>{r.qtype}</Badge>}
                 </span>) },
               { key: 'messages', label: 'Messages', render: (r) => <span style={{ fontWeight: 600, color: r.status === 'attention' ? 'var(--red-600)' : 'var(--slate-700)' }}>{r.messages}</span> },
               { key: 'ready', label: 'Ready' },

@@ -54,7 +54,7 @@
       data-name="{{ queue.name }}" data-kind="{{ queue.kind }}" data-status="{{ queue.status }}"
       data-dlq="{{ 1 if queue.is_dlq else 0 }}" data-messages="{{ queue.messages }}" data-consumers="{{ queue.consumers }}">
     <td><a href="/queues/{{ queue.name | urlencode }}" class="mono">{{ queue.name }}</a></td>
-    <td><span class="badge k-{{ queue.kind }}">{{ queue.kind }}</span></td>
+    <td><span style="display: inline-flex; gap: 6px"><span class="badge k-{{ queue.kind }}">{{ queue.kind }}</span>{% if queue.queue_type != 'classic' %}<span class="badge qt-{{ queue.queue_type }}">{{ queue.queue_type }}</span>{% endif %}</span></td>
     <td class="mono"{% if queue.severity == 'attention' %} style="color: var(--red); font-weight: 700"{% endif %}>{{ queue.messages }}</td>
     <td class="mono">{{ queue.messages_ready }}</td>
     <td class="mono">{{ queue.messages_unacked }}</td>

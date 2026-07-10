@@ -832,3 +832,7 @@ input::placeholder { color: var(--muted); }
 .action-name.a-replay, .action-name.a-bulk_replay { color: var(--accent); }
 .action-name.a-park, .action-name.a-bulk_park { color: var(--purple); }
 .action-name.a-delete, .action-name.a-bulk_delete { color: var(--red); }
+
+/* RabbitMQ queue-type badges (classic is the default and stays unbadged) */
+.badge.qt-quorum { color: var(--purple); border-color: var(--purple-soft); background: var(--purple-soft); }
+.badge.qt-stream { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }

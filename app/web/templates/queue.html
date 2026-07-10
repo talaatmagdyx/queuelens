@@ -9,6 +9,7 @@
   <div><span>Total</span><b>{{ queue.messages }}</b></div>
   <div><span>Consumers</span><b>{{ queue.consumers }}</b></div>
   <div><span>Message Rate (in)</span><b>{{ (queue.publish_rate ~ '/s') if queue.publish_rate is not none else '—' }}</b></div>
+  <div><span>Queue Type</span><b>{{ queue.queue_type }}</b></div>
   <div><span>Durable</span><b>{{ 'yes' if queue.durable else 'no' }}</b></div>
   <div><span>Preview Limit</span><b>{{ messages | length }}</b></div>
 </div>

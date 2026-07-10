@@ -89,3 +89,32 @@ async def test_source_queues_with_dlx_arguments_are_not_listed_as_dlqs() -> None
     await client.aclose()
 
     assert sorted(queue.name for queue in queues) == ["email.dlq", "orders.failed"]
+
+
+@pytest.mark.asyncio
+async def test_queue_type_extracted_from_type_field_or_arguments() -> None:
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        def queue(name: str, extra: dict) -> dict:
+            return {
+                "name": name, "vhost": "/", "messages": 0, "messages_ready": 0,
+                "messages_unacknowledged": 0, "consumers": 0, "durable": True,
+                "arguments": {}, **extra,
+            }
+
+        return httpx.Response(200, json=[
+            queue("orders.dlq", {"type": "quorum"}),
+            queue("audit.stream.dlq", {"arguments": {"x-queue-type": "stream"}}),
+            queue("legacy.dlq", {}),
+        ])
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="http://management.test"
+    )
+    management = RabbitMQManagementClient(settings(), client=client)
+    queues = await QueueService(management).list_queues()
+    await client.aclose()
+
+    by_name = {q.name: q.queue_type for q in queues}
+    assert by_name["orders.dlq"] == "quorum"
+    assert by_name["audit.stream.dlq"] == "stream"
+    assert by_name["legacy.dlq"] == "classic"

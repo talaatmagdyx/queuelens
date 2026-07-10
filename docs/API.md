@@ -58,6 +58,9 @@ List queues in the configured vhost.
 }
 ```
 
+`queue_type` is the RabbitMQ queue type (`classic`, `quorum`, or `stream`), read from the
+Management API `type` field with an `x-queue-type` argument fallback.
+
 `is_dlq` is true when the name matches `.dlq` / `_dlq` / `dead`, or when another queue
 dead-letters into it via the default exchange.
 

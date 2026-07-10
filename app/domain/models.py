@@ -15,6 +15,7 @@ class QueueInfo:
     arguments: dict[str, Any] = field(default_factory=dict)
     is_dlq: bool = False
     kind: str = "dlq"  # dlq | parking | retry | normal
+    queue_type: str = "classic"  # classic | quorum | stream
     publish_rate: float | None = None
     idle_since: str | None = None
 

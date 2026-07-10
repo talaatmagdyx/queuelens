@@ -68,6 +68,7 @@ window.QL = window.QL || {};
       name: q.name, type: type, messages: q.messages, ready: q.messages_ready,
       unacked: q.messages_unacked, consumers: q.consumers,
       status: STATUS_ALIAS[q.status] || q.status,
+      qtype: q.queue_type,
       last: q.idle_since ? rel(q.idle_since.replace(' ', 'T')) : '—',
     };
     if (q.kind === 'retry') row.retry = true;
