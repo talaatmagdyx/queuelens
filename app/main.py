@@ -78,7 +78,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    app = FastAPI(title="QueueLens", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="QueueLens", version="0.2.0", lifespan=lifespan)
     app.state.settings = settings or get_settings()
     database = Database(app.state.settings.database_url)
     app.state.database = database
