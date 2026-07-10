@@ -13,6 +13,27 @@
       <span class="step" data-step="4"><i>4</i> Execute</span>
     </div>
     <section class="card">
+      <h2>1. Select Action</h2>
+      <p class="card-sub">Choose how you want to handle this message.</p>
+      <div class="action-cards">
+        <a class="action-card" href="/messages/{{ message.queue | urlencode }}/{{ message.fingerprint }}/replay" style="text-decoration: none">
+          <b>▶ Replay (Move)</b>
+          <span>Publish to target and remove from the source queue.</span>
+          <em class="badge b-success">Recommended</em>
+        </a>
+        <a class="action-card" href="/messages/{{ message.queue | urlencode }}/{{ message.fingerprint }}/replay" style="text-decoration: none">
+          <b>⧉ Replay (Copy)</b>
+          <span>Publish a copy to target without removing from source.</span>
+          <em class="badge b-json">Non-destructive</em>
+        </a>
+        <span class="action-card selected">
+          <b>⚑ Park Message</b>
+          <span>Send to a parking queue for manual inspection.</span>
+          <em class="badge b-started">Safe Holding</em>
+        </span>
+      </div>
+    </section>
+    <section class="card">
       <h2>2. Parking Destination</h2>
       <p class="card-sub">Parked messages go to a dedicated parking queue, created on demand.</p>
       <div class="table-wrap"><table><tbody>

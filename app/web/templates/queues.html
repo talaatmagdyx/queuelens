@@ -49,7 +49,7 @@
     <button data-tab="noconsumers">No Consumers<span class="count" id="c-noconsumers"></span></button>
   </div>
   <div class="table-wrap">
-  <table id="q-table"><thead><tr><th>Queue Name</th><th>Type</th><th>Messages</th><th>Ready</th><th>Unacked</th><th>Consumers</th><th>Status</th><th></th></tr></thead>
+  <table id="q-table"><thead><tr><th>Queue Name</th><th>Type</th><th>Messages</th><th>Ready</th><th>Unacked</th><th>Consumers</th><th>Status</th><th>Last Activity</th><th></th></tr></thead>
   <tbody>{% for queue in queues %}<tr data-href="/queues/{{ queue.name | urlencode }}"
       data-name="{{ queue.name }}" data-kind="{{ queue.kind }}" data-status="{{ queue.status }}"
       data-dlq="{{ 1 if queue.is_dlq else 0 }}" data-messages="{{ queue.messages }}" data-consumers="{{ queue.consumers }}">
@@ -60,6 +60,7 @@
     <td class="mono">{{ queue.messages_unacked }}</td>
     <td class="mono">{{ queue.consumers }}</td>
     <td><span class="badge dot s-{{ queue.status }}">{{ {'attention': 'Needs Attention', 'warning': 'Warning', 'low': 'Low', 'empty': 'Empty', 'parking': 'Parking', 'active': 'Active', 'idle': 'Idle'}.get(queue.status, queue.status) }}</span></td>
+    <td class="mono muted">{% if queue.idle_since %}<span data-ts="{{ queue.idle_since | replace(' ', 'T') }}Z">{{ queue.idle_since }}</span>{% else %}—{% endif %}</td>
     <td><a class="button row-open" href="/queues/{{ queue.name | urlencode }}">View</a></td>
   </tr>{% endfor %}</tbody></table>
   </div>
@@ -152,6 +153,15 @@ if (currentTab === 'parking') {
   document.getElementById('q-type').value = 'parking';
   currentTab = 'all';
 }
+document.querySelectorAll('[data-ts]').forEach(el => {
+  const then = Date.parse(el.dataset.ts);
+  if (Number.isNaN(then)) return;
+  const minutes = Math.round((Date.now() - then) / 60000);
+  el.textContent = minutes < 1 ? 'just now'
+    : minutes < 60 ? minutes + 'm ago'
+    : minutes < 1440 ? Math.round(minutes / 60) + 'h ago'
+    : Math.round(minutes / 1440) + 'd ago';
+});
 refreshCounts();
 render();
 </script>

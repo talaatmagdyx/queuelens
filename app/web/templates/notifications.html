@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Notifications · QueueLens{% endblock %}
+{% block content %}
+<div class="card-head">
+  <div><h1>Notifications</h1>
+  <p class="subtitle">Stay updated on important events — computed live from queue state and
+    the audit log.</p></div>
+  <button type="button" onclick="markAllRead()">Mark all as read</button>
+</div>
+<section class="card">
+  <div class="tabs" id="n-tabs">
+    <button class="active" data-level="">All<span class="count" id="n-all"></span></button>
+    <button data-level="alert">Alerts<span class="count" id="n-alert"></span></button>
+    <button data-level="warning">Warnings<span class="count" id="n-warning"></span></button>
+    <button data-level="info">Info<span class="count" id="n-info"></span></button>
+    <button data-level="success">Success<span class="count" id="n-success"></span></button>
+  </div>
+  {% if items %}
+  <div class="table-wrap">
+  <table id="n-table"><thead><tr><th>Time</th><th>Level</th><th>Title</th><th>Message</th><th>Source</th><th></th></tr></thead>
+  <tbody>{% for item in items %}<tr data-level="{{ item.level }}" data-id="{{ item.id }}">
+    <td class="mono">{% if item.timestamp %}<span data-ts="{{ item.timestamp }}">{{ item.timestamp[:19] }}</span>{% else %}now{% endif %}</td>
+    <td><span class="badge n-{{ item.level }}">{{ {'alert': 'Alert', 'warning': 'Warning', 'info': 'Info', 'success': 'Success'}[item.level] }}</span></td>
+    <td><b style="color: var(--text-bright); font-size: 0.86rem">{{ item.title }}</b></td>
+    <td class="mono muted">{{ item.message }}</td>
+    <td class="muted">{{ item.source }}</td>
+    <td><a class="button row-open" href="{{ item.href }}">View</a></td>
+  </tr>{% endfor %}</tbody></table>
+  </div>
+  {% else %}<p class="empty">All clear — nothing needs your attention.</p>{% endif %}
+</section>
+<script>
+const READ_KEY = 'ql-notifications-read';
+const readSet = new Set(JSON.parse(localStorage.getItem(READ_KEY) || '[]'));
+const rows = Array.from(document.querySelectorAll('#n-table tbody tr'));
+
+function applyRead() {
+  rows.forEach(row => { row.style.opacity = readSet.has(row.dataset.id) ? '0.55' : '1'; });
+}
+
+function markAllRead() {
+  rows.forEach(row => readSet.add(row.dataset.id));
+  localStorage.setItem(READ_KEY, JSON.stringify(Array.from(readSet)));
+  applyRead();
+}
+
+function renderTabs() {
+  const counts = {'': rows.length, alert: 0, warning: 0, info: 0, success: 0};
+  rows.forEach(row => { counts[row.dataset.level] += 1; });
+  document.getElementById('n-all').textContent = counts[''];
+  ['alert', 'warning', 'info', 'success'].forEach(level => {
+    document.getElementById('n-' + level).textContent = counts[level];
+  });
+}
+
+document.querySelectorAll('#n-tabs button').forEach(button => {
+  button.addEventListener('click', () => {
+    document.querySelectorAll('#n-tabs button').forEach(b => b.classList.remove('active'));
+    button.classList.add('active');
+    rows.forEach(row => {
+      row.style.display = (!button.dataset.level || row.dataset.level === button.dataset.level)
+        ? '' : 'none';
+    });
+  });
+});
+
+// relative timestamps ("2m ago")
+document.querySelectorAll('[data-ts]').forEach(el => {
+  const then = Date.parse(el.dataset.ts);
+  if (Number.isNaN(then)) return;
+  const minutes = Math.round((Date.now() - then) / 60000);
+  el.textContent = minutes < 1 ? 'just now'
+    : minutes < 60 ? minutes + 'm ago'
+    : minutes < 1440 ? Math.round(minutes / 60) + 'h ago'
+    : Math.round(minutes / 1440) + 'd ago';
+});
+
+renderTabs();
+applyRead();
+</script>
+{% endblock %}

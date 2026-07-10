@@ -65,11 +65,24 @@
         <span class="bell-wrap">
           <button type="button" class="icon-button" id="bell" title="Alerts" onclick="toggleAlerts()">🔔<i class="bell-count" id="bell-count" hidden></i></button>
           <div class="bell-panel" id="bell-panel" hidden>
-            <div class="bell-head">Alerts <span class="muted small" style="margin: 0">computed from live queue + audit state</span></div>
+            <div class="bell-head">Notifications <span class="muted small" style="margin: 0">computed from live queue + audit state</span></div>
             <div id="bell-items"><p class="muted small" style="padding: 0 1rem 0.8rem">Loading…</p></div>
+            <a class="bell-item" href="/notifications" style="text-align: center"><b style="color: var(--accent)">View all notifications</b></a>
           </div>
         </span>
         <button type="button" class="icon-button" id="theme-toggle" title="Toggle dark mode">◐</button>
+        {% if current_user %}
+        <span class="bell-wrap">
+          <button type="button" class="user-chip" onclick="toggleUserMenu()">
+            <span class="avatar">{{ current_user[:2] | upper }}</span> {{ current_user }} ▾</button>
+          <div class="bell-panel" id="user-panel" hidden>
+            <div class="bell-head">{{ current_user }}
+              <span class="muted small" style="margin: 0">{{ 'Administrator' if current_user == admin_username else 'Operator' }} · HTTP Basic Auth</span></div>
+            <a class="bell-item" href="/users"><b>Manage users</b><span>QUEUELENS_USERS_JSON</span></a>
+            <a class="bell-item" href="/config"><b>Configuration</b><span>connection · limits · masking</span></a>
+          </div>
+        </span>
+        {% endif %}
       </span>
     </header>
     <main class="container">{% block content %}{% endblock %}</main>
@@ -145,8 +158,16 @@ function toggleAlerts() {
   const panel = document.getElementById('bell-panel');
   panel.hidden = !panel.hidden;
 }
+function toggleUserMenu() {
+  const panel = document.getElementById('user-panel');
+  if (panel) panel.hidden = !panel.hidden;
+}
 document.addEventListener('click', event => {
-  if (!event.target.closest('.bell-wrap')) document.getElementById('bell-panel').hidden = true;
+  if (!event.target.closest('.bell-wrap')) {
+    document.getElementById('bell-panel').hidden = true;
+    const userPanel = document.getElementById('user-panel');
+    if (userPanel) userPanel.hidden = true;
+  }
 });
 
 function alertItem(parent, level, title, detail, href) {

@@ -2,7 +2,7 @@
 {% block title %}{{ queue.name }} · QueueLens{% endblock %}
 {% block content %}
 <p class="crumbs"><a href="/queues">Queues</a> › <b>{{ queue.name }}</b> › Messages</p>
-<h1>Messages <span class="badge k-{{ queue.kind }}">{{ queue.kind }}</span></h1>
+<h1>Messages <span class="badge k-{{ queue.kind }}">{{ 'DLQ · Retry' if queue.kind == 'retry' else queue.kind }}</span></h1>
 <p class="subtitle">Browse messages safely. Messages are fetched with requeue (non-destructive).</p>
 <div class="kv">
   <div><span>Messages Ready</span><b>{{ queue.messages_ready }}</b></div>
@@ -12,10 +12,12 @@
   <div><span>Durable</span><b>{{ 'yes' if queue.durable else 'no' }}</b></div>
   <div><span>Preview Limit</span><b>{{ messages | length }}</b></div>
 </div>
+<div class="detail-grid" id="mp-grid" style="grid-template-columns: minmax(0, 1fr)">
+<div>
 <section class="card">
   <div class="card-head">
     <div><h2>Messages</h2>
-    <p class="card-sub">Click a message to inspect payload, headers, and x-death history.</p></div>
+    <p class="card-sub">Click a message to inspect it in the side panel.</p></div>
   </div>
   {% if queue.messages > messages|length %}
   <p class="notice">Showing {{ messages | length }} of {{ queue.messages }} messages —
@@ -23,9 +25,29 @@
     to preview more.</p>
   {% endif %}
   {% if messages %}
+  <div class="filters">
+    <label>Search <input type="search" id="m-search" placeholder="Search in payload, headers…"></label>
+    <label>Payload Type
+      <select id="m-type"><option value="">All Payload Types</option>
+        <option value="json">json</option><option value="text">text</option><option value="base64">base64</option>
+      </select>
+    </label>
+    <button type="button" onclick="clearMessageFilters()">Clear Filters</button>
+  </div>
   <div class="table-wrap">
-  <table><thead><tr><th><input type="checkbox" id="select-all" onchange="toggleAll(this)" aria-label="Select all messages"></th><th>Message ID</th><th>Payload Type</th><th>Size</th><th>x-death</th><th>Preview</th><th></th></tr></thead>
-  <tbody>{% for message in messages %}<tr data-href="/messages/{{ queue.name | urlencode }}/{{ message.fingerprint }}"><td><input type="checkbox" class="msg-select" data-fingerprint="{{ message.fingerprint }}" onchange="updateSelectionCount()" aria-label="Select message {{ message.fingerprint[:12] }}"></td><td class="mono">{{ message.message_id or message.fingerprint[:12] }}</td><td><span class="badge b-{{ message.payload_format }}">{{ message.payload_format }}</span></td><td class="mono">{{ message.payload_size }} B</td><td class="mono">{{ message.x_death | length or '—' }}</td><td class="mono muted">{{ (message.payload | tojson) | truncate(40, True) }}</td><td><a class="button row-open" href="/messages/{{ queue.name | urlencode }}/{{ message.fingerprint }}">View</a></td></tr>{% endfor %}</tbody></table>
+  <table id="m-table"><thead><tr><th><input type="checkbox" id="select-all" onchange="toggleAll(this)" aria-label="Select all messages"></th><th>Message ID</th><th>Published At</th><th>Payload Type</th><th>Size</th><th>x-death</th><th>Preview</th><th></th></tr></thead>
+  <tbody>{% for message in messages %}<tr data-msg='{{ message | tojson }}'
+      data-hay="{{ ((message.payload | string) ~ ' ' ~ (message.headers | string) ~ ' ' ~ (message.message_id or '')) | lower }}"
+      data-format="{{ message.payload_format }}">
+    <td><input type="checkbox" class="msg-select" data-fingerprint="{{ message.fingerprint }}" onchange="updateSelectionCount()" aria-label="Select message {{ message.fingerprint[:12] }}"></td>
+    <td class="mono">{{ message.message_id or message.fingerprint[:12] }}</td>
+    <td class="mono">{{ message.timestamp[:19] if message.timestamp else '—' }}</td>
+    <td><span class="badge b-{{ message.payload_format }}">{{ message.payload_format }}</span></td>
+    <td class="mono">{{ message.payload_size }} B</td>
+    <td class="mono">{{ message.x_death | length or '—' }}</td>
+    <td class="mono muted">{{ (message.payload | tojson) | truncate(38, True) }}</td>
+    <td><a class="button row-open" href="/messages/{{ queue.name | urlencode }}/{{ message.fingerprint }}">View</a></td>
+  </tr>{% endfor %}</tbody></table>
   </div>
   {% else %}<p class="empty">No messages returned.</p>{% endif %}
 </section>
@@ -53,9 +75,29 @@
   <div id="bulk-preview" class="action-result" hidden></div>
   <div id="bulk-result" class="action-result" hidden></div>
 </section>
+{% endif %}
+</div>
+<aside id="mp-aside" hidden>
+  <section class="card summary-card">
+    <div class="card-head"><h2>Message Details</h2>
+      <button type="button" class="icon-button" onclick="closePanel()">✕</button></div>
+    <div id="mp-summary"></div>
+    <div class="tabs" id="mp-tabs" style="margin-top: 0.6rem">
+      <button class="active" data-pane="payload">Payload</button>
+      <button data-pane="headers">Headers</button>
+      <button data-pane="properties">Properties</button>
+      <button data-pane="x_death">x-death</button>
+    </div>
+    <pre class="mp-pane" id="mp-pre" style="margin-top: 0.7rem; max-height: 300px"></pre>
+    <div class="actions-row" style="margin-top: 0.9rem" id="mp-actions"></div>
+  </section>
+</aside>
+</div>
 <script>
 const QUEUE_NAME = {{ queue.name | tojson }};
 let pendingBatch = null;
+let panelMessage = null;
+let panelPane = 'payload';
 
 function selectedFingerprints() {
   return Array.from(document.querySelectorAll('.msg-select:checked'))
@@ -71,6 +113,120 @@ function updateSelectionCount() {
   const count = selectedFingerprints().length;
   document.getElementById('selection-count').textContent =
     count ? count + ' message(s) selected — the dry run will use the selection.' : '';
+}
+
+function clearMessageFilters() {
+  document.getElementById('m-search').value = '';
+  document.getElementById('m-type').value = '';
+  filterMessages();
+}
+
+function filterMessages() {
+  const search = document.getElementById('m-search').value.trim().toLowerCase();
+  const type = document.getElementById('m-type').value;
+  document.querySelectorAll('#m-table tbody tr').forEach(row => {
+    const okSearch = !search || row.dataset.hay.includes(search);
+    const okType = !type || row.dataset.format === type;
+    row.style.display = okSearch && okType ? '' : 'none';
+  });
+}
+['m-search', 'm-type'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('input', filterMessages);
+});
+
+function summaryRow(parent, label, value) {
+  if (value === null || value === undefined || value === '') return;
+  const div = document.createElement('div');
+  div.className = 'kv-row';
+  const span = document.createElement('span');
+  span.textContent = label;
+  const b = document.createElement('b');
+  b.textContent = String(value);
+  div.append(span, b);
+  parent.append(div);
+}
+
+function renderPane() {
+  const pre = document.getElementById('mp-pre');
+  pre.textContent = JSON.stringify(panelMessage[panelPane], null, 2);
+  pre.classList.add('code-json');
+  colorizeJson(pre);
+}
+
+function openPanel(row) {
+  panelMessage = JSON.parse(row.dataset.msg);
+  const summary = document.getElementById('mp-summary');
+  summary.replaceChildren();
+  summaryRow(summary, 'Message ID', panelMessage.message_id || '—');
+  if (panelMessage.timestamp) summaryRow(summary, 'Published At', panelMessage.timestamp.slice(0, 19));
+  summaryRow(summary, 'Size', panelMessage.payload_size + ' B');
+  summaryRow(summary, 'Payload Type', panelMessage.payload_format);
+  summaryRow(summary, 'x-death Count', panelMessage.x_death.length);
+  summaryRow(summary, 'Fingerprint', panelMessage.fingerprint.slice(0, 24) + '…');
+  const actions = document.getElementById('mp-actions');
+  actions.replaceChildren();
+  const base = '/messages/' + encodeURIComponent(QUEUE_NAME) + '/' + panelMessage.fingerprint;
+  [['Replay', base + '/replay', 'primary'], ['Park', base + '/park', ''], ['Open full view', base, '']]
+    .forEach(([label, href, klass]) => {
+      const link = document.createElement('a');
+      link.className = 'button ' + klass;
+      link.href = href;
+      link.textContent = label;
+      actions.append(link);
+    });
+  const del = document.createElement('button');
+  del.className = 'danger';
+  del.textContent = 'Delete';
+  del.onclick = () => deleteFromPanel(panelMessage.fingerprint);
+  actions.append(del);
+  panelPane = 'payload';
+  document.querySelectorAll('#mp-tabs button').forEach(button =>
+    button.classList.toggle('active', button.dataset.pane === 'payload'));
+  renderPane();
+  document.getElementById('mp-aside').hidden = false;
+  document.getElementById('mp-grid').style.gridTemplateColumns = '';
+}
+
+function closePanel() {
+  document.getElementById('mp-aside').hidden = true;
+  document.getElementById('mp-grid').style.gridTemplateColumns = 'minmax(0, 1fr)';
+}
+
+document.querySelectorAll('#mp-tabs button').forEach(button => {
+  button.addEventListener('click', () => {
+    document.querySelectorAll('#mp-tabs button').forEach(b => b.classList.remove('active'));
+    button.classList.add('active');
+    panelPane = button.dataset.pane;
+    renderPane();
+  });
+});
+
+async function deleteFromPanel(fingerprint) {
+  if (!window.confirm('Delete this message from ' + QUEUE_NAME + '? This cannot be undone.')) return;
+  const response = await fetch('/api/messages/delete', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({source_queue: QUEUE_NAME, fingerprint: fingerprint, confirm: true})
+  });
+  if (response.ok) { location.reload(); return; }
+  let detail = {};
+  try { detail = await response.json(); } catch (error) {}
+  window.alert('Delete failed: ' + (detail.detail || response.status));
+}
+
+document.querySelectorAll('#m-table tbody tr').forEach(row => {
+  row.addEventListener('click', event => {
+    if (event.target.closest('a') || event.target.closest('input')) return;
+    openPanel(row);
+  });
+});
+
+function line(parent, label, value) {
+  const p = document.createElement('p');
+  const strong = document.createElement('strong');
+  strong.textContent = label;
+  p.append(strong, document.createTextNode(' ' + value));
+  parent.append(p);
 }
 
 function bulkBody() {
@@ -89,14 +245,6 @@ function bulkBody() {
   const selected = selectedFingerprints();
   if (selected.length) body.fingerprints = selected;
   return body;
-}
-
-function line(parent, label, value) {
-  const p = document.createElement('p');
-  const strong = document.createElement('strong');
-  strong.textContent = label;
-  p.append(strong, document.createTextNode(' ' + value));
-  parent.append(p);
 }
 
 async function bulkDryRun() {
@@ -180,13 +328,5 @@ async function bulkExecute() {
   links.append(refresh, audit);
   resultBox.append(links);
 }
-
-document.querySelectorAll('tr[data-href]').forEach(row => {
-  row.addEventListener('click', event => {
-    if (event.target.closest('a') || event.target.closest('input')) return;
-    location.href = row.dataset.href;
-  });
-});
 </script>
-{% endif %}
 {% endblock %}

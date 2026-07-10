@@ -12,8 +12,26 @@ from app.application.queue_service import QueueService, queues_to_dicts
 from app.auth.basic import get_current_username
 from app.observability.metrics import PREVIEW_REQUESTS
 
+
+def _identity_context(request: Request) -> dict[str, Any]:
+    """Expose the acting Basic Auth username to every template (topbar chip)."""
+    import base64
+
+    header = request.headers.get("authorization", "")
+    if header.lower().startswith("basic "):
+        try:
+            decoded = base64.b64decode(header.split(" ", 1)[1]).decode("utf-8", "replace")
+            return {"current_user": decoded.split(":", 1)[0]}
+        except Exception:
+            pass
+    return {"current_user": None}
+
+
 router = APIRouter(tags=["web"])
-templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+templates = Jinja2Templates(
+    directory=str(Path(__file__).parent / "templates"),
+    context_processors=[_identity_context],
+)
 
 
 def _broker_display(rabbitmq_url: str, vhost: str) -> str:
@@ -215,6 +233,74 @@ async def action_wizard(
             ),
             "vhost": settings.rabbitmq_vhost,
         },
+    )
+
+
+@router.get("/notifications", response_class=HTMLResponse)
+async def notifications(
+    request: Request,
+    _username: str = Depends(get_current_username),
+) -> HTMLResponse:
+    """Derived from live state: queue severities plus recent audit outcomes."""
+    items: list[dict[str, Any]] = []
+    queues = await cast(QueueService, request.app.state.queue_service).list_queues(dlq_only=True)
+    for queue in queues_to_dicts(queues):
+        if queue["severity"] == "attention":
+            items.append(
+                {
+                    "id": f"queue:{queue['name']}",
+                    "level": "alert",
+                    "title": "DLQ queue needs attention",
+                    "message": f"{queue['name']} has {queue['messages']} messages",
+                    "source": "Queue Monitor",
+                    "timestamp": None,
+                    "href": f"/queues/{queue['name']}",
+                }
+            )
+        elif queue["severity"] == "warning":
+            items.append(
+                {
+                    "id": f"queue:{queue['name']}",
+                    "level": "warning",
+                    "title": "DLQ queue is growing",
+                    "message": f"{queue['name']} has {queue['messages']} messages",
+                    "source": "Queue Monitor",
+                    "timestamp": None,
+                    "href": f"/queues/{queue['name']}",
+                }
+            )
+    try:
+        events = await request.app.state.audit_repository.list(limit=30)
+    except Exception:
+        events = []
+    for event in events:
+        if event["result"] == "started":
+            continue
+        level = "success" if event["result"] == "success" else (
+            "alert" if event["result"] in ("failed", "partial") else "info"
+        )
+        title = {
+            "success": f"{event['action']} action successful",
+            "alert": f"Failed {event['action']} action",
+            "info": f"{event['action']} — {event['result']}",
+        }[level]
+        target = event.get("target_queue") or event.get("target_exchange")
+        items.append(
+            {
+                "id": f"audit:{event['id']}",
+                "level": level,
+                "title": title,
+                "message": (event.get("source_queue") or "—")
+                + (f" → {target}" if target else ""),
+                "source": "Audit Log",
+                "timestamp": event.get("timestamp"),
+                "href": "/audit",
+            }
+        )
+    return templates.TemplateResponse(
+        request=request,
+        name="notifications.html",
+        context={"items": items},
     )
 
 

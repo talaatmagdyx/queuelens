@@ -162,6 +162,10 @@ coloring, a summary panel, and safe actions:
 
 ![Bulk actions](docs/screenshots/bulk-actions.png)
 
+**Notifications** — live alerts derived from queue state and audit outcomes:
+
+![Notifications](docs/screenshots/notifications.png)
+
 **Audit log** — stats, filters, CSV export, per-action durations, and a details panel:
 
 ![Audit log](docs/screenshots/audit.png)

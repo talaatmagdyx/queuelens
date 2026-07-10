@@ -16,6 +16,7 @@ class QueueInfo:
     is_dlq: bool = False
     kind: str = "dlq"  # dlq | parking | retry | normal
     publish_rate: float | None = None
+    idle_since: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

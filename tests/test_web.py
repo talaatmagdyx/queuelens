@@ -306,3 +306,31 @@ async def test_replay_wizard_renders_with_message_context() -> None:
     assert park.status_code == 200
     assert "Parking Queue" in park.text
     assert "orders.dlq.parking" in park.text
+
+
+@pytest.mark.asyncio
+async def test_notifications_page_derives_from_live_state(tmp_path) -> None:
+    app = create_app(
+        Settings(auth_enabled=False, database_url=f"sqlite+aiosqlite:///{tmp_path}/n.db")
+    )
+    await app.state.database.start()
+
+    class FakeQueueService:
+        async def list_queues(self, dlq_only: bool = False) -> list[QueueInfo]:
+            return [
+                QueueInfo(
+                    name="orders.dlq", vhost="/", messages=500, messages_ready=500,
+                    messages_unacked=0, consumers=0, durable=True, is_dlq=True,
+                )
+            ]
+
+    app.state.queue_service = FakeQueueService()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/notifications")
+    await app.state.database.close()
+
+    assert response.status_code == 200
+    assert "DLQ queue needs attention" in response.text
+    assert "orders.dlq has 500 messages" in response.text
+    assert "Queue Monitor" in response.text

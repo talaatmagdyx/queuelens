@@ -812,3 +812,17 @@ input::placeholder { color: var(--muted); }
   font-weight: 700;
   color: var(--muted);
 }
+
+/* user chip + notification level badges */
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.28rem 0.7rem 0.28rem 0.35rem;
+}
+.badge.n-alert { color: var(--red); border-color: var(--red-line); background: var(--red-soft); }
+.badge.n-warning { color: var(--amber); border-color: var(--amber-line); background: var(--amber-soft); }
+.badge.n-info { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+.badge.n-success { color: var(--green); border-color: var(--green-line); background: var(--green-soft); }

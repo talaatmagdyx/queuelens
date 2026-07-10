@@ -52,6 +52,7 @@ class QueueService:
             publish_rate=(raw.get("message_stats") or {})
             .get("publish_details", {})
             .get("rate"),
+            idle_since=raw.get("idle_since"),
         )
 
     @staticmethod
@@ -112,6 +113,7 @@ def queues_to_dicts(queues: Sequence[QueueInfo]) -> list[dict[str, Any]]:
             "severity": _severity(queue.messages),
             "status": _status(queue),
             "publish_rate": queue.publish_rate,
+            "idle_since": queue.idle_since,
         }
         for queue in queues
     ]

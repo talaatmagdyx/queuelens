@@ -28,6 +28,11 @@
           <span>Publish a copy to target without removing from source.</span>
           <em class="badge b-json">Non-destructive</em>
         </label>
+        <a class="action-card" href="/messages/{{ message.queue | urlencode }}/{{ message.fingerprint }}/park" style="text-decoration: none">
+          <b>⚑ Park Message</b>
+          <span>Send to a parking queue for manual inspection.</span>
+          <em class="badge b-started">Safe Holding</em>
+        </a>
       </div>
       <div class="banner safe" style="margin: 0.9rem 0 0">
         <span>🛡 <b>Safety:</b> Move replay publishes the message first. The original message
