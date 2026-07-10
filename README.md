@@ -68,6 +68,10 @@ docker compose up --build
 
 Open [http://localhost:8000](http://localhost:8000). The default local credentials are
 `admin` / `change-me`; change them before using a shared environment.
+
+**New console preview:** [http://localhost:8000/app](http://localhost:8000/app) serves the
+design-system React console (imported from the QueueLens Claude Design kit) wired to the
+live API — fully self-hosted, no CDN.
 RabbitMQ Management UI is available at [http://localhost:15672](http://localhost:15672)
 with `queuelens` / `queuelens`.
 
