@@ -143,7 +143,7 @@
                 <XDeathTable rows={sel.xdeathList} />
               </div>
             )}
-            <Button variant="secondary" icon="eye" size="sm" style={{ marginTop: 16, color: 'var(--text-link)' }} onClick={() => nav('messages')}>View Message</Button>
+            <Button variant="secondary" icon="eye" size="sm" style={{ marginTop: 16, color: 'var(--text-link)' }} onClick={() => nav('messages', { queue: sel.queue !== '\u2014' ? sel.queue : undefined, fingerprint: sel.fingerprint || undefined })}>View Message</Button>
           </aside>
         )}
       </div>

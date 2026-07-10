@@ -92,7 +92,7 @@ function App() {
   let screen = null;
   if (route.id === 'dashboard') screen = <S.Dashboard nav={nav} empty={(window.QL.data.queues || []).length === 0} />;
   else if (route.id === 'queues') screen = <S.Queues nav={nav} />;
-  else if (route.id === 'messages') screen = <S.Messages nav={nav} queue={route.params.queue || window.QL.defaultQueue} />;
+  else if (route.id === 'messages') screen = <S.Messages nav={nav} queue={route.params.queue || window.QL.defaultQueue} fingerprint={route.params.fingerprint || null} />;
   else if (route.id === 'replay' || route.id === 'parking') screen = <S.Wizard nav={nav} mode={route.params.mode || (route.id === 'parking' ? 'park' : 'move')} msg={route.params.msg || window.QL.data.messages[0]} count={route.params.count || 1} fingerprints={route.params.fingerprints || null} />;
   else if (route.id === 'audit') screen = <S.AuditLog nav={nav} />;
   else if (route.id === 'config') screen = <S.Configuration nav={nav} envs={ENVS} activeEnv={envId} vhost={vhost} onEnvChange={switchEnv} />;
