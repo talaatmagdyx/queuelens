@@ -85,7 +85,11 @@
             ) : (
               <Input label={meta.name + ' URL'} value={draft.url || ''} onChange={(v) => setDraft({ ...draft, url: v })} placeholder="https://…" />
             )}
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {connected && (
+                <Button variant="danger" size="sm" onClick={() => { onSave(id, {}); setEditing(false); }}>Disconnect</Button>
+              )}
+              <div style={{ flex: 1 }} />
               <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Button>
               <Button size="sm" onClick={() => { onSave(id, draft); setEditing(false); }}>Save</Button>
             </div>
@@ -104,7 +108,8 @@
     const [busy, setBusy] = React.useState(false);
     const [error, setError] = React.useState(null);
     const [testResult, setTestResult] = React.useState(null);
-    const [draft, setDraft] = React.useState({ name: '', pattern: '*.dlq', metric: 'Messages ready', op: '>', threshold: '100', dur: 'for 5 minutes', severity: 'Warning', email: true, slack: false, webhook: false });
+    const emailConfigured = !!((serverSettings.channels || {}).email || {}).smtp_host;
+    const [draft, setDraft] = React.useState({ name: '', pattern: '*.dlq', metric: 'Messages ready', op: '>', threshold: '100', dur: 'for 5 minutes', severity: 'Warning', email: emailConfigured, slack: false, webhook: false });
     const d = (k) => (v) => setDraft((s) => ({ ...s, [k]: v }));
     const reload = () => setRules(window.QL.fetchAlerts());
 
@@ -169,7 +174,7 @@
                 <Select label="Severity" options={['Info', 'Warning', 'Alert']} value={draft.severity} onChange={d('severity')} />
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 24, marginTop: 16 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--slate-700)' }}>Send to</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--slate-700)' }}>Send to <span style={{ fontWeight: 400, color: 'var(--slate-400)' }}>(optional — unchecked = in-app notification only)</span></span>
                 <Checkbox checked={draft.email} onChange={d('email')} label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Icon name="mail" size={13} /> Email</span>} />
                 <Checkbox checked={draft.slack} onChange={d('slack')} label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Icon name="hash" size={13} /> Slack</span>} />
                 <Checkbox checked={draft.webhook} onChange={d('webhook')} label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Icon name="webhook" size={13} /> Webhook</span>} />
