@@ -12,9 +12,7 @@ router = APIRouter(prefix="/api", tags=["platform"])
 
 # ---------------------------------------------------------------- settings
 
-ALLOWED_SETTING_KEYS = {
-    "custom_headers", "channels", "limits", "retention", "ui", "custom_environments",
-}
+ALLOWED_SETTING_KEYS = {"custom_headers", "channels", "limits", "retention", "ui"}
 
 
 SECRET_SENTINEL = "__secret__"
@@ -27,6 +25,21 @@ def _redact_channels(settings: dict[str, Any]) -> dict[str, Any]:
         if isinstance(email, dict) and email.get("password"):
             redacted = {**email, "password": SECRET_SENTINEL}
             settings = {**settings, "channels": {**channels, "email": redacted}}
+    stored_envs = settings.get("custom_environments")
+    if isinstance(stored_envs, dict):
+        cleaned = {
+            name: {
+                **profile,
+                **(
+                    {"management_password": SECRET_SENTINEL}
+                    if (profile or {}).get("management_password")
+                    else {}
+                ),
+                **({"rabbitmq_url": "__redacted__"} if (profile or {}).get("rabbitmq_url") else {}),
+            }
+            for name, profile in stored_envs.items()
+        }
+        settings = {**settings, "custom_environments": cleaned}
     return settings
 
 
@@ -236,6 +249,11 @@ async def list_environments(
 class EnvironmentBody(BaseModel):
     name: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9._-]+$")
     vhosts: list[str] = Field(min_length=1, max_length=50)
+    # optional full broker profile — blank fields inherit the default environment
+    host: str | None = Field(default=None, max_length=255)  # e.g. rabbitmq-stg:5672
+    management_url: str | None = Field(default=None, max_length=255)
+    username: str | None = Field(default=None, max_length=128)
+    password: str | None = Field(default=None, max_length=255)
 
 
 @router.post("/environments")
@@ -256,8 +274,21 @@ async def create_environment(
         raise HTTPException(status_code=400, detail="At least one vhost is required")
     store = request.app.state.settings_store
     stored = await store.get("custom_environments", {}) or {}
-    merged = sorted(set(stored.get(body.name, {}).get("vhosts", [])) | set(vhosts))
-    stored[body.name] = {"vhosts": merged}
+    previous = stored.get(body.name, {}) or {}
+    merged = sorted(set(previous.get("vhosts", [])) | set(vhosts))
+    profile: dict[str, Any] = {**previous, "vhosts": merged}
+    if body.host:
+        username = body.username or ""
+        password = body.password or ""
+        credentials = f"{username}:{password}@" if username else ""
+        profile["rabbitmq_url"] = f"amqp://{credentials}{body.host.strip()}/"
+    if body.management_url:
+        profile["management_url"] = body.management_url.strip()
+    if body.username:
+        profile["management_username"] = body.username
+    if body.password and body.password != SECRET_SENTINEL:
+        profile["management_password"] = body.password
+    stored[body.name] = profile
     await store.put({"custom_environments": stored})
     request.app.state.environment_manager.apply_custom(stored)
     await request.app.state.audit_repository.record(
@@ -267,6 +298,38 @@ async def create_environment(
             timestamp=datetime.now(UTC),
             result="success",
             metadata={"name": body.name, "vhosts": vhosts},
+        )
+    )
+    return {"environments": request.app.state.environment_manager.list()}
+
+
+@router.delete("/environments/{name}")
+async def delete_environment(
+    request: Request,
+    name: str,
+    username: str = Depends(get_current_username),
+) -> dict[str, Any]:
+    from datetime import UTC, datetime
+
+    from app.domain.models import AuditEntry
+
+    try:
+        request.app.state.environment_manager.remove_custom(name)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    store = request.app.state.settings_store
+    stored = await store.get("custom_environments", {}) or {}
+    stored.pop(name, None)
+    await store.put({"custom_environments": stored})
+    await request.app.state.audit_repository.record(
+        AuditEntry(
+            username=username,
+            action="remove_environment",
+            timestamp=datetime.now(UTC),
+            result="success",
+            metadata={"name": name},
         )
     )
     return {"environments": request.app.state.environment_manager.list()}

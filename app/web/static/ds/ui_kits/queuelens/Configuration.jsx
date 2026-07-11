@@ -55,7 +55,7 @@
     );
   }
 
-  function EnvRow({ env, onActivate, onAddVhost }) {
+  function EnvRow({ env, onActivate, onAddVhost, onRemove }) {
     const [adding, setAdding] = React.useState(false);
     const [vhostDraft, setVhostDraft] = React.useState('');
     return (
@@ -88,7 +88,10 @@
         </div>
         {env.active
           ? <StatusPill tone="success">Active</StatusPill>
-          : <Button variant="secondary" size="sm" onClick={() => onActivate(env.id, null)}>Set Active</Button>}
+          : <span style={{ display: 'inline-flex', gap: 6 }}>
+              <Button variant="secondary" size="sm" onClick={() => onActivate(env.id, null)}>Set Active</Button>
+              {env.removable && <IconButton icon="trash-2" size={30} onClick={() => onRemove(env.id)} />}
+            </span>}
       </div>
     );
   }
@@ -140,17 +143,29 @@
     };
 
     const [addingEnv, setAddingEnv] = React.useState(false);
-    const [envDraft, setEnvDraft] = React.useState({ name: '', vhosts: '/' });
+    const [envDraft, setEnvDraft] = React.useState({ name: '', vhosts: '/', host: '', management_url: '', username: '', password: '' });
+    const removeEnv = async (envId) => {
+      if (!window.confirm(`Remove environment "${envId}"? Its stored profile is deleted (the broker itself is untouched).`)) return;
+      setError(null);
+      try {
+        const result = await window.QL.requestJson('DELETE', '/api/environments/' + encodeURIComponent(envId));
+        setEnvs(result.environments);
+      } catch (e) { setError(e.message); }
+    };
     const addEnvironment = async () => {
       setError(null);
       try {
         const result = await window.QL.postJson('/api/environments', {
           name: envDraft.name.trim(),
           vhosts: envDraft.vhosts.split(',').map((v) => v.trim()).filter(Boolean),
+          host: envDraft.host.trim() || null,
+          management_url: envDraft.management_url.trim() || null,
+          username: envDraft.username.trim() || null,
+          password: envDraft.password || null,
         });
         setEnvs(result.environments);
         setAddingEnv(false);
-        setEnvDraft({ name: '', vhosts: '/' });
+        setEnvDraft({ name: '', vhosts: '/', host: '', management_url: '', username: '', password: '' });
         setSavedNote('Environment added');
         setTimeout(() => setSavedNote(null), 2500);
       } catch (e) { setError(e.message); }
@@ -226,14 +241,29 @@
                   <Button variant="secondary" size="sm" icon="plus" onClick={() => setAddingEnv(!addingEnv)}>Add Environment</Button>
                 </span>}>
                 {addingEnv && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr auto', gap: 12, alignItems: 'end', marginBottom: 14, padding: '12px 14px', background: 'var(--blue-50)', border: '1px solid var(--blue-200)', borderRadius: 'var(--radius-md)' }}>
-                    <Input label="Name" required placeholder="production" value={envDraft.name} onChange={(v) => setEnvDraft({ ...envDraft, name: v })} />
-                    <Input label="Vhosts (comma-separated)" required placeholder="orders, payments, billing" value={envDraft.vhosts} onChange={(v) => setEnvDraft({ ...envDraft, vhosts: v })} />
-                    <Button style={{ height: 38 }} disabled={!envDraft.name.trim() || !envDraft.vhosts.trim()} onClick={addEnvironment}>Create</Button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 14, padding: '12px 14px', background: 'var(--blue-50)', border: '1px solid var(--blue-200)', borderRadius: 'var(--radius-md)' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 12 }}>
+                      <Input label="Name" required placeholder="staging-2" value={envDraft.name} onChange={(v) => setEnvDraft({ ...envDraft, name: v })} />
+                      <Input label="Vhosts (comma-separated)" required placeholder="orders, payments, billing" value={envDraft.vhosts} onChange={(v) => setEnvDraft({ ...envDraft, vhosts: v })} />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 0.8fr 0.8fr', gap: 12 }}>
+                      <Input label="Broker Host (optional)" placeholder="rabbitmq-stg2:5672" value={envDraft.host} onChange={(v) => setEnvDraft({ ...envDraft, host: v })} />
+                      <Input label="Management URL (optional)" placeholder="http://rabbitmq-stg2:15672" value={envDraft.management_url} onChange={(v) => setEnvDraft({ ...envDraft, management_url: v })} />
+                      <Input label="Username (optional)" placeholder="queuelens" value={envDraft.username} onChange={(v) => setEnvDraft({ ...envDraft, username: v })} />
+                      <Input label="Password" type="password" value={envDraft.password} onChange={(v) => setEnvDraft({ ...envDraft, password: v })} />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span style={{ flex: 1, fontSize: 12, color: 'var(--slate-500)' }}>
+                        Leave the broker fields blank to share the default broker. Credentials are stored
+                        server-side and never echoed back to the browser.
+                      </span>
+                      <Button variant="ghost" size="sm" onClick={() => setAddingEnv(false)}>Cancel</Button>
+                      <Button style={{ height: 34 }} disabled={!envDraft.name.trim() || !envDraft.vhosts.trim()} onClick={addEnvironment}>Create</Button>
+                    </div>
                   </div>
                 )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
-                  {envs.map((env) => <EnvRow key={env.id} env={env} onActivate={activate} onAddVhost={addVhost} />)}
+                  {envs.map((env) => <EnvRow key={env.id} env={env} onActivate={activate} onAddVhost={addVhost} onRemove={removeEnv} />)}
                 </div>
                 <Alert tone="info" style={{ marginTop: 14 }}>
                   Environments added here share the default broker credentials (stored in environment

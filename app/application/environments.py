@@ -64,6 +64,7 @@ class EnvironmentManager:
         self.active_env = base_settings.environment
         self.active_vhost = base_settings.rabbitmq_vhost
         self._profiles = self._load_profiles(base_settings)
+        self._custom: set[str] = set()
 
     @staticmethod
     def _load_profiles(settings: Settings) -> dict[str, dict[str, Any]]:
@@ -96,20 +97,45 @@ class EnvironmentManager:
             }
         )
 
+    CUSTOM_FIELDS = (
+        "rabbitmq_url",
+        "management_url",
+        "management_username",
+        "management_password",
+    )
+
     def apply_custom(self, stored: dict[str, Any]) -> None:
-        """Merge server-stored environments: new names inherit the default broker;
-        existing names gain any extra vhosts. Idempotent."""
+        """Merge server-stored environments. Omitted broker fields inherit the
+        default environment; existing names gain extra vhosts and any field
+        overrides. Idempotent."""
         default = self._profiles[self._base.environment]
         for name, custom in (stored or {}).items():
-            vhosts = [str(v) for v in (custom or {}).get("vhosts", []) if str(v).strip()]
+            custom = custom or {}
+            vhosts = [str(v) for v in custom.get("vhosts", []) if str(v).strip()]
+            overrides = {k: custom[k] for k in self.CUSTOM_FIELDS if custom.get(k)}
             if name in self._profiles:
+                self._profiles[name].update(overrides)
                 for vhost in vhosts:
                     if vhost not in self._profiles[name]["vhosts"]:
                         self._profiles[name]["vhosts"].append(vhost)
             else:
                 profile = dict(default)
+                profile.update(overrides)
                 profile["vhosts"] = vhosts or ["/"]
                 self._profiles[name] = profile
+            if name != self._base.environment:
+                self._custom.add(name)
+
+    def remove_custom(self, name: str) -> None:
+        """Drop a server-added environment (never the default or env-var ones)."""
+        if name not in self._custom:
+            raise KeyError(f"{name} is not a removable environment")
+        if name == self.active_env:
+            raise ValueError("Cannot remove the active environment — switch first")
+        self._custom.discard(name)
+        self._profiles.pop(name, None)
+        for key in [k for k in self._bundles if k[0] == name]:
+            self._bundles.pop(key)
 
     def list(self) -> list[dict[str, Any]]:
         out = []
@@ -121,6 +147,7 @@ class EnvironmentManager:
                     "vhosts": profile["vhosts"],
                     "active": name == self.active_env,
                     "active_vhost": self.active_vhost if name == self.active_env else None,
+                    "removable": name in self._custom,
                 }
             )
         return out

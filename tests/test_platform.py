@@ -292,3 +292,35 @@ async def test_smtp_auth_tls_and_password_redaction(tmp_path) -> None:
     assert "sg-secret" not in got.text
     assert stored["email"]["password"] == "sg-secret"
     assert stored["email"]["smtp_host"] == "smtp2.acme.io"
+
+
+@pytest.mark.asyncio
+async def test_environment_with_own_broker_credentials(tmp_path) -> None:
+    app = _app(tmp_path)
+    await app.state.database.start()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post(
+            "/api/environments",
+            json={"name": "staging-2", "vhosts": ["/"],
+                  "host": "rabbitmq-stg2:5672",
+                  "management_url": "http://rabbitmq-stg2:15672",
+                  "username": "stg-user", "password": "stg-pass"},
+        )
+        listing = await client.get("/api/environments")
+        settings = await client.get("/api/settings")
+        removed = await client.delete("/api/environments/staging-2")
+        gone = await client.get("/api/environments")
+        not_removable = await client.delete("/api/environments/development")
+    await app.state.database.close()
+
+    assert created.status_code == 200
+    env = next(e for e in listing.json()["environments"] if e["id"] == "staging-2")
+    assert env["api"] == "http://rabbitmq-stg2:15672"
+    assert env["removable"] is True
+    # secrets never leave the server
+    assert "stg-pass" not in listing.text
+    assert "stg-pass" not in settings.text
+    assert removed.status_code == 200
+    assert all(e["id"] != "staging-2" for e in gone.json()["environments"])
+    assert not_removable.status_code == 404
