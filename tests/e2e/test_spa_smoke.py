@@ -64,6 +64,7 @@ def test_every_screen_renders(page) -> None:
         ("Topology", "dead-letter"),
         ("Composer", "Test Message Composer"),
         ("Audit Log", "Total Actions"),
+        ("Metrics", "Scrape this instance"),
         ("Alerts", "Delivery Channels"),
         ("Configuration", "Broker Connection"),
         ("Users", "Roles"),

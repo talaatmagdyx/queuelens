@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Metrics screen in the console**: live `queuelens_*` values (broker status,
+  DLQ backlog per queue, action counters, average broker-operation latency),
+  a ready-to-paste Prometheus scrape config, and the bundled alert rules with
+  copy buttons. Backed by `GET /api/metrics/summary` and
+  `GET /api/metrics/alert-rules`.
+
 ## v0.8.0 — 2026-07-11
 
 ### Added
