@@ -1,3 +1,6 @@
+import json as _json
+import logging
+import sys
 from datetime import datetime, timedelta
 
 from sqlalchemy import delete, desc, func, select
@@ -7,9 +10,24 @@ from app.infrastructure.persistence.database import Database
 from app.infrastructure.persistence.models import AuditEventModel
 
 
+def _audit_logger() -> logging.Logger:
+    """Stdout JSON-lines logger — uvicorn does not equip app loggers with handlers."""
+    logger = logging.getLogger("queuelens.audit")
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(logging.Formatter("queuelens.audit %(message)s"))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+    return logger
+
+
 class AuditRepository:
     def __init__(self, database: Database) -> None:
         self._database = database
+        # When on, every audit event is also emitted as a JSON line on the app log
+        # (docker logs / stdout) so syslog- and log-shippers can pick it up.
+        self.stream_to_log = False
 
     async def record(self, entry: AuditEntry) -> dict[str, object]:
         async with self._database.session() as session:
@@ -33,7 +51,10 @@ class AuditRepository:
             session.add(model)
             await session.commit()
             await session.refresh(model)
-            return self._to_dict(model)
+            record = self._to_dict(model)
+            if self.stream_to_log:
+                _audit_logger().info(_json.dumps(record, default=str))
+            return record
 
     async def list(
         self,

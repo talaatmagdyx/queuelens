@@ -32,6 +32,13 @@ class SettingsRepository:
             row = await session.get(AppSettingModel, key)
             return row.value if row is not None else default
 
+    async def get_safe(self, key: str, default: Any = None) -> Any:
+        """Like get(), but returns the default if the table does not exist yet."""
+        try:
+            return await self.get(key, default)
+        except Exception:  # noqa: BLE001 - callers treat settings as best-effort
+            return default
+
     async def put(self, values: dict[str, Any]) -> dict[str, Any]:
         async with self._database.session() as session:
             for key, value in values.items():

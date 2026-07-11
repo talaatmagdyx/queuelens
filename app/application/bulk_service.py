@@ -56,6 +56,7 @@ class BulkActionService:
         target: ReplayTarget | None = None,
         payload_contains: str | None = None,
         selected_fingerprints: frozenset[str] | None = None,
+        max_bulk: int | None = None,
     ) -> dict[str, object]:
         if action == "replay":
             operator_action = mode
@@ -72,7 +73,7 @@ class BulkActionService:
             raise ValueError(f"Unsupported bulk action: {action}")
 
         records = await self._browser.list_messages(
-            source_queue, self._settings.max_bulk_size
+            source_queue, max_bulk or self._settings.max_bulk_size
         )
         if payload_contains:
             needle = payload_contains.encode("utf-8")

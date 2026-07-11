@@ -99,8 +99,12 @@
         window.alert('Delete failed: ' + error.message);
       } finally { setDeleting(false); }
     };
+    const preferPark = (((window.QL.serverSettings || {}).ui || {}).preferPark !== false);
     const deleteOne = async () => {
-      if (!window.confirm('Delete this message from ' + queue + '? This cannot be undone.')) return;
+      const parkHint = preferPark && msg.xdeath >= 3
+        ? ' This message has died ' + msg.xdeath + ' times — consider Park instead to keep it recoverable.'
+        : '';
+      if (!window.confirm('Delete this message from ' + queue + '? This cannot be undone.' + parkHint)) return;
       try {
         await api('/api/messages/delete', { source_queue: queue, fingerprint: msg.fingerprint, confirm: true });
         setRows((rs) => rs.filter((r) => r.id !== msg.id));
@@ -178,7 +182,8 @@
                   <React.Fragment>
                     <Icon name="alert-triangle" size={16} color="var(--red-600)" />
                     <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--red-700)' }}>Delete {checked.length} {checked.length === 1 ? 'message' : 'messages'} from {queue}?</span>
-                    <span style={{ fontSize: 12.5, color: 'var(--slate-600)' }}>This cannot be undone. Consider parking instead.</span>
+                    <span style={{ fontSize: 12.5, color: 'var(--slate-600)' }}>This cannot be undone.{preferPark && rows.some((r) => checked.includes(r.id) && r.xdeath >= 3) ? ' Some selected messages died 3+ times — parking keeps them recoverable.' : ''}</span>
+                    {preferPark && <Button size="sm" variant="park" icon="flag" onClick={() => bulkNav('park')}>Park Instead</Button>}
                     <div style={{ flex: 1 }} />
                     <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(false)}>Cancel</Button>
                     <Button variant="dangerSolid" size="sm" icon="trash-2" onClick={doDelete} disabled={deleting}>{deleting ? 'Deleting…' : 'Delete ' + checked.length}</Button>

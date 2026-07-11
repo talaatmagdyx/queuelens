@@ -33,7 +33,12 @@
     const noun = many ? `${count} messages` : 'this message';
     const srcQueue = (msg && msg.queue) || window.QL.defaultQueue;
     const [action, setAction] = React.useState(mode);
-    const [confirm, setConfirm] = React.useState('');
+    const ui = (window.QL.serverSettings || {}).ui || {};
+    const isProduction = ((window.QL.broker || {}).environment || '') === 'production';
+    // Type-to-confirm: always enforced in production; elsewhere the toggle may
+    // pre-fill the field (the review step still stands between you and execute).
+    const prefill = !isProduction && ui.typeConfirm === false;
+    const [confirm, setConfirm] = React.useState(prefill ? srcQueue : '');
     const [headers, setHeaders] = React.useState(true);
     const [stage, setStage] = React.useState('form'); // form | review | running | done | failed
     const [error, setError] = React.useState(null);

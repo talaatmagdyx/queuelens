@@ -307,7 +307,7 @@
                 <ToggleRow locked label="Non-destructive browsing" desc="Browsing fetches messages with requeue — reading never removes anything." />
                 <ToggleRow locked label="Audit everything" desc="Every replay, park, delete, publish, and environment switch is recorded." />
                 <ToggleRow locked label="Confirm dangerous actions" desc="Every destructive API call requires confirm: true." />
-                <ToggleRow label="Type-to-confirm in production" desc="Require typing the queue name before any action in production environments." checked={ui.typeConfirm !== false} onChange={t('typeConfirm')} />
+                <ToggleRow label="Type-to-confirm in production" desc="Always enforced in production. When off, other environments pre-fill the confirmation (review is still required)." checked={ui.typeConfirm !== false} onChange={t('typeConfirm')} />
                 <ToggleRow label="Prefer Park over Delete" desc="Suggest parking when a delete is requested on messages with x-death ≥ 3." checked={ui.preferPark !== false} onChange={t('preferPark')} />
               </div>
               <Alert tone="success" style={{ marginTop: 14 }}>Messages never lost: with these defaults, no QueueLens operation can drop a message.</Alert>
@@ -385,7 +385,7 @@
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
                   <ToggleRow locked label="Audit recovery actions" desc="Replay, park, delete, publish, and bulk operations are always recorded." />
-                  <ToggleRow label="Ship to syslog" desc="Forward audit entries to the configured syslog endpoint (requires a syslog sidecar)." checked={!!ui.syslog} onChange={t('syslog')} />
+                  <ToggleRow label="Stream audit to log" desc="Stream every audit entry as a JSON line to the container log, ready for syslog/log shippers." checked={!!ui.syslog} onChange={t('syslog')} />
                 </div>
               </Card>
               <section style={{ background: 'var(--red-50)', border: '1px solid var(--red-200)', borderRadius: 'var(--radius-lg)', padding: 20 }}>

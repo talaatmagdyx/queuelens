@@ -39,6 +39,8 @@ async def dry_run(
     body: BulkDryRunRequest,
     username: str = Depends(get_current_username),
 ) -> dict[str, object]:
+    stored = await request.app.state.settings_store.get_safe("limits", {}) or {}
+    max_bulk = stored.get("max_bulk_size")
     try:
         return await _service(request).dry_run(
             source_queue=body.source_queue,
@@ -49,6 +51,7 @@ async def dry_run(
             selected_fingerprints=(
                 frozenset(body.fingerprints) if body.fingerprints is not None else None
             ),
+            max_bulk=min(int(max_bulk), 1000) if max_bulk else None,
         )
     except Exception as error:
         # Dry-run failures are audited too — a rejected bulk attempt is still an attempt.

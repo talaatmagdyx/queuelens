@@ -21,7 +21,7 @@ async def list_messages(
     limit: int | None = Query(default=None, ge=1, le=1000),
 ) -> dict[str, object]:
     settings = request.app.state.settings
-    stored = await request.app.state.settings_store.get("limits", {}) or {}
+    stored = await request.app.state.settings_store.get_safe("limits", {}) or {}
     effective = limit or int(
         stored.get("max_preview_messages") or settings.max_preview_messages
     )
@@ -47,11 +47,13 @@ async def get_message(
     _username: str = Depends(get_current_username),
 ) -> dict[str, object]:
     settings = request.app.state.settings
+    stored = await request.app.state.settings_store.get_safe("limits", {}) or {}
+    refetch = int(stored.get("refetch_window_size") or settings.refetch_window_size)
     try:
         message = await _service(request).get_message(
             queue_name,
             fingerprint,
-            settings.refetch_window_size,
+            min(refetch, 1000),
         )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error

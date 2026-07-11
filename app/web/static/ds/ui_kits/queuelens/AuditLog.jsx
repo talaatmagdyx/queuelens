@@ -39,14 +39,22 @@
     const pageRows = rows.slice((safePage - 1) * pageSize, safePage * pageSize);
     const filtersOn = q || from || to || actionF !== 'All Actions' || resultF !== 'All Results';
 
+    const exportFormat = ((((window.QL.serverSettings || {}).ui) || {}).export_format || 'CSV');
     const exportCsv = () => {
-      const head = 'time,user,action,queue,target,result,duration';
-      const esc = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-      const body = rows.map((r) => [r.time, r.user, r.action, r.queue, r.target, r.result, r.duration].map(esc).join(','));
-      const blob = new Blob([[head].concat(body).join('\n')], { type: 'text/csv' });
+      let blob, filename;
+      if (exportFormat === 'JSON') {
+        blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
+        filename = 'queuelens-audit.json';
+      } else {
+        const head = 'time,user,action,queue,target,result,duration';
+        const esc = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+        const body = rows.map((r) => [r.time, r.user, r.action, r.queue, r.target, r.result, r.duration].map(esc).join(','));
+        blob = new Blob([[head].concat(body).join('\n')], { type: 'text/csv' });
+        filename = 'queuelens-audit.csv';
+      }
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'queuelens-audit.csv';
+      a.download = filename;
       a.click();
       URL.revokeObjectURL(a.href);
     };
@@ -57,7 +65,7 @@
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <PageHeader title="Audit Log" subtitle="Complete history of all actions performed in QueueLens."
-            actions={<Button variant="secondary" icon="download" onClick={exportCsv}>Export CSV</Button>} />
+            actions={<Button variant="secondary" icon="download" onClick={exportCsv}>Export {exportFormat}</Button>} />
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(215px, 1fr))', gap: 14, marginBottom: 20 }}>
             <StatCard icon="database" tone="info" value={String(total)} label="Total Actions" sublabel="Last 500" />

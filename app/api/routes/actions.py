@@ -48,7 +48,7 @@ class MessageActionRequest(BaseModel):
 
 async def _custom_headers(request: Request) -> dict[str, object]:
     """Admin-configured headers stamped on every message QueueLens publishes."""
-    stored = await request.app.state.settings_store.get("custom_headers", []) or []
+    stored = await request.app.state.settings_store.get_safe("custom_headers", []) or []
     return {
         str(item["key"]): str(item["value"])
         for item in stored

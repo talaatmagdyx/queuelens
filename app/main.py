@@ -106,6 +106,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.environment_manager.apply_custom(
             await app.state.settings_store.get("custom_environments", {}) or {}
         )
+        stored_ui = await app.state.settings_store.get("ui", {}) or {}
+        app.state.audit_repository.stream_to_log = bool(stored_ui.get("syslog"))
         await app.state.environment_manager.start_default()
         app.state.alert_engine.start()
         retention_task = asyncio.get_running_loop().create_task(_retention_loop(app))

@@ -67,6 +67,10 @@ async def put_settings_api(
     if unknown:
         raise HTTPException(status_code=400, detail=f"Unknown settings keys: {sorted(unknown)}")
     values = body.values
+    if "ui" in values:
+        request.app.state.audit_repository.stream_to_log = bool(
+            (values.get("ui") or {}).get("syslog")
+        )
     email = ((values.get("channels") or {}).get("email")) if "channels" in values else None
     if isinstance(email, dict) and email.get("password") == SECRET_SENTINEL:
         stored = await request.app.state.settings_store.get("channels", {}) or {}
