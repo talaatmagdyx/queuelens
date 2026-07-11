@@ -184,6 +184,7 @@ window.QL.screens = window.QL.screens || {};
   window.QL.putJson = function (path, body) { return window.QL.requestJson('PUT', path, body); };
 
   window.QL.fetchServerSettings = function () { return getJson('/api/settings') || {}; };
+  window.QL.serverSettings = window.QL.fetchServerSettings();
   window.QL.saveSettings = function (values) {
     return window.QL.putJson('/api/settings', { values: values });
   };

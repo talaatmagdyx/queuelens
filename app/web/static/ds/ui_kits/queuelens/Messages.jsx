@@ -141,7 +141,7 @@
             </div>
           </Card>
 
-          {queueRow.messages > rows.length && (
+          {queueRow.messages > rows.length && ((window.QL.serverSettings || {}).ui || {}).limits !== false && (
             <Alert tone="info" style={{ marginBottom: 18 }}>Showing the latest {rows.length} messages (preview limit) of {queueRow.messages} in the queue.</Alert>
           )}
 
