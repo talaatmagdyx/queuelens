@@ -69,11 +69,18 @@
         {editing && (
           <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {id === 'email' ? (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 0.5fr 1fr 1fr', gap: 8 }}>
-                <Input label="SMTP Host" value={draft.smtp_host || ''} onChange={(v) => setDraft({ ...draft, smtp_host: v })} placeholder="mailpit" />
-                <Input label="Port" value={String(draft.smtp_port || 1025)} onChange={(v) => setDraft({ ...draft, smtp_port: parseInt(v, 10) || 1025 })} />
-                <Input label="To" value={draft.to || ''} onChange={(v) => setDraft({ ...draft, to: v })} placeholder="sre@acme.io" />
-                <Input label="From" value={draft.from || ''} onChange={(v) => setDraft({ ...draft, from: v })} placeholder="queuelens@local" />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 0.5fr 1fr 1fr', gap: 8 }}>
+                  <Input label="SMTP Host" value={draft.smtp_host || ''} onChange={(v) => setDraft({ ...draft, smtp_host: v })} placeholder="smtp.sendgrid.net" />
+                  <Input label="Port" value={String(draft.smtp_port || 1025)} onChange={(v) => setDraft({ ...draft, smtp_port: parseInt(v, 10) || 1025 })} />
+                  <Input label="To" value={draft.to || ''} onChange={(v) => setDraft({ ...draft, to: v })} placeholder="sre@acme.io" />
+                  <Input label="From" value={draft.from || ''} onChange={(v) => setDraft({ ...draft, from: v })} placeholder="queuelens@acme.io" />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 8, alignItems: 'end' }}>
+                  <Input label="SMTP Username (optional)" value={draft.username || ''} onChange={(v) => setDraft({ ...draft, username: v })} placeholder="apikey" />
+                  <Input label="SMTP Password" type="password" value={draft.password || ''} onChange={(v) => setDraft({ ...draft, password: v })} placeholder={draft.password === '__secret__' ? 'saved — type to replace' : ''} />
+                  <Switch checked={draft.use_tls != null ? !!draft.use_tls : !!draft.username} onChange={(v) => setDraft({ ...draft, use_tls: v })} label="STARTTLS" description="Port 465 uses implicit TLS automatically" />
+                </div>
               </div>
             ) : (
               <Input label={meta.name + ' URL'} value={draft.url || ''} onChange={(v) => setDraft({ ...draft, url: v })} placeholder="https://…" />

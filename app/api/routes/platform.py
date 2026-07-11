@@ -17,12 +17,27 @@ ALLOWED_SETTING_KEYS = {
 }
 
 
+SECRET_SENTINEL = "__secret__"
+
+
+def _redact_channels(settings: dict[str, Any]) -> dict[str, Any]:
+    channels = settings.get("channels")
+    if isinstance(channels, dict):
+        email = channels.get("email")
+        if isinstance(email, dict) and email.get("password"):
+            redacted = {**email, "password": SECRET_SENTINEL}
+            settings = {**settings, "channels": {**channels, "email": redacted}}
+    return settings
+
+
 @router.get("/settings")
 async def get_settings_api(
     request: Request,
     _username: str = Depends(get_current_username),
 ) -> dict[str, Any]:
-    return cast(dict[str, Any], await request.app.state.settings_store.get_all())
+    return _redact_channels(
+        cast(dict[str, Any], await request.app.state.settings_store.get_all())
+    )
 
 
 class SettingsUpdate(BaseModel):
@@ -38,7 +53,14 @@ async def put_settings_api(
     unknown = set(body.values) - ALLOWED_SETTING_KEYS
     if unknown:
         raise HTTPException(status_code=400, detail=f"Unknown settings keys: {sorted(unknown)}")
-    return cast(dict[str, Any], await request.app.state.settings_store.put(body.values))
+    values = body.values
+    email = ((values.get("channels") or {}).get("email")) if "channels" in values else None
+    if isinstance(email, dict) and email.get("password") == SECRET_SENTINEL:
+        stored = await request.app.state.settings_store.get("channels", {}) or {}
+        email["password"] = (stored.get("email") or {}).get("password", "")
+    return _redact_channels(
+        cast(dict[str, Any], await request.app.state.settings_store.put(values))
+    )
 
 
 # ---------------------------------------------------------------- alert rules

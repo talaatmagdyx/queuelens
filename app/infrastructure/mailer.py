@@ -17,9 +17,21 @@ def _send_sync(config: dict[str, Any], subject: str, body: str) -> None:
     message["To"] = config.get("to", "sre@localhost")
     message["Subject"] = subject
     message.set_content(body)
-    with smtplib.SMTP(
-        config.get("smtp_host", "localhost"), int(config.get("smtp_port", 1025)), timeout=10
-    ) as smtp:
+    host = config.get("smtp_host", "localhost")
+    port = int(config.get("smtp_port", 1025))
+    username = config.get("username") or ""
+    password = config.get("password") or ""
+    # port 465 is implicit TLS; otherwise STARTTLS when requested or when credentials are set
+    use_ssl = bool(config.get("use_ssl")) or port == 465
+    use_tls = config.get("use_tls")
+    if use_tls is None:
+        use_tls = bool(username) and not use_ssl
+    smtp_class = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+    with smtp_class(host, port, timeout=10) as smtp:
+        if use_tls and not use_ssl:
+            smtp.starttls()
+        if username:
+            smtp.login(username, password)
         smtp.send_message(message)
 
 

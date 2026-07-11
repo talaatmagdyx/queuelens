@@ -225,3 +225,70 @@ async def test_create_environment_and_extend_vhosts(tmp_path) -> None:
     # persisted server-side so it survives restarts
     stored = await app.state.settings_store.get("custom_environments")
     assert stored["production"]["vhosts"] == ["billing", "orders", "payments", "reporting"]
+
+
+@pytest.mark.asyncio
+async def test_smtp_auth_tls_and_password_redaction(tmp_path) -> None:
+    from app.infrastructure import mailer
+
+    calls: dict[str, object] = {}
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout=10):  # type: ignore[no-untyped-def]
+            calls["endpoint"] = (host, port)
+
+        def __enter__(self):  # type: ignore[no-untyped-def]
+            return self
+
+        def __exit__(self, *args):  # type: ignore[no-untyped-def]
+            return False
+
+        def starttls(self):  # type: ignore[no-untyped-def]
+            calls["starttls"] = True
+
+        def login(self, username, password):  # type: ignore[no-untyped-def]
+            calls["login"] = (username, password)
+
+        def send_message(self, message):  # type: ignore[no-untyped-def]
+            calls["sent"] = message["Subject"]
+
+    original = mailer.smtplib.SMTP
+    mailer.smtplib.SMTP = FakeSMTP  # type: ignore[misc]
+    try:
+        result = await mailer.send_email(
+            {"smtp_host": "smtp.acme.io", "smtp_port": 587,
+             "username": "apikey", "password": "sg-secret"},
+            "hello", "body",
+        )
+    finally:
+        mailer.smtplib.SMTP = original  # type: ignore[misc]
+
+    assert result["ok"] is True
+    assert calls["endpoint"] == ("smtp.acme.io", 587)
+    assert calls["starttls"] is True  # implied by credentials on a non-465 port
+    assert calls["login"] == ("apikey", "sg-secret")
+
+    # the API never echoes the stored password back
+    app = _app(tmp_path)
+    await app.state.database.start()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.put(
+            "/api/settings",
+            json={"values": {"channels": {"email": {
+                "smtp_host": "smtp.acme.io", "password": "sg-secret"}}}},
+        )
+        got = await client.get("/api/settings")
+        # saving with the sentinel keeps the stored password
+        await client.put(
+            "/api/settings",
+            json={"values": {"channels": {"email": {
+                "smtp_host": "smtp2.acme.io", "password": "__secret__"}}}},
+        )
+    stored = await app.state.settings_store.get("channels")
+    await app.state.database.close()
+
+    assert got.json()["channels"]["email"]["password"] == "__secret__"
+    assert "sg-secret" not in got.text
+    assert stored["email"]["password"] == "sg-secret"
+    assert stored["email"]["smtp_host"] == "smtp2.acme.io"
