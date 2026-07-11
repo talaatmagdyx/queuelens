@@ -85,4 +85,17 @@ See [`config/replay-targets.example.json`](../config/replay-targets.example.json
 | Variable | Default | Meaning |
 |---|---|---|
 | `QUEUELENS_APP_NAME` | `QueueLens` | Display name |
-| `QUEUELENS_ENVIRONMENT` | `development` | Free-form environment label |
+| `QUEUELENS_ENVIRONMENT` | `development` | Free-form environment label (name of the default environment) |
+
+## Environments, alerting, and email
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `QUEUELENS_ENVIRONMENTS_JSON` | `{}` | Additional environment profiles: `{"name": {"rabbitmq_url", "management_url", "management_username", "management_password", "vhosts": [...]}}`. Omitted fields inherit from the default environment, so a same-broker profile only needs `vhosts`. Same-broker environments and extra vhosts can also be added at runtime from Configuration → Environments (persisted in the settings store) |
+| `QUEUELENS_SMTP_HOST` | *(empty)* | Seeds the email delivery channel on first boot (e.g. `mailpit`). Channels are editable afterwards in Alerts → Delivery Channels |
+| `QUEUELENS_SMTP_PORT` | `1025` | SMTP port for the seeded email channel |
+| `QUEUELENS_ALERT_INTERVAL_SECONDS` | `15` | How often the alert engine evaluates enabled rules against live queue stats |
+
+Settings managed in the UI (custom headers, limits overrides, retention, delivery channels,
+alert rules, invited users, runtime-added environments) live in the SQLite database
+(`QUEUELENS_DATABASE_URL`), not in environment variables.
