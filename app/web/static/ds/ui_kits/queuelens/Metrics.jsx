@@ -1,57 +1,50 @@
 // Metrics — the app's own Prometheus story: live queuelens_* values,
 // the scrape config, and the bundled alert rules. Read-only, all roles.
 (function () {
-  const { Icon, Badge, CodeBlock } = window.__NS;
-  const { PageHeader, Card } = window.QL;
+  const { Icon, Badge, StatCard, CodeBlock, Tabs, Button } = window.__NS;
+  const { PageHeader, Card, EmptyState } = window.QL;
 
   const SCRAPE_SNIPPET = [
     'scrape_configs:',
     '  - job_name: queuelens',
     '    metrics_path: /metrics',
     '    basic_auth:',
-    '      username: <viewer-user>',
+    '      username: <viewer-user>   # a read-only Viewer account is enough',
     '      password: <password>',
     '    static_configs:',
     "      - targets: ['queuelens.internal:8000']",
   ].join('\n');
 
-  function Stat({ label, value, hint, tone }) {
-    const color = tone === 'bad' ? 'var(--red-600)' : tone === 'good' ? 'var(--green-600)' : 'var(--slate-900)';
+  // queue name, thin proportional bar, count — reads like a chart, scans like a table
+  function BacklogRow({ name, value, max }) {
+    const pct = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
+    const hot = value > 0;
     return (
-      <Card style={{ padding: '18px 20px', flex: 1, minWidth: 150 }}>
-        <div style={{ fontSize: 26, fontWeight: 700, color, fontFamily: 'var(--font-mono)' }}>{value}</div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--slate-700)', marginTop: 2 }}>{label}</div>
-        {hint && <div style={{ fontSize: 12, color: 'var(--slate-400)' }}>{hint}</div>}
-      </Card>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '7px 0' }}>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--slate-700)', width: 220, flex: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+        <span style={{ flex: 1, height: 8, borderRadius: 99, background: 'var(--slate-100)', overflow: 'hidden' }}>
+          <span style={{ display: 'block', height: '100%', width: pct + '%', borderRadius: 99, background: hot ? 'var(--red-400, #f87171)' : 'var(--slate-200)', transition: 'width .4s' }} />
+        </span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, fontWeight: 700, color: hot ? 'var(--red-600)' : 'var(--slate-400)', width: 52, textAlign: 'right', flex: 'none' }}>{value}</span>
+      </div>
     );
   }
 
-  function MiniTable({ head, rows, empty }) {
-    if (!rows.length) return <div style={{ padding: '22px 0', textAlign: 'center', color: 'var(--slate-400)', fontSize: 13.5 }}>{empty}</div>;
+  function ResultPill({ result }) {
+    const ok = result === 'success';
     return (
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
-        <thead><tr>
-          {head.map((h, i) => (
-            <th key={h} style={{ textAlign: i === head.length - 1 ? 'right' : 'left', padding: '8px 10px', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--slate-400)', borderBottom: '1px solid var(--border-default)' }}>{h}</th>
-          ))}
-        </tr></thead>
-        <tbody>
-          {rows.map((cells, r) => (
-            <tr key={r}>
-              {cells.map((c, i) => (
-                <td key={i} style={{ padding: '9px 10px', borderBottom: '1px solid var(--border-subtle, var(--border-default))', textAlign: i === cells.length - 1 ? 'right' : 'left', fontFamily: i === 0 ? 'var(--font-mono)' : undefined, color: i === 0 ? 'var(--slate-800)' : 'var(--slate-600)' }}>{c}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <span style={{ fontSize: 11.5, fontWeight: 600, padding: '2px 9px', borderRadius: 99, background: ok ? 'var(--green-100)' : 'var(--red-100)', color: ok ? 'var(--green-600)' : 'var(--red-600)' }}>
+        {result}
+      </span>
     );
   }
 
   function Metrics() {
     const [data, setData] = React.useState(null);
     const [rules, setRules] = React.useState('');
+    const [tab, setTab] = React.useState('scrape');
     const [error, setError] = React.useState(null);
+
     const getSync = (path) => {
       const x = new XMLHttpRequest();
       x.open('GET', path, false);
@@ -71,85 +64,86 @@
       catch (e) { /* rules panel just stays empty */ }
     }, []);
 
-    if (error) {
-      return (
-        <div style={{ maxWidth: 1060, margin: '0 auto', padding: '28px 28px 60px' }}>
-          <PageHeader title="Metrics" subtitle="Prometheus observability for this QueueLens instance." />
-          <Card style={{ padding: 24, color: 'var(--red-600)', fontSize: 14 }}>Could not load metrics: {error}</Card>
-        </div>
-      );
-    }
-    if (!data) return null;
-
-    return (
+    const wrap = (children) => (
       <div style={{ maxWidth: 1060, margin: '0 auto', padding: '28px 28px 60px' }}>
         <PageHeader
           title="Metrics"
           subtitle="What this instance exports at /metrics — live values, the scrape config, and the bundled Prometheus alert rules."
-          actions={<button className="ql-btn" onClick={load}><Icon name="refresh-cw" size={14} /> Refresh</button>}
+          actions={<Button variant="secondary" icon="refresh-cw" onClick={load}>Refresh</Button>}
         />
-
-        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 22 }}>
-          <Stat label="Broker" value={data.rabbitmq_ready ? 'UP' : 'DOWN'} tone={data.rabbitmq_ready ? 'good' : 'bad'} hint="queuelens_rabbitmq_ready" />
-          <Stat label="DLQ backlog" value={data.dlq_backlog} tone={data.dlq_backlog > 0 ? 'bad' : 'good'} hint="sum of queuelens_dlq_messages" />
-          <Stat label="Previews served" value={data.preview_requests} hint="queuelens_preview_requests_total" />
-          <Stat label="Actions OK" value={data.actions_succeeded} tone="good" hint='queuelens_actions_total{result="success"}' />
-          <Stat label="Actions failed" value={data.actions_failed} tone={data.actions_failed > 0 ? 'bad' : undefined} hint='queuelens_actions_total{result="failed"}' />
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 18, marginBottom: 22 }}>
-          <Card style={{ padding: 20 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <Icon name="inbox" size={16} color="var(--red-600)" />
-              <b style={{ fontSize: 14.5 }}>Dead-letter backlog</b>
-              <Badge tone="neutral">{data.dlq.length} queues</Badge>
-            </div>
-            <MiniTable head={['queue', 'messages']} empty="No dead-letter queues detected."
-              rows={data.dlq.map((r) => [r.queue, r.messages])} />
-          </Card>
-          <Card style={{ padding: 20 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <Icon name="zap" size={16} color="var(--blue-600)" />
-              <b style={{ fontSize: 14.5 }}>Actions since start</b>
-            </div>
-            <MiniTable head={['action', 'result', 'count']} empty="No actions executed since this instance started."
-              rows={data.actions.map((r) => [r.action, r.result, r.count])} />
-            {data.operations.length > 0 && (
-              <div style={{ marginTop: 14 }}>
-                <div style={{ fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--slate-400)', marginBottom: 4 }}>Broker operation latency (avg)</div>
-                <MiniTable head={['action', 'calls', 'avg']} empty=""
-                  rows={data.operations.map((r) => [r.action, r.count, (r.avg_seconds * 1000).toFixed(0) + ' ms'])} />
-              </div>
-            )}
-          </Card>
-        </div>
-
-        <Card style={{ padding: 20, marginBottom: 18 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-            <Icon name="radar" size={16} color="var(--purple-600)" />
-            <b style={{ fontSize: 14.5 }}>Scrape this instance</b>
-          </div>
-          <p style={{ fontSize: 13.5, color: 'var(--slate-500)', margin: '0 0 12px' }}>
-            <code style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5 }}>/metrics</code> serves Prometheus
-            text format behind the same Basic auth as the app — a read-only Viewer account is enough.
-          </p>
-          <CodeBlock code={SCRAPE_SNIPPET} copy maxHeight={220} />
-        </Card>
-
-        <Card style={{ padding: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-            <Icon name="bell-ring" size={16} color="var(--amber-600, #d97706)" />
-            <b style={{ fontSize: 14.5 }}>Bundled alert rules</b>
-          </div>
-          <p style={{ fontSize: 13.5, color: 'var(--slate-500)', margin: '0 0 12px' }}>
-            Ready-made Alertmanager rules for broker loss, DLQ depth, DLQ growth, and action failures.
-            Copy them into your Prometheus rules directory and tune the thresholds to your traffic.
-          </p>
-          {rules
-            ? <CodeBlock code={rules} copy maxHeight={380} />
-            : <div style={{ padding: '18px 0', color: 'var(--slate-400)', fontSize: 13.5 }}>Rules file not available on this instance.</div>}
-        </Card>
+        {children}
       </div>
+    );
+
+    if (error) return wrap(<Card><EmptyState icon="alert-triangle" tone="danger" title="Could not load metrics">{error}</EmptyState></Card>);
+    if (!data) return null;
+
+    const maxDlq = Math.max(1, ...data.dlq.map((r) => r.messages));
+    const ruleCount = (rules.match(/- alert:/g) || []).length;
+
+    return wrap(
+      <React.Fragment>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 20 }}>
+          <StatCard icon="activity" tone={data.rabbitmq_ready ? 'success' : 'danger'} value={data.rabbitmq_ready ? 'UP' : 'DOWN'} label="Broker" sublabel="AMQP link" />
+          <StatCard icon="inbox" tone={data.dlq_backlog > 0 ? 'danger' : 'success'} value={String(data.dlq_backlog)} label="DLQ backlog" sublabel={data.dlq.length + ' queues'} />
+          <StatCard icon="eye" tone="info" value={String(data.preview_requests)} label="Previews" sublabel="Reads only" />
+          <StatCard icon="check-circle" tone="success" value={String(data.actions_succeeded)} label="Actions OK" sublabel="Replay · park" />
+          <StatCard icon="x-circle" tone={data.actions_failed > 0 ? 'danger' : 'park'} value={String(data.actions_failed)} label="Failed" sublabel="See audit log" />
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 18, marginBottom: 20, alignItems: 'start' }}>
+          <Card title="Dead-letter backlog" subtitle="queuelens_dlq_messages — refreshed on every load"
+            action={<Badge tone="neutral">{data.dlq.length} queues</Badge>}>
+            {data.dlq.length === 0
+              ? <EmptyState icon="check-circle" tone="success" title="No dead-letter queues detected">Nothing is dead-lettering right now.</EmptyState>
+              : data.dlq.map((r) => <BacklogRow key={r.queue} name={r.queue} value={r.messages} max={maxDlq} />)}
+          </Card>
+
+          <div style={{ display: 'grid', gap: 18 }}>
+            <Card title="Actions since start" subtitle='queuelens_actions_total by action and result'>
+              {data.actions.length === 0
+                ? <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0 4px', color: 'var(--slate-400)', fontSize: 13.5 }}>
+                    <span style={{ width: 34, height: 34, borderRadius: 999, background: 'var(--slate-100)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Icon name="zap" size={16} color="var(--slate-400)" /></span>
+                    Counters reset with the process — run a replay or park and it shows up here.
+                  </div>
+                : data.actions.map((r, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: i < data.actions.length - 1 ? '1px solid var(--slate-100)' : 'none' }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--slate-700)', flex: 1 }}>{r.action}</span>
+                      <ResultPill result={r.result} />
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, fontWeight: 700, color: 'var(--slate-700)', width: 44, textAlign: 'right' }}>{r.count}</span>
+                    </div>
+                  ))}
+            </Card>
+            <Card title="Broker operation latency" subtitle="Average per action, this process">
+              {data.operations.length === 0
+                ? <div style={{ color: 'var(--slate-400)', fontSize: 13.5, padding: '4px 0' }}>No timed operations yet.</div>
+                : data.operations.map((r) => (
+                    <div key={r.action} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--slate-700)', flex: 1 }}>{r.action}</span>
+                      <span style={{ fontSize: 12, color: 'var(--slate-400)' }}>{r.count} calls</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, fontWeight: 700, color: 'var(--slate-700)', width: 70, textAlign: 'right' }}>{(r.avg_seconds * 1000).toFixed(0)} ms</span>
+                    </div>
+                  ))}
+            </Card>
+          </div>
+        </div>
+
+        <Card title="Prometheus integration" subtitle="Point your Prometheus at this instance, then load the bundled rules and tune the thresholds to your traffic." pad={false}>
+          <div style={{ padding: '0 20px' }}>
+            <Tabs active={tab} onChange={setTab} tabs={[
+              { id: 'scrape', label: 'Scrape config', icon: 'radar' },
+              { id: 'rules', label: 'Alert rules', icon: 'bell-ring', count: ruleCount || undefined },
+            ]} />
+          </div>
+          <div style={{ padding: '16px 20px 18px' }}>
+            {tab === 'scrape'
+              ? <CodeBlock code={SCRAPE_SNIPPET} copy />
+              : rules
+                ? <CodeBlock code={rules} copy maxHeight={360} />
+                : <div style={{ color: 'var(--slate-400)', fontSize: 13.5 }}>Rules file not available on this instance.</div>}
+          </div>
+        </Card>
+      </React.Fragment>
     );
   }
 
