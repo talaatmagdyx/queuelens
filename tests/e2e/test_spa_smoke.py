@@ -11,6 +11,30 @@ import pytest
 pytestmark = pytest.mark.skipif(os.environ.get("E2E") != "1", reason="set E2E=1 to run")
 
 BASE = os.environ.get("E2E_BASE_URL", "http://127.0.0.1:8123")
+MGMT = os.environ.get("E2E_MGMT_URL", "http://127.0.0.1:15672")
+MGMT_AUTH = (
+    os.environ.get("E2E_MGMT_USER", "queuelens"),
+    os.environ.get("E2E_MGMT_PASSWORD", "queuelens"),
+)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def seeded_dlq() -> None:
+    """CI's broker starts empty — the wizard test needs at least one DLQ with a message."""
+    import httpx
+
+    with httpx.Client(auth=MGMT_AUTH, timeout=10) as client:
+        queue_url = f"{MGMT}/api/queues/%2F/e2e.orders.dlq"
+        client.put(queue_url, json={"durable": True}).raise_for_status()
+        client.post(
+            f"{MGMT}/api/exchanges/%2F/amq.default/publish",
+            json={
+                "properties": {},
+                "routing_key": "e2e.orders.dlq",
+                "payload": '{"order_id": "e2e-1"}',
+                "payload_encoding": "string",
+            },
+        ).raise_for_status()
 
 
 @pytest.fixture(scope="module")
