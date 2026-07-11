@@ -133,6 +133,17 @@
     const removeHeader = (index) =>
       save({ custom_headers: customHeaders.filter((_, i) => i !== index) }, 'Header removed');
 
+    // The management URL points at the Docker-internal hostname; the browser needs
+    // the host it is actually browsing from (override persisted in settings.ui).
+    const derivedOverview = (() => {
+      try {
+        const u = new URL(CFG.management_url);
+        return location.protocol + '//' + location.hostname + ':' + (u.port || '15672');
+      } catch (e) { return 'http://localhost:15672'; }
+    })();
+    const overviewUrl = ui.broker_overview_url || derivedOverview;
+    const [overviewDraft, setOverviewDraft] = React.useState(null); // null = not editing
+
     const th = { textAlign: 'left', padding: '8px 14px', fontSize: 12.5, fontWeight: 600, color: 'var(--slate-500)', background: 'var(--surface-table-header)' };
     const td = { padding: '10px 14px', fontSize: 13, fontFamily: 'var(--font-mono)', borderTop: '1px solid var(--slate-100)' };
     const nowIso = new Date().toISOString();
@@ -310,7 +321,21 @@
             <SideRow icon="list" label="Queue Count" value={String((test && test.queues != null) ? test.queues : D.queues.length)} />
             <SideRow icon="clock" label="Last Check" value={test ? 'just now' : '—'} />
             <Button variant="secondary" iconRight="external-link" style={{ width: '100%', marginTop: 10, color: 'var(--text-link)' }}
-              onClick={() => window.open(CFG.management_url, '_blank', 'noopener')}>View Broker Overview</Button>
+              onClick={() => window.open(overviewUrl, '_blank', 'noopener')}>View Broker Overview</Button>
+            {overviewDraft === null ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+                <span style={{ flex: 1, fontSize: 11.5, fontFamily: 'var(--font-mono)', color: 'var(--slate-400)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{overviewUrl}</span>
+                <a href="#" onClick={(e) => { e.preventDefault(); setOverviewDraft(overviewUrl); }} style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-link)', textDecoration: 'none', flex: 'none' }}>Change URL</a>
+              </div>
+            ) : (
+              <div style={{ marginTop: 8 }}>
+                <Input label="Broker Overview URL (opens in your browser)" value={overviewDraft} onChange={setOverviewDraft} placeholder={derivedOverview} />
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+                  <Button variant="ghost" size="sm" onClick={() => setOverviewDraft(null)}>Cancel</Button>
+                  <Button size="sm" onClick={() => { save({ ui: { ...ui, broker_overview_url: overviewDraft.trim() } }, 'URL saved'); setOverviewDraft(null); }}>Save</Button>
+                </div>
+              </div>
+            )}
           </Card>
           <Card title="Safety Defaults (Summary)">
             <CheckRow label="Publish-before-ack" right="Enabled" />
