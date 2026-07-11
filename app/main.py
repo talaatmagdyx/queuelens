@@ -103,6 +103,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         await app.state.database.start()
         await _seed_defaults(app)
+        app.state.environment_manager.apply_custom(
+            await app.state.settings_store.get("custom_environments", {}) or {}
+        )
         await app.state.environment_manager.start_default()
         app.state.alert_engine.start()
         retention_task = asyncio.get_running_loop().create_task(_retention_loop(app))

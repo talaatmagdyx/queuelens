@@ -55,7 +55,9 @@
     );
   }
 
-  function EnvRow({ env, onActivate }) {
+  function EnvRow({ env, onActivate, onAddVhost }) {
+    const [adding, setAdding] = React.useState(false);
+    const [vhostDraft, setVhostDraft] = React.useState('');
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 16px', background: env.active ? 'var(--blue-50)' : 'var(--surface-card)', border: `1px solid ${env.active ? 'var(--blue-200)' : 'var(--border-default)'}`, borderRadius: 'var(--radius-md)' }}>
         <StatusPill tone={env.id === 'production' ? 'danger' : 'info'} dot size="sm" style={{ textTransform: 'uppercase', letterSpacing: '0.04em', flex: 'none' }}>{env.id}</StatusPill>
@@ -70,6 +72,18 @@
                   style={{ padding: '2px 8px', borderRadius: 6, border: 'none', cursor: 'pointer', background: isActive ? 'var(--blue-100)' : 'var(--slate-100)', color: isActive ? 'var(--blue-700)' : 'var(--slate-600)', fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{v}</button>
               );
             })}
+            {adding ? (
+              <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                <input autoFocus value={vhostDraft} onChange={(e) => setVhostDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && vhostDraft.trim()) { onAddVhost(env.id, vhostDraft.trim()); setAdding(false); setVhostDraft(''); } if (e.key === 'Escape') setAdding(false); }}
+                  placeholder="vhost name" style={{ width: 110, padding: '2px 8px', borderRadius: 6, border: '1px solid var(--blue-200)', fontSize: 12, fontFamily: 'var(--font-mono)', outline: 'none' }} />
+                <button onClick={() => { if (vhostDraft.trim()) { onAddVhost(env.id, vhostDraft.trim()); setAdding(false); setVhostDraft(''); } }}
+                  style={{ padding: '2px 8px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--blue-600)', color: 'white', fontSize: 12, fontWeight: 600 }}>Add</button>
+              </span>
+            ) : (
+              <button onClick={() => setAdding(true)} title="Add a vhost to this environment"
+                style={{ padding: '2px 8px', borderRadius: 6, border: '1px dashed var(--slate-300)', cursor: 'pointer', background: 'transparent', color: 'var(--slate-500)', fontSize: 12, fontWeight: 600 }}>+ vhost</button>
+            )}
           </div>
         </div>
         {env.active
@@ -123,6 +137,30 @@
         await window.QL.postJson('/api/environments/activate', { environment: envId, vhost: vhost || undefined });
         location.reload(); // the data layer reloads against the newly active broker/vhost
       } catch (e) { setError(e.message); setSwitching(false); }
+    };
+
+    const [addingEnv, setAddingEnv] = React.useState(false);
+    const [envDraft, setEnvDraft] = React.useState({ name: '', vhosts: '/' });
+    const addEnvironment = async () => {
+      setError(null);
+      try {
+        const result = await window.QL.postJson('/api/environments', {
+          name: envDraft.name.trim(),
+          vhosts: envDraft.vhosts.split(',').map((v) => v.trim()).filter(Boolean),
+        });
+        setEnvs(result.environments);
+        setAddingEnv(false);
+        setEnvDraft({ name: '', vhosts: '/' });
+        setSavedNote('Environment added');
+        setTimeout(() => setSavedNote(null), 2500);
+      } catch (e) { setError(e.message); }
+    };
+    const addVhost = async (envId, vhost) => {
+      setError(null);
+      try {
+        const result = await window.QL.postJson('/api/environments', { name: envId, vhosts: [vhost] });
+        setEnvs(result.environments);
+      } catch (e) { setError(e.message); }
     };
 
     const addHeader = () => {
@@ -182,14 +220,26 @@
                 </div>
               </Card>
 
-              <Card title="Environments & Virtual Hosts" subtitle="Connection profiles from QUEUELENS_ENVIRONMENTS_JSON. Set Active switches every view, action, and audit entry to that broker/vhost."
-                action={switching ? <StatusPill tone="warning" size="sm">Switching…</StatusPill> : <Badge tone="info" uppercase={false}>{envs.length} defined</Badge>}>
+              <Card title="Environments & Virtual Hosts" subtitle="Set Active switches every view, action, and audit entry to that broker/vhost. Same-broker environments and vhosts can be added right here."
+                action={<span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                  {switching && <StatusPill tone="warning" size="sm">Switching…</StatusPill>}
+                  <Button variant="secondary" size="sm" icon="plus" onClick={() => setAddingEnv(!addingEnv)}>Add Environment</Button>
+                </span>}>
+                {addingEnv && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr auto', gap: 12, alignItems: 'end', marginBottom: 14, padding: '12px 14px', background: 'var(--blue-50)', border: '1px solid var(--blue-200)', borderRadius: 'var(--radius-md)' }}>
+                    <Input label="Name" required placeholder="production" value={envDraft.name} onChange={(v) => setEnvDraft({ ...envDraft, name: v })} />
+                    <Input label="Vhosts (comma-separated)" required placeholder="orders, payments, billing" value={envDraft.vhosts} onChange={(v) => setEnvDraft({ ...envDraft, vhosts: v })} />
+                    <Button style={{ height: 38 }} disabled={!envDraft.name.trim() || !envDraft.vhosts.trim()} onClick={addEnvironment}>Create</Button>
+                  </div>
+                )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
-                  {envs.map((env) => <EnvRow key={env.id} env={env} onActivate={activate} />)}
+                  {envs.map((env) => <EnvRow key={env.id} env={env} onActivate={activate} onAddVhost={addVhost} />)}
                 </div>
                 <Alert tone="info" style={{ marginTop: 14 }}>
-                  Credentials live in environment variables, never in the browser. Named vhosts are created
-                  on the broker on first activation. Every environment switch is audited.
+                  Environments added here share the default broker credentials (stored in environment
+                  variables, never the browser). Profiles with their own broker or credentials belong in
+                  QUEUELENS_ENVIRONMENTS_JSON. Named vhosts are created on the broker on first activation;
+                  every switch is audited.
                 </Alert>
               </Card>
 

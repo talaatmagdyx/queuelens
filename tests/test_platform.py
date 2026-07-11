@@ -198,3 +198,30 @@ async def test_custom_headers_applied_to_publish(tmp_path) -> None:
     assert response.status_code == 200
     assert seen["x-team"] == "payments-sre"
     assert seen["x-queuelens-test"] is True
+
+
+@pytest.mark.asyncio
+async def test_create_environment_and_extend_vhosts(tmp_path) -> None:
+    app = _app(tmp_path)
+    await app.state.database.start()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post(
+            "/api/environments",
+            json={"name": "production", "vhosts": ["orders", "payments", "billing"]},
+        )
+        extended = await client.post(
+            "/api/environments", json={"name": "production", "vhosts": ["reporting"]}
+        )
+        listing = await client.get("/api/environments")
+        bad = await client.post("/api/environments", json={"name": "x y", "vhosts": ["/"]})
+    await app.state.database.close()
+
+    assert created.status_code == 200
+    assert extended.status_code == 200
+    envs = {e["id"]: e for e in listing.json()["environments"]}
+    assert envs["production"]["vhosts"] == ["billing", "orders", "payments", "reporting"]
+    assert bad.status_code == 422  # invalid name pattern
+    # persisted server-side so it survives restarts
+    stored = await app.state.settings_store.get("custom_environments")
+    assert stored["production"]["vhosts"] == ["billing", "orders", "payments", "reporting"]

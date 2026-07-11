@@ -12,7 +12,9 @@ router = APIRouter(prefix="/api", tags=["platform"])
 
 # ---------------------------------------------------------------- settings
 
-ALLOWED_SETTING_KEYS = {"custom_headers", "channels", "limits", "retention", "ui"}
+ALLOWED_SETTING_KEYS = {
+    "custom_headers", "channels", "limits", "retention", "ui", "custom_environments",
+}
 
 
 @router.get("/settings")
@@ -206,6 +208,45 @@ async def list_environments(
     request: Request,
     _username: str = Depends(get_current_username),
 ) -> dict[str, Any]:
+    return {"environments": request.app.state.environment_manager.list()}
+
+
+class EnvironmentBody(BaseModel):
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9._-]+$")
+    vhosts: list[str] = Field(min_length=1, max_length=50)
+
+
+@router.post("/environments")
+async def create_environment(
+    request: Request,
+    body: EnvironmentBody,
+    username: str = Depends(get_current_username),
+) -> dict[str, Any]:
+    """Create a same-broker environment or add vhosts to an existing one.
+    Environments with their own broker/credentials belong in
+    QUEUELENS_ENVIRONMENTS_JSON — credentials never pass through this API."""
+    from datetime import UTC, datetime
+
+    from app.domain.models import AuditEntry
+
+    vhosts = [v.strip() for v in body.vhosts if v.strip()]
+    if not vhosts:
+        raise HTTPException(status_code=400, detail="At least one vhost is required")
+    store = request.app.state.settings_store
+    stored = await store.get("custom_environments", {}) or {}
+    merged = sorted(set(stored.get(body.name, {}).get("vhosts", [])) | set(vhosts))
+    stored[body.name] = {"vhosts": merged}
+    await store.put({"custom_environments": stored})
+    request.app.state.environment_manager.apply_custom(stored)
+    await request.app.state.audit_repository.record(
+        AuditEntry(
+            username=username,
+            action="add_environment",
+            timestamp=datetime.now(UTC),
+            result="success",
+            metadata={"name": body.name, "vhosts": vhosts},
+        )
+    )
     return {"environments": request.app.state.environment_manager.list()}
 
 

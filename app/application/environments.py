@@ -96,6 +96,21 @@ class EnvironmentManager:
             }
         )
 
+    def apply_custom(self, stored: dict[str, Any]) -> None:
+        """Merge server-stored environments: new names inherit the default broker;
+        existing names gain any extra vhosts. Idempotent."""
+        default = self._profiles[self._base.environment]
+        for name, custom in (stored or {}).items():
+            vhosts = [str(v) for v in (custom or {}).get("vhosts", []) if str(v).strip()]
+            if name in self._profiles:
+                for vhost in vhosts:
+                    if vhost not in self._profiles[name]["vhosts"]:
+                        self._profiles[name]["vhosts"].append(vhost)
+            else:
+                profile = dict(default)
+                profile["vhosts"] = vhosts or ["/"]
+                self._profiles[name] = profile
+
     def list(self) -> list[dict[str, Any]]:
         out = []
         for name, profile in self._profiles.items():
