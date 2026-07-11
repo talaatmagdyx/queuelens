@@ -143,7 +143,7 @@
     };
 
     const [addingEnv, setAddingEnv] = React.useState(false);
-    const [envDraft, setEnvDraft] = React.useState({ name: '', vhosts: '/', host: '', management_url: '', username: '', password: '' });
+    const [envDraft, setEnvDraft] = React.useState({ name: '', vhosts: '/', host: '', management_url: '', username: '', password: '', management_username: '', management_password: '' });
     const removeEnv = async (envId) => {
       if (!window.confirm(`Remove environment "${envId}"? Its stored profile is deleted (the broker itself is untouched).`)) return;
       setError(null);
@@ -162,10 +162,12 @@
           management_url: envDraft.management_url.trim() || null,
           username: envDraft.username.trim() || null,
           password: envDraft.password || null,
+          management_username: envDraft.management_username.trim() || null,
+          management_password: envDraft.management_password || null,
         });
         setEnvs(result.environments);
         setAddingEnv(false);
-        setEnvDraft({ name: '', vhosts: '/', host: '', management_url: '', username: '', password: '' });
+        setEnvDraft({ name: '', vhosts: '/', host: '', management_url: '', username: '', password: '', management_username: '', management_password: '' });
         setSavedNote('Environment added');
         setTimeout(() => setSavedNote(null), 2500);
       } catch (e) { setError(e.message); }
@@ -246,11 +248,15 @@
                       <Input label="Name" required placeholder="staging-2" value={envDraft.name} onChange={(v) => setEnvDraft({ ...envDraft, name: v })} />
                       <Input label="Vhosts (comma-separated)" required placeholder="orders, payments, billing" value={envDraft.vhosts} onChange={(v) => setEnvDraft({ ...envDraft, vhosts: v })} />
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 0.8fr 0.8fr', gap: 12 }}>
-                      <Input label="Broker Host (optional)" placeholder="rabbitmq-stg2:5672" value={envDraft.host} onChange={(v) => setEnvDraft({ ...envDraft, host: v })} />
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.9fr 0.9fr', gap: 12 }}>
+                      <Input label="AMQP Host (optional)" placeholder="rabbitmq-stg2:5672" value={envDraft.host} onChange={(v) => setEnvDraft({ ...envDraft, host: v })} />
+                      <Input label="AMQP Username" placeholder="queuelens" value={envDraft.username} onChange={(v) => setEnvDraft({ ...envDraft, username: v })} />
+                      <Input label="AMQP Password" type="password" value={envDraft.password} onChange={(v) => setEnvDraft({ ...envDraft, password: v })} />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.9fr 0.9fr', gap: 12 }}>
                       <Input label="Management URL (optional)" placeholder="http://rabbitmq-stg2:15672" value={envDraft.management_url} onChange={(v) => setEnvDraft({ ...envDraft, management_url: v })} />
-                      <Input label="Username (optional)" placeholder="queuelens" value={envDraft.username} onChange={(v) => setEnvDraft({ ...envDraft, username: v })} />
-                      <Input label="Password" type="password" value={envDraft.password} onChange={(v) => setEnvDraft({ ...envDraft, password: v })} />
+                      <Input label="Mgmt Username (blank = AMQP user)" placeholder="" value={envDraft.management_username} onChange={(v) => setEnvDraft({ ...envDraft, management_username: v })} />
+                      <Input label="Mgmt Password (blank = AMQP pass)" type="password" value={envDraft.management_password} onChange={(v) => setEnvDraft({ ...envDraft, management_password: v })} />
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       <span style={{ flex: 1, fontSize: 12, color: 'var(--slate-500)' }}>

@@ -251,9 +251,12 @@ class EnvironmentBody(BaseModel):
     vhosts: list[str] = Field(min_length=1, max_length=50)
     # optional full broker profile — blank fields inherit the default environment
     host: str | None = Field(default=None, max_length=255)  # e.g. rabbitmq-stg:5672
+    username: str | None = Field(default=None, max_length=128)  # AMQP user
+    password: str | None = Field(default=None, max_length=255)  # AMQP password
     management_url: str | None = Field(default=None, max_length=255)
-    username: str | None = Field(default=None, max_length=128)
-    password: str | None = Field(default=None, max_length=255)
+    # management credentials fall back to the AMQP ones when omitted
+    management_username: str | None = Field(default=None, max_length=128)
+    management_password: str | None = Field(default=None, max_length=255)
 
 
 @router.post("/environments")
@@ -284,10 +287,12 @@ async def create_environment(
         profile["rabbitmq_url"] = f"amqp://{credentials}{body.host.strip()}/"
     if body.management_url:
         profile["management_url"] = body.management_url.strip()
-    if body.username:
-        profile["management_username"] = body.username
-    if body.password and body.password != SECRET_SENTINEL:
-        profile["management_password"] = body.password
+    mgmt_user = body.management_username or body.username
+    mgmt_pass = body.management_password or body.password
+    if mgmt_user:
+        profile["management_username"] = mgmt_user
+    if mgmt_pass and mgmt_pass != SECRET_SENTINEL:
+        profile["management_password"] = mgmt_pass
     stored[body.name] = profile
     await store.put({"custom_environments": stored})
     request.app.state.environment_manager.apply_custom(stored)

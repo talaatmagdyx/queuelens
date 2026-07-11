@@ -305,10 +305,12 @@ async def test_environment_with_own_broker_credentials(tmp_path) -> None:
             json={"name": "staging-2", "vhosts": ["/"],
                   "host": "rabbitmq-stg2:5672",
                   "management_url": "http://rabbitmq-stg2:15672",
-                  "username": "stg-user", "password": "stg-pass"},
+                  "username": "stg-user", "password": "stg-pass",
+                  "management_username": "mgmt-user", "management_password": "mgmt-pass"},
         )
         listing = await client.get("/api/environments")
         settings = await client.get("/api/settings")
+        stored_before = await app.state.settings_store.get("custom_environments") or {}
         removed = await client.delete("/api/environments/staging-2")
         gone = await client.get("/api/environments")
         not_removable = await client.delete("/api/environments/development")
@@ -321,6 +323,12 @@ async def test_environment_with_own_broker_credentials(tmp_path) -> None:
     # secrets never leave the server
     assert "stg-pass" not in listing.text
     assert "stg-pass" not in settings.text
+    assert "mgmt-pass" not in listing.text
+    assert "mgmt-pass" not in settings.text
+    # AMQP and management credentials are stored independently
+    assert stored_before["staging-2"]["management_username"] == "mgmt-user"
+    assert stored_before["staging-2"]["management_password"] == "mgmt-pass"
+    assert "stg-user:stg-pass@" in stored_before["staging-2"]["rabbitmq_url"]
     assert removed.status_code == 200
     assert all(e["id"] != "staging-2" for e in gone.json()["environments"])
     assert not_removable.status_code == 404
