@@ -2,3 +2,6 @@
 @import './tokens/typography.css';
 @import './tokens/layout.css';
 @import './tokens/dark.css';
+
+/* Tabs strips stay swipe/wheel-scrollable but never show a scrollbar */
+.ds-tabs-strip::-webkit-scrollbar { display: none; }

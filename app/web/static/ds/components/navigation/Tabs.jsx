@@ -7,7 +7,8 @@ import { Icon } from '../icons/Icon.jsx';
  */
 export function Tabs({ tabs = [], active, onChange, variant = 'underline', style }) {
   return React.createElement('div', {
-    style: { display: 'flex', gap: variant === 'underline' ? 28 : 24, borderBottom: '1px solid var(--border-default)', fontFamily: 'var(--font-ui)', overflowX: 'auto', ...style },
+    className: 'ds-tabs-strip',
+    style: { display: 'flex', gap: variant === 'underline' ? 28 : 24, borderBottom: '1px solid var(--border-default)', fontFamily: 'var(--font-ui)', overflowX: 'auto', scrollbarWidth: 'none', ...style },
   }, tabs.map((t) => {
     const tab = typeof t === 'string' ? { id: t, label: t } : t;
     const isActive = tab.id === active;
