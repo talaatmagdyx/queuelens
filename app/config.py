@@ -7,7 +7,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="QUEUELENS_", case_sensitive=False)
+    model_config = SettingsConfigDict(
+        env_prefix="QUEUELENS_", case_sensitive=False, env_file=".env", extra="ignore"
+    )
 
     app_name: str = "QueueLens"
     environment: str = "development"
