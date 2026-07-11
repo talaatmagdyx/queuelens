@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- **Topology caching**: the exchanges/bindings/queues snapshot (three
+  management-API calls) is now served from a 30-second cache — part of the
+  documented "light on your broker" contract.
+- README and the landing page now document how QueueLens avoids loading the
+  broker, plus a feature-status table (Stable / Experimental / Roadmap).
 - **Compressed-payload decode**: messages with `content_encoding: gzip` or
   `deflate` now display their inflated payload (JSON pretty-printed), with a
   decoded/encoded toggle showing the original bytes as base64. Decompression
