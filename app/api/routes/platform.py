@@ -6,9 +6,22 @@ from typing import Any, Literal, cast
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from app.auth.basic import get_current_username
+from app.auth.basic import (
+    CurrentUser,
+    get_current_username,
+    require_admin,
+    require_operator,
+)
+from app.auth.basic import (
+    get_current_user as get_current_user_dep,
+)
 
 router = APIRouter(prefix="/api", tags=["platform"])
+
+
+@router.get("/me")
+async def whoami(user: CurrentUser = Depends(get_current_user_dep)) -> dict[str, Any]:
+    return {"username": user.username, "role": user.role}
 
 # ---------------------------------------------------------------- settings
 
@@ -61,7 +74,7 @@ class SettingsUpdate(BaseModel):
 async def put_settings_api(
     request: Request,
     body: SettingsUpdate,
-    _username: str = Depends(get_current_username),
+    _user: CurrentUser = Depends(require_admin),
 ) -> dict[str, Any]:
     unknown = set(body.values) - ALLOWED_SETTING_KEYS
     if unknown:
@@ -109,8 +122,9 @@ async def list_alerts(
 async def create_alert(
     request: Request,
     body: AlertRuleBody,
-    username: str = Depends(get_current_username),
+    user: CurrentUser = Depends(require_operator),
 ) -> dict[str, Any]:
+    username = user.username
     return cast(
         dict[str, Any],
         await request.app.state.alert_rules.create(created_by=username, **body.model_dump()),
@@ -122,7 +136,7 @@ async def update_alert(
     request: Request,
     rule_id: int,
     body: AlertRuleBody,
-    _username: str = Depends(get_current_username),
+    _user: CurrentUser = Depends(require_operator),
 ) -> dict[str, Any]:
     updated = await request.app.state.alert_rules.update(rule_id, **body.model_dump())
     if updated is None:
@@ -139,7 +153,7 @@ async def patch_alert(
     request: Request,
     rule_id: int,
     body: AlertPatch,
-    _username: str = Depends(get_current_username),
+    _user: CurrentUser = Depends(require_operator),
 ) -> dict[str, Any]:
     updated = await request.app.state.alert_rules.update(rule_id, enabled=body.enabled)
     if updated is None:
@@ -151,7 +165,7 @@ async def patch_alert(
 async def delete_alert(
     request: Request,
     rule_id: int,
-    _username: str = Depends(get_current_username),
+    _user: CurrentUser = Depends(require_operator),
 ) -> dict[str, Any]:
     if not await request.app.state.alert_rules.delete(rule_id):
         raise HTTPException(status_code=404, detail="Alert rule not found")
@@ -166,8 +180,9 @@ class ChannelTest(BaseModel):
 async def test_channel(
     request: Request,
     body: ChannelTest,
-    username: str = Depends(get_current_username),
+    user: CurrentUser = Depends(require_operator),
 ) -> dict[str, Any]:
+    username = user.username
     """Send a test notification through one channel; returns the delivery outcome."""
     engine = request.app.state.alert_engine
     outcome = await engine.dispatch(
@@ -202,8 +217,9 @@ class InviteBody(BaseModel):
 async def invite_user(
     request: Request,
     body: InviteBody,
-    username: str = Depends(get_current_username),
+    user: CurrentUser = Depends(require_admin),
 ) -> dict[str, Any]:
+    username = user.username
     password = secrets.token_urlsafe(12)
     created = await request.app.state.users.create(
         username=body.username,
@@ -239,6 +255,34 @@ async def invite_user(
     }
 
 
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=255)
+    new_password: str = Field(min_length=10, max_length=255)
+
+
+@router.post("/users/me/password")
+async def change_my_password(
+    request: Request,
+    body: PasswordChange,
+    user: CurrentUser = Depends(get_current_user_dep),
+) -> dict[str, Any]:
+    settings = request.app.state.settings
+    if user.username in settings.users:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This account is managed by environment variables "
+                "(QUEUELENS_ADMIN_PASSWORD / QUEUELENS_USERS_JSON) — change it there"
+            ),
+        )
+    changed = await request.app.state.users.change_password(
+        user.username, body.current_password, body.new_password
+    )
+    if not changed:
+        raise HTTPException(status_code=403, detail="Current password is incorrect")
+    return {"changed": True}
+
+
 # ---------------------------------------------------------------- environments
 
 
@@ -267,8 +311,9 @@ class EnvironmentBody(BaseModel):
 async def create_environment(
     request: Request,
     body: EnvironmentBody,
-    username: str = Depends(get_current_username),
+    user: CurrentUser = Depends(require_admin),
 ) -> dict[str, Any]:
+    username = user.username
     """Create a same-broker environment or add vhosts to an existing one.
     Environments with their own broker/credentials belong in
     QUEUELENS_ENVIRONMENTS_JSON — credentials never pass through this API."""
@@ -316,8 +361,9 @@ async def create_environment(
 async def delete_environment(
     request: Request,
     name: str,
-    username: str = Depends(get_current_username),
+    user: CurrentUser = Depends(require_admin),
 ) -> dict[str, Any]:
+    username = user.username
     from datetime import UTC, datetime
 
     from app.domain.models import AuditEntry
@@ -353,8 +399,9 @@ class ActivateBody(BaseModel):
 async def activate_environment(
     request: Request,
     body: ActivateBody,
-    username: str = Depends(get_current_username),
+    user: CurrentUser = Depends(require_operator),
 ) -> dict[str, Any]:
+    username = user.username
     from datetime import UTC, datetime
 
     from app.domain.models import AuditEntry
@@ -375,5 +422,15 @@ async def activate_environment(
             result="success",
             metadata=result,
         )
+    )
+    # the switch is instance-global — surface it to every user via Notifications
+    await request.app.state.notifications.add(
+        level="Warning",
+        title=f"Environment switched to {result['environment']}",
+        message=(
+            f"{username} activated {result['environment']} (vhost {result['vhost']}) — "
+            "all views and actions now target that broker"
+        ),
+        source="Environments",
     )
     return cast(dict[str, Any], result)

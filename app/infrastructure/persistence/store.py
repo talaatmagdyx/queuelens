@@ -15,22 +15,53 @@ from app.infrastructure.persistence.models import (
     UserModel,
 )
 
+# Settings keys whose values may carry secrets — encrypted at rest when a key is set.
+SECRET_SETTING_KEYS = {"channels", "custom_environments"}
+
 
 class SettingsRepository:
-    """Server-persisted app settings (custom headers, channels, limits, retention, UI)."""
+    """Server-persisted app settings (custom headers, channels, limits, retention, UI).
 
-    def __init__(self, database: Database) -> None:
+    When constructed with a Fernet key, values for SECRET_SETTING_KEYS are
+    encrypted at rest; plaintext rows written before the key existed are still
+    readable and get encrypted on their next write."""
+
+    def __init__(self, database: Database, secret_key: str = "") -> None:
         self._database = database
+        self._fernet = None
+        if secret_key:
+            from cryptography.fernet import Fernet
+
+            self._fernet = Fernet(secret_key.encode())
+
+    def _encrypt(self, key: str, value: Any) -> Any:
+        if self._fernet is None or key not in SECRET_SETTING_KEYS:
+            return value
+        import json as jsonlib
+
+        token = self._fernet.encrypt(jsonlib.dumps(value).encode()).decode()
+        return {"__encrypted__": token}
+
+    def _decrypt(self, key: str, value: Any) -> Any:
+        if not (isinstance(value, dict) and "__encrypted__" in value):
+            return value
+        if self._fernet is None:
+            raise ValueError(
+                f"Setting '{key}' is encrypted but QUEUELENS_SECRET_KEY is not configured"
+            )
+        import json as jsonlib
+
+        return jsonlib.loads(self._fernet.decrypt(value["__encrypted__"].encode()))
 
     async def get_all(self) -> dict[str, Any]:
         async with self._database.session() as session:
             rows = (await session.execute(select(AppSettingModel))).scalars().all()
-            return {row.key: row.value for row in rows}
+            return {row.key: self._decrypt(row.key, row.value) for row in rows}
 
     async def get(self, key: str, default: Any = None) -> Any:
         async with self._database.session() as session:
             row = await session.get(AppSettingModel, key)
-            return row.value if row is not None else default
+            return self._decrypt(key, row.value) if row is not None else default
 
     async def get_safe(self, key: str, default: Any = None) -> Any:
         """Like get(), but returns the default if the table does not exist yet."""
@@ -42,11 +73,12 @@ class SettingsRepository:
     async def put(self, values: dict[str, Any]) -> dict[str, Any]:
         async with self._database.session() as session:
             for key, value in values.items():
+                stored = self._encrypt(key, value)
                 row = await session.get(AppSettingModel, key)
                 if row is None:
-                    session.add(AppSettingModel(key=key, value=value))
+                    session.add(AppSettingModel(key=key, value=stored))
                 else:
-                    row.value = value
+                    row.value = stored
             await session.commit()
         return await self.get_all()
 
@@ -260,6 +292,15 @@ class UserRepository:
                     invited_by=invited_by,
                 )
             )
+            await session.commit()
+            return True
+
+    async def change_password(self, username: str, current: str, new: str) -> bool:
+        async with self._database.session() as session:
+            row = await session.get(UserModel, username)
+            if row is None or not verify_password(current, row.password_hash):
+                return False
+            row.password_hash = hash_password(new)
             await session.commit()
             return True
 

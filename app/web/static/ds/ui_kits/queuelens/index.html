@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <title>QueueLens</title>
-<link rel="stylesheet" href="/static/ds/styles.css?v=0.8.9">
+<link rel="stylesheet" href="/static/ds/styles.css?v=0.9.0">
 <script src="/static/vendor/react.production.min.js"></script>
 <script src="/static/vendor/react-dom.production.min.js"></script>
 <script src="/static/vendor/babel.min.js"></script>
 <script src="/static/vendor/lucide.js"></script>
-<script src="/static/ds/ds-loader.js?v=0.8.9"></script>
+<script src="/static/ds/ds-loader.js?v=0.9.0"></script>
 <style>
   html, body { margin: 0; background: var(--slate-50); font-family: var(--font-ui); }
   * { box-sizing: border-box; }
@@ -29,21 +29,21 @@ setInterval(function () {
   if (el && el.getAttribute('data-screen-label') === 'Dashboard') location.reload();
 }, 30000);
 </script>
-<script src="/static/ds/ui_kits/queuelens/data.js?v=0.8.9"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/shared.jsx?v=0.8.9"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Dashboard.jsx?v=0.8.9"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Queues.jsx?v=0.8.9"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Messages.jsx?v=0.8.9"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Wizard.jsx?v=0.8.9"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/AuditLog.jsx?v=0.8.9"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Configuration.jsx?v=0.8.9"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Users.jsx?v=0.8.9"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Parking.jsx?v=0.8.9"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/QueueDetail.jsx?v=0.8.9"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Topology.jsx?v=0.8.9"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Composer.jsx?v=0.8.9"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Alerts.jsx?v=0.8.9"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Notifications.jsx?v=0.8.9"></script>
+<script src="/static/ds/ui_kits/queuelens/data.js?v=0.9.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/shared.jsx?v=0.9.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Dashboard.jsx?v=0.9.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Queues.jsx?v=0.9.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Messages.jsx?v=0.9.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Wizard.jsx?v=0.9.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/AuditLog.jsx?v=0.9.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Configuration.jsx?v=0.9.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Users.jsx?v=0.9.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Parking.jsx?v=0.9.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/QueueDetail.jsx?v=0.9.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Topology.jsx?v=0.9.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Composer.jsx?v=0.9.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Alerts.jsx?v=0.9.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Notifications.jsx?v=0.9.0"></script>
 <script type="text/babel">
 const { SidebarNav, TopBar, Alert, Icon } = window.__NS;
 const S = window.QL.screens;
@@ -168,7 +168,7 @@ function App() {
   let screen = null;
   if (route.id === 'dashboard') screen = <S.Dashboard nav={nav} empty={(window.QL.data.queues || []).length === 0} />;
   else if (route.id === 'queues') screen = <S.Queues nav={nav} />;
-  else if (route.id === 'messages') screen = <S.Messages nav={nav} queue={route.params.queue || window.QL.defaultQueue} fingerprint={route.params.fingerprint || null} />;
+  else if (route.id === 'messages') screen = <S.Messages nav={nav} queue={route.params.queue || window.QL.defaultQueue} fingerprint={route.params.fingerprint || null} role={(window.QL.me || {}).role || 'Admin'} />;
   else if (route.id === 'replay') screen = <S.Wizard nav={nav} mode={route.params.mode || (route.id === 'parking' ? 'park' : 'move')} msg={route.params.msg || window.QL.data.messages[0]} count={route.params.count || 1} fingerprints={route.params.fingerprints || null} />;
   else if (route.id === 'parking') screen = <S.Parking nav={nav} />;
   else if (route.id === 'queuedetail') screen = <S.QueueDetail nav={nav} queue={route.params.queue || window.QL.defaultQueue} />;
@@ -201,13 +201,13 @@ function App() {
             { id: 'topology', label: 'Topology', icon: 'git-fork' },
             { id: 'composer', label: 'Composer', icon: 'send' },
             { id: 'audit', label: 'Audit Log', icon: 'clipboard-list' } ] },
-          { label: 'Settings', items: [
+          ...(((window.QL.me || {}).role) === 'Viewer' ? [] : [{ label: 'Settings', items: [
             { id: 'alerts', label: 'Alerts', icon: 'bell-ring' },
             { id: 'config', label: 'Configuration', icon: 'settings' },
-            { id: 'users', label: 'Users', icon: 'users' } ] }]}
+            ...((window.QL.me || {}).role === 'Admin' ? [{ id: 'users', label: 'Users', icon: 'users' }] : []) ] }])]}
         broker={{ host: envObj.host, vhost: vhost, latency: B.latency || '—', offline: !brokerLive }}
         safety={['Non-destructive browsing', 'Publish-before-ack', 'Audit everything', 'Messages never lost']}
-        user={{ initials: (window.QL.user || 'ad').slice(0, 2).toUpperCase(), name: window.QL.user || 'admin', role: 'Administrator' }}
+        user={{ initials: (window.QL.user || 'ad').slice(0, 2).toUpperCase(), name: window.QL.user || 'admin', role: (window.QL.me || {}).role || 'Admin' }}
       />
       <div style={{ flex: 1, minWidth: 0, position: 'relative', background: 'var(--surface-page)' }}>
         <TopBar version={B.api} userName={window.QL.user || 'admin'} notifications={window.QL.alertCount || 0} onBell={() => setBellOpen(!bellOpen)}

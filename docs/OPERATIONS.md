@@ -1,5 +1,39 @@
 # Operations
 
+## Deployment model & constraints (read this first)
+
+QueueLens is designed as a **single-instance, internal-network operations tool**:
+
+- **Exactly one replica.** Bulk dry-run tokens, alert-engine state, and
+  environment bundles live in process memory; running two replicas causes
+  dry-run 404s and duplicate alert deliveries. The SQLite datastore implies the
+  same constraint.
+- **TLS is mandatory and external.** Authentication is HTTP Basic — always
+  deploy behind a TLS-terminating reverse proxy (or a service mesh). Never
+  expose port 8000 directly to the internet.
+- **Roles**: Viewer (read-only), Operator (replay/park/publish, alert rules,
+  environment switching), Admin (delete, settings, users, environment
+  management). Enforced server-side on every route.
+- **Environment switching is instance-global**: activating an environment
+  re-points every user's session and broadcasts a notification. Suitable for a
+  small operator team sharing one context; per-request scoping is on the roadmap.
+- **Alert rules evaluate the active environment only.**
+- Failed logins are rate-limited (10/minute per client IP, in-memory).
+
+## Backups & data
+
+Everything mutable lives in one SQLite file (`QUEUELENS_DATABASE_URL`,
+default `data/queuelens.db` on the `queuelens-data` volume): audit history,
+settings, alert rules, notifications, invited users, runtime-added environments.
+
+- Back it up with `sqlite3 data/queuelens.db ".backup backup.db"` or by
+  snapshotting the volume. Restoring the file restores everything.
+- Retention pruning is **permanent** — export the audit log (CSV/JSON from the
+  UI) before shortening retention if you need history.
+- Set `QUEUELENS_SECRET_KEY` in production so channel and environment
+  credentials are encrypted at rest; back the key up separately from the
+  database (one is useless without the other).
+
 ## Deployment
 
 ### Docker Compose (reference setup)

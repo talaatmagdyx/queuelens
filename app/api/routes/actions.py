@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.application.action_service import ActionService
-from app.auth.basic import get_current_username
+from app.auth.basic import CurrentUser, require_admin, require_operator
 from app.domain.models import AuditEntry, ReplayTarget
 from app.observability.metrics import ACTIONS, OPERATION_SECONDS
 
@@ -155,14 +155,14 @@ async def _run_action(
 async def replay(
     request: Request,
     body: ReplayRequest,
-    username: str = Depends(get_current_username),
+    user: CurrentUser = Depends(require_operator),
 ) -> dict[str, object]:
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Replay confirmation is required")
     custom_headers = await _custom_headers(request)
     return await _run_action(
         request,
-        username,
+        user.username,
         "replay",
         body.source_queue,
         body.fingerprint,
@@ -171,7 +171,7 @@ async def replay(
             fingerprint=body.fingerprint,
             mode=body.mode,
             target=body.target.to_domain() if body.target else None,
-            username=username,
+            username=user.username,
             annotate=body.annotate,
             extra_headers=custom_headers,
         ),
@@ -184,13 +184,13 @@ async def replay(
 async def park(
     request: Request,
     body: MessageActionRequest,
-    username: str = Depends(get_current_username),
+    user: CurrentUser = Depends(require_operator),
 ) -> dict[str, object]:
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Park confirmation is required")
     return await _run_action(
         request,
-        username,
+        user.username,
         "park",
         body.source_queue,
         body.fingerprint,
@@ -206,13 +206,13 @@ async def park(
 async def delete(
     request: Request,
     body: MessageActionRequest,
-    username: str = Depends(get_current_username),
+    user: CurrentUser = Depends(require_admin),
 ) -> dict[str, object]:
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Delete confirmation is required")
     return await _run_action(
         request,
-        username,
+        user.username,
         "delete",
         body.source_queue,
         body.fingerprint,
@@ -235,7 +235,7 @@ class PublishRequest(BaseModel):
 async def publish(
     request: Request,
     body: PublishRequest,
-    username: str = Depends(get_current_username),
+    user: CurrentUser = Depends(require_operator),
 ) -> dict[str, object]:
     """Publish a hand-written test message (Composer). Mandatory publish — unroutable
     messages raise instead of being dropped, and every attempt is audited."""
@@ -252,7 +252,7 @@ async def publish(
         content_type = "text/plain"
     headers: dict[str, Any] = {
         **(await _custom_headers(request)),
-        "x-queuelens-published-by": username,
+        "x-queuelens-published-by": user.username,
         "x-queuelens-published-at": datetime.now(UTC).isoformat(),
     }
     if body.mark_test:
@@ -273,7 +273,7 @@ async def publish(
     async def _record(result: str, error: str | None = None, **meta: object) -> None:
         await audit.record(
             AuditEntry(
-                username=username,
+                username=user.username,
                 action="publish",
                 timestamp=datetime.now(UTC),
                 result=result,

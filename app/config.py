@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     smtp_host: str = ""  # seeds the email channel config (e.g. mailpit)
     smtp_port: int = 1025
     alert_interval_seconds: float = 15.0
+    # Optional Fernet key (44-char urlsafe base64). When set, secret-bearing
+    # settings (delivery channels, environment credentials) are encrypted at rest.
+    secret_key: str = Field(default="", repr=False)
 
     @property
     def users(self) -> dict[str, str]:

@@ -262,6 +262,9 @@ window.QL.screens = window.QL.screens || {};
     return n.level === 'Alert' || n.level === 'Warning';
   }).length;
 
+  var me = getJson('/api/me') || {};
+  window.QL.me = { username: me.username || 'local', role: me.role || 'Admin' };
+
   var accounts = (getJson('/api/users') || {}).accounts || [];
   var users = accounts.map(function (a) {
     return {
@@ -270,7 +273,7 @@ window.QL.screens = window.QL.screens || {};
       envs: [broker.environment || 'development'], last: '—', status: 'Active',
     };
   });
-  window.QL.user = (accounts.find(function (a) { return a.role === 'Administrator'; }) || accounts[0] || { username: 'admin' }).username;
+  window.QL.user = window.QL.me.username;
 
   window.QL.broker = {
     environment: broker.environment || 'development',

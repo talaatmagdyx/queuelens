@@ -7,12 +7,12 @@ from app.main import create_app
 
 
 def _app(tmp_path, **overrides):
-    settings = Settings(
-        auth_enabled=False,
-        database_url=f"sqlite+aiosqlite:///{tmp_path}/p.db",
+    kwargs = {
+        "auth_enabled": False,
+        "database_url": f"sqlite+aiosqlite:///{tmp_path}/p.db",
         **overrides,
-    )
-    return create_app(settings)
+    }
+    return create_app(Settings(**kwargs))
 
 
 @pytest.mark.asyncio
@@ -332,3 +332,204 @@ async def test_environment_with_own_broker_credentials(tmp_path) -> None:
     assert removed.status_code == 200
     assert all(e["id"] != "staging-2" for e in gone.json()["environments"])
     assert not_removable.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_roles_enforced_viewer_operator_admin(tmp_path) -> None:
+    app = _app(
+        tmp_path,
+        auth_enabled=True,
+        admin_username="admin",
+        admin_password="root-pw",
+    )
+    await app.state.database.start()
+    await app.state.users.seed_env_users({"admin": "root-pw"}, "admin")
+    # invite an operator and a viewer via the API (as admin)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        op = await client.post(
+            "/api/users/invite",
+            json={"username": "op.user", "role": "Operator"},
+            auth=("admin", "root-pw"),
+        )
+        vw = await client.post(
+            "/api/users/invite",
+            json={"username": "view.user", "role": "Viewer"},
+            auth=("admin", "root-pw"),
+        )
+        op_auth = ("op.user", op.json()["password"])
+        vw_auth = ("view.user", vw.json()["password"])
+
+        me = await client.get("/api/me", auth=vw_auth)
+        assert me.json() == {"username": "view.user", "role": "Viewer"}
+
+        # Viewer: reads are auth-only (no broker in tests) — mutations are forbidden
+        assert (await client.get("/api/alerts", auth=vw_auth)).status_code == 200
+        replay = await client.post(
+            "/api/messages/replay",
+            json={"source_queue": "q", "fingerprint": "f" * 64, "confirm": True},
+            auth=vw_auth,
+        )
+        assert replay.status_code == 403
+        settings_put = await client.put(
+            "/api/settings", json={"values": {"ui": {}}}, auth=vw_auth
+        )
+        assert settings_put.status_code == 403
+        invite = await client.post(
+            "/api/users/invite", json={"username": "x.y", "role": "Viewer"}, auth=vw_auth
+        )
+        assert invite.status_code == 403
+
+        # Operator: delete requires Admin, settings requires Admin
+        delete = await client.post(
+            "/api/messages/delete",
+            json={"source_queue": "q", "fingerprint": "f" * 64, "confirm": True},
+            auth=op_auth,
+        )
+        assert delete.status_code == 403
+        bulk_delete = await client.post(
+            "/api/messages/bulk/dry-run",
+            json={"source_queue": "q", "action": "delete"},
+            auth=op_auth,
+        )
+        assert bulk_delete.status_code == 403
+        op_settings = await client.put(
+            "/api/settings", json={"values": {"ui": {}}}, auth=op_auth
+        )
+        assert op_settings.status_code == 403
+
+        # Admin: settings PUT allowed
+        admin_settings = await client.put(
+            "/api/settings", json={"values": {"ui": {}}}, auth=("admin", "root-pw")
+        )
+        assert admin_settings.status_code == 200
+    await app.state.database.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_logins_are_rate_limited(tmp_path) -> None:
+    from app.auth import basic as auth_basic
+
+    auth_basic._failures.clear()
+    app = _app(tmp_path, auth_enabled=True, admin_password="root-pw")
+    await app.state.database.start()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        for _ in range(10):
+            response = await client.get("/api/queues", auth=("admin", "wrong"))
+            assert response.status_code == 401
+        blocked = await client.get("/api/queues", auth=("admin", "wrong"))
+        # even correct credentials are blocked while the window is hot
+        also_blocked = await client.get("/api/queues", auth=("admin", "root-pw"))
+    await app.state.database.close()
+    auth_basic._failures.clear()
+
+    assert blocked.status_code == 429
+    assert also_blocked.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_settings_encrypted_at_rest_when_key_set(tmp_path) -> None:
+    from cryptography.fernet import Fernet
+
+    from app.infrastructure.persistence.models import AppSettingModel
+
+    key = Fernet.generate_key().decode()
+    app = _app(tmp_path, secret_key=key)
+    await app.state.database.start()
+    await app.state.settings_store.put(
+        {"channels": {"email": {"smtp_host": "smtp.acme.io", "password": "topsecret"}}}
+    )
+    # raw row must not contain the secret
+    async with app.state.database.session() as session:
+        row = await session.get(AppSettingModel, "channels")
+        raw = str(row.value)
+    assert "topsecret" not in raw
+    assert "__encrypted__" in raw
+    # decrypted read round-trips
+    channels = await app.state.settings_store.get("channels")
+    assert channels["email"]["password"] == "topsecret"
+    await app.state.database.close()
+
+
+@pytest.mark.asyncio
+async def test_password_change_flow(tmp_path) -> None:
+    app = _app(tmp_path, auth_enabled=True, admin_password="root-pw")
+    await app.state.database.start()
+    await app.state.users.seed_env_users({"admin": "root-pw"}, "admin")
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        invited = await client.post(
+            "/api/users/invite",
+            json={"username": "rotate.me", "role": "Operator"},
+            auth=("admin", "root-pw"),
+        )
+        old_password = invited.json()["password"]
+        changed = await client.post(
+            "/api/users/me/password",
+            json={"current_password": old_password, "new_password": "new-strong-pass"},
+            auth=("rotate.me", old_password),
+        )
+        wrong = await client.post(
+            "/api/users/me/password",
+            json={"current_password": "nope", "new_password": "whatever-strong"},
+            auth=("rotate.me", "new-strong-pass"),
+        )
+        env_managed = await client.post(
+            "/api/users/me/password",
+            json={"current_password": "root-pw", "new_password": "cannot-do-this"},
+            auth=("admin", "root-pw"),
+        )
+    assert changed.status_code == 200
+    assert wrong.status_code == 403
+    assert env_managed.status_code == 400
+    assert await app.state.users.verify("rotate.me", "new-strong-pass") is True
+    assert await app.state.users.verify("rotate.me", old_password) is False
+    await app.state.database.close()
+
+
+@pytest.mark.asyncio
+async def test_quiet_hours_mute_non_alert_deliveries(tmp_path) -> None:
+    app = _app(tmp_path)
+    await app.state.database.start()
+    await app.state.settings_store.put(
+        {
+            "channels": {"webhook": {"url": "http://example.invalid/hook"}},
+            "ui": {"quiet_hours": True, "quiet_from": "00:00", "quiet_until": "23:59"},
+        }
+    )
+    engine = app.state.alert_engine
+    muted = await engine.dispatch(["webhook"], "t", "m", severity="Warning")
+    assert muted["webhook"]["skipped"] == "quiet_hours"
+    # Alert severity always delivers (fails here since the URL is fake, but it TRIES)
+    attempted = await engine.dispatch(["webhook"], "t", "m", severity="Alert")
+    assert "skipped" not in attempted["webhook"]
+    await app.state.database.close()
+
+
+@pytest.mark.asyncio
+async def test_pagerduty_events_v2_payload(tmp_path, monkeypatch) -> None:
+    app = _app(tmp_path)
+    await app.state.database.start()
+    await app.state.settings_store.put(
+        {"channels": {"pagerduty": {"routing_key": "R0UT1NGKEY"}}}
+    )
+    sent = {}
+
+    async def fake_post(url, payload):
+        sent["url"] = url
+        sent["payload"] = payload
+        return {"ok": True, "attempts": 1, "errors": []}
+
+    from app.application import alert_engine as engine_module
+
+    monkeypatch.setattr(engine_module, "post_webhook", fake_post)
+    outcome = await app.state.alert_engine.dispatch(
+        ["pagerduty"], "DLQ critical", "queue over threshold", severity="Alert"
+    )
+    assert outcome["pagerduty"]["ok"] is True
+    assert sent["url"] == "https://events.pagerduty.com/v2/enqueue"
+    assert sent["payload"]["routing_key"] == "R0UT1NGKEY"
+    assert sent["payload"]["event_action"] == "trigger"
+    assert sent["payload"]["payload"]["severity"] == "critical"
+    await app.state.database.close()

@@ -41,6 +41,32 @@
     });
   }
 
+  function PasswordCard() {
+    const { Input, Button, Alert } = window.__NS;
+    const [draft, setDraft] = React.useState({ current: '', next: '' });
+    const [status, setStatus] = React.useState(null);
+    const change = async () => {
+      setStatus(null);
+      try {
+        await window.QL.postJson('/api/users/me/password', {
+          current_password: draft.current, new_password: draft.next,
+        });
+        setStatus({ ok: true, text: 'Password changed. Use it on your next request.' });
+        setDraft({ current: '', next: '' });
+      } catch (e) { setStatus({ ok: false, text: e.message }); }
+    };
+    return (
+      <Card title="My Password" subtitle={`Signed in as ${(window.QL.me || {}).username} (${(window.QL.me || {}).role})`}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
+          <Input label="Current password" type="password" value={draft.current} onChange={(v) => setDraft({ ...draft, current: v })} />
+          <Input label="New password (10+ chars)" type="password" value={draft.next} onChange={(v) => setDraft({ ...draft, next: v })} />
+          <Button size="sm" disabled={!draft.current || draft.next.length < 10} onClick={change}>Change Password</Button>
+          {status && <Alert tone={status.ok ? 'success' : 'danger'}>{status.text}</Alert>}
+        </div>
+      </Card>
+    );
+  }
+
   function Users({ nav }) {
     const [users, setUsers] = React.useState(mapAccounts);
     const [inviting, setInviting] = React.useState(false);
@@ -63,7 +89,7 @@
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <PageHeader title="Users" subtitle="Manage who can browse, recover, and configure QueueLens."
-            actions={<Button icon="user-plus" onClick={() => { setResult(null); setInviting(!inviting); }}>Invite User</Button>} />
+            actions={(window.QL.me || {}).role === 'Admin' ? <Button icon="user-plus" onClick={() => { setResult(null); setInviting(!inviting); }}>Invite User</Button> : null} />
           {error && <Alert tone="danger" style={{ marginBottom: 14 }}>{error}</Alert>}
           {inviting && (
             <Card title="Invite User" subtitle="Creates a real account (stored server-side). The password is shown exactly once." style={{ marginBottom: 18 }}>
@@ -112,7 +138,8 @@
           </Card>
         </div>
 
-        <aside style={{ width: 'clamp(280px, 26vw, 360px)', flex: 'none', position: 'sticky', top: 16 }}>
+        <aside style={{ width: 'clamp(280px, 26vw, 360px)', flex: 'none', position: 'sticky', top: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <PasswordCard />
           <Card title="Roles" subtitle="What each role is allowed to do.">
             <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--font-ui)', marginTop: 4 }}>
               <thead>

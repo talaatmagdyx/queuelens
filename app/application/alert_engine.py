@@ -150,7 +150,7 @@ class AlertEngine:
     async def _fire(
         self, rule: dict[str, Any], *, level: str, title: str, message: str
     ) -> dict[str, Any]:
-        delivery = await self.dispatch(rule["channels"], title, message)
+        delivery = await self.dispatch(rule["channels"], title, message, severity=level)
         return await self._notifications.add(
             level=level,
             title=title,
@@ -159,11 +159,34 @@ class AlertEngine:
             delivery=delivery,
         )
 
+    @staticmethod
+    def _in_quiet_hours(ui: dict[str, Any], now_hhmm: str) -> bool:
+        """True when quiet hours are on and `now` falls inside the window (UTC)."""
+        if not ui.get("quiet_hours"):
+            return False
+        start = str(ui.get("quiet_from") or "22:00")
+        end = str(ui.get("quiet_until") or "07:00")
+        if start <= end:
+            return start <= now_hhmm < end
+        return now_hhmm >= start or now_hhmm < end  # window crosses midnight
+
     async def dispatch(
-        self, channels: list[str], title: str, message: str
+        self,
+        channels: list[str],
+        title: str,
+        message: str,
+        severity: str = "Alert",
     ) -> dict[str, Any]:
-        """Deliver to each configured channel; returns per-channel outcomes."""
+        """Deliver to each configured channel; returns per-channel outcomes.
+        Quiet hours mute Info/Warning deliveries — Alert severity always sends."""
         config = await self._settings_store.get("channels", {}) or {}
+        ui = await self._settings_store.get("ui", {}) or {}
+        now_hhmm = datetime.now(UTC).strftime("%H:%M")
+        if severity != "Alert" and self._in_quiet_hours(ui, now_hhmm):
+            return {
+                channel: {"ok": False, "skipped": "quiet_hours", "errors": []}
+                for channel in channels
+            }
         outcomes: dict[str, Any] = {}
         for channel in channels:
             channel_config = config.get(channel) or {}
@@ -173,6 +196,20 @@ class AlertEngine:
                     continue
                 outcomes[channel] = await send_email(
                     channel_config, f"[QueueLens] {title}", f"{title}\n\n{message}"
+                )
+            elif channel == "pagerduty" and channel_config.get("routing_key"):
+                # native PagerDuty Events API v2
+                outcomes[channel] = await post_webhook(
+                    "https://events.pagerduty.com/v2/enqueue",
+                    {
+                        "routing_key": channel_config["routing_key"],
+                        "event_action": "trigger",
+                        "payload": {
+                            "summary": f"{title} — {message}"[:1024],
+                            "source": "queuelens",
+                            "severity": "critical" if severity == "Alert" else "warning",
+                        },
+                    },
                 )
             elif channel in ("webhook", "slack", "pagerduty"):
                 url = channel_config.get("url")

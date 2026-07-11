@@ -34,7 +34,17 @@ jobs:
       - name: Type-check
         run: mypy app
       - name: Test (includes real-broker integration test)
-        run: pytest -q
+        run: pytest -q --cov=app --cov-report=term-missing:skip-covered
+      - name: Boot smoke — app starts and serves the SPA
+        env:
+          QUEUELENS_AUTH_ENABLED: "false"
+          QUEUELENS_DATABASE_URL: sqlite+aiosqlite:///./smoke.db
+        run: |
+          python -m uvicorn app.main:app --port 8123 &
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:8123/health && break; sleep 1; done
+          curl -sf http://127.0.0.1:8123/app | grep -q "data.js"
+          curl -sf http://127.0.0.1:8123/api/config > /dev/null
+          kill %1
 
   docker:
     runs-on: ubuntu-latest

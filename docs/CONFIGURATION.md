@@ -128,6 +128,7 @@ See [`config/replay-targets.example.json`](../config/replay-targets.example.json
 | `QUEUELENS_SMTP_HOST` | *(empty)* | Seeds the email delivery channel on first boot (e.g. `mailpit`). Channels are editable afterwards in Alerts → Delivery Channels |
 | `QUEUELENS_SMTP_PORT` | `1025` | SMTP port for the seeded email channel |
 | `QUEUELENS_ALERT_INTERVAL_SECONDS` | `15` | How often the alert engine evaluates enabled rules against live queue stats |
+| `QUEUELENS_SECRET_KEY` | *(empty)* | Optional Fernet key — encrypts delivery-channel and environment credentials at rest. Generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 
 Settings managed in the UI (custom headers, limits overrides, retention, delivery channels,
 alert rules, invited users, runtime-added environments) live in the SQLite database

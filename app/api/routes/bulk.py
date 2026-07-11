@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.api.routes.actions import TargetRequest
 from app.application.bulk_service import BulkActionService, UnknownBulkBatch
-from app.auth.basic import get_current_username
+from app.auth.basic import CurrentUser, require_operator
 from app.domain.models import AuditEntry
 from app.observability.metrics import ACTIONS, OPERATION_SECONDS
 
@@ -37,8 +37,11 @@ def _service(request: Request) -> BulkActionService:
 async def dry_run(
     request: Request,
     body: BulkDryRunRequest,
-    username: str = Depends(get_current_username),
+    user: CurrentUser = Depends(require_operator),
 ) -> dict[str, object]:
+    if body.action == "delete" and not user.is_admin:
+        raise HTTPException(status_code=403, detail="Deleting messages requires the Admin role")
+    username = user.username
     stored = await request.app.state.settings_store.get_safe("limits", {}) or {}
     max_bulk = stored.get("max_bulk_size")
     try:
@@ -84,8 +87,12 @@ async def dry_run(
 async def execute(
     request: Request,
     body: BulkExecuteRequest,
-    username: str = Depends(get_current_username),
+    user: CurrentUser = Depends(require_operator),
 ) -> dict[str, object]:
+    username = user.username
+    pending_check = request.app.state.bulk_service.peek(body.batch_id)
+    if pending_check and pending_check.action == "delete" and not user.is_admin:
+        raise HTTPException(status_code=403, detail="Deleting messages requires the Admin role")
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Bulk execution confirmation is required")
     audit = request.app.state.audit_repository
