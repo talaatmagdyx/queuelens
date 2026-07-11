@@ -33,6 +33,10 @@ class Settings(BaseSettings):
         "password,token,access_token,refresh_token,authorization,api_key,secret,email,phone"
     )
     users_json: str = "{}"
+    environments_json: str = "{}"
+    smtp_host: str = ""  # seeds the email channel config (e.g. mailpit)
+    smtp_port: int = 1025
+    alert_interval_seconds: float = 15.0
 
     @property
     def users(self) -> dict[str, str]:
@@ -46,6 +50,16 @@ class Settings(BaseSettings):
         users = {str(name): str(password) for name, password in parsed.items()}
         users[self.admin_username] = self.admin_password
         return users
+
+    @property
+    def environments(self) -> dict[str, dict[str, Any]]:
+        try:
+            parsed = json.loads(self.environments_json)
+        except json.JSONDecodeError as error:
+            raise ValueError("QUEUELENS_ENVIRONMENTS_JSON must contain valid JSON") from error
+        if not isinstance(parsed, dict):
+            raise ValueError("QUEUELENS_ENVIRONMENTS_JSON must be an object")
+        return parsed
 
     @property
     def masked_field_names(self) -> tuple[str, ...]:

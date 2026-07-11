@@ -23,6 +23,10 @@ async def get_current_username(
         ):
             matched = True
     if not matched:
+        users = getattr(request.app.state, "users", None)
+        if users is not None and await users.verify(credentials.username, credentials.password):
+            matched = True
+    if not matched:
         raise _unauthorized()
     return credentials.username
 

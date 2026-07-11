@@ -8,21 +8,22 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import actions, audit, bulk, health, messages, metrics, queues
-from app.application.action_service import ActionService
-from app.application.bulk_service import BulkActionService
-from app.application.message_service import MessageService
-from app.application.queue_service import QueueService
+from app.api.routes import actions, audit, bulk, health, messages, metrics, platform, queues
+from app.application.alert_engine import AlertEngine
+from app.application.environments import EnvironmentManager
 from app.config import Settings, get_settings
 from app.infrastructure.persistence.audit_repository import AuditRepository
 from app.infrastructure.persistence.database import Database
-from app.infrastructure.rabbitmq.connection import RabbitMQConnection, RabbitMQUnavailableError
+from app.infrastructure.persistence.store import (
+    AlertRuleRepository,
+    NotificationRepository,
+    SettingsRepository,
+    UserRepository,
+)
+from app.infrastructure.rabbitmq.connection import RabbitMQUnavailableError
 from app.infrastructure.rabbitmq.management_client import (
-    RabbitMQManagementClient,
     RabbitMQManagementError,
 )
-from app.infrastructure.rabbitmq.message_browser import MessageBrowser
-from app.infrastructure.rabbitmq.message_operator import MessageOperator
 from app.web import routes as web
 
 
@@ -62,19 +63,56 @@ def _register_error_handlers(app: FastAPI) -> None:
         return _error_response(request, 503, "RabbitMQ connection is not available")
 
 
+async def _retention_loop(app: FastAPI) -> None:
+    import asyncio
+
+    while True:
+        try:
+            retention = await app.state.settings_store.get("retention", {}) or {}
+            days = int(retention.get("days") or 0)
+            if days > 0:
+                await app.state.audit_repository.delete_older_than(days)
+                await app.state.notifications.purge_older_than(days)
+        except Exception:  # noqa: BLE001 - retention must never kill the app
+            pass
+        await asyncio.sleep(3600)
+
+
+async def _seed_defaults(app: FastAPI) -> None:
+    settings = app.state.settings
+    await app.state.users.seed_env_users(settings.users, settings.admin_username)
+    if settings.smtp_host and not await app.state.settings_store.get("channels"):
+        await app.state.settings_store.put(
+            {
+                "channels": {
+                    "email": {
+                        "smtp_host": settings.smtp_host,
+                        "smtp_port": settings.smtp_port,
+                        "from": "queuelens@local",
+                        "to": "sre@queuelens.local",
+                    }
+                }
+            }
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    await app.state.management_client.start()
+    import asyncio
+
     try:
         await app.state.database.start()
-        await app.state.rabbitmq_connection.start()
-        app.state.rabbitmq_connection.start_reconnect_loop()
+        await _seed_defaults(app)
+        await app.state.environment_manager.start_default()
+        app.state.alert_engine.start()
+        retention_task = asyncio.get_running_loop().create_task(_retention_loop(app))
         app.state.ready = True
         yield
     finally:
         app.state.ready = False
-        await app.state.management_client.close()
-        await app.state.rabbitmq_connection.close()
+        retention_task.cancel()
+        await app.state.alert_engine.stop()
+        await app.state.environment_manager.stop_all()
         await app.state.database.close()
 
 
@@ -84,16 +122,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     database = Database(app.state.settings.database_url)
     app.state.database = database
     app.state.audit_repository = AuditRepository(database)
-    rabbitmq_connection = RabbitMQConnection(app.state.settings)
-    app.state.rabbitmq_connection = rabbitmq_connection
-    browser = MessageBrowser(rabbitmq_connection)
-    operator = MessageOperator(rabbitmq_connection)
-    app.state.message_service = MessageService(browser)
-    app.state.action_service = ActionService(app.state.settings, operator)
-    app.state.bulk_service = BulkActionService(app.state.settings, browser, operator)
-    management = RabbitMQManagementClient(app.state.settings)
-    app.state.management_client = management
-    app.state.queue_service = QueueService(management)
+    app.state.settings_store = SettingsRepository(database)
+    app.state.alert_rules = AlertRuleRepository(database)
+    app.state.notifications = NotificationRepository(database)
+    app.state.users = UserRepository(database)
+    manager = EnvironmentManager(app.state, app.state.settings)
+    app.state.environment_manager = manager
+    manager.attach_default()  # services exist pre-lifespan so tests can override them
+    app.state.alert_engine = AlertEngine(
+        rules=app.state.alert_rules,
+        notifications=app.state.notifications,
+        settings_store=app.state.settings_store,
+        get_queue_service=lambda: app.state.queue_service,
+        interval_seconds=app.state.settings.alert_interval_seconds,
+    )
     # base.html renders the environment badge and sidebar identity on every page
     web.templates.env.globals["app_environment"] = app.state.settings.environment
     web.templates.env.globals["admin_username"] = app.state.settings.admin_username
@@ -106,6 +148,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(messages.router)
     app.include_router(actions.router)
     app.include_router(bulk.router)
+    app.include_router(platform.router)
     app.include_router(web.router)
     app.mount(
         "/static",

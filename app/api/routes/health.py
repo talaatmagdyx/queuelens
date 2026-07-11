@@ -42,6 +42,25 @@ async def users(
     _username: str = Depends(get_current_username),
 ) -> dict[str, object]:
     settings = request.app.state.settings
+    users_repo = getattr(request.app.state, "users", None)
+    if users_repo is not None:
+        try:
+            stored = await users_repo.list()
+        except Exception:  # noqa: BLE001 - fall back to env accounts pre-migration
+            stored = []
+        if stored:
+            return {
+                "accounts": [
+                    {
+                        "username": u["username"],
+                        "role": "Administrator" if u["role"] == "Admin" else u["role"],
+                        "email": u["email"],
+                        "invited_by": u["invited_by"],
+                        "active": u["active"],
+                    }
+                    for u in stored
+                ]
+            }
     return {
         "accounts": [
             {

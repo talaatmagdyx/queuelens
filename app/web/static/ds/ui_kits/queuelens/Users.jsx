@@ -21,12 +21,71 @@
       : <Icon name="minus" size={14} color="var(--slate-300)" />;
   }
 
+  function mapAccounts() {
+    var accounts = (window.QL.requestJson ? null : null);
+    var raw = [];
+    try {
+      var x = new XMLHttpRequest();
+      x.open('GET', '/api/users', false);
+      x.send();
+      raw = (JSON.parse(x.responseText).accounts) || [];
+    } catch (e) { raw = []; }
+    return raw.map(function (a) {
+      return {
+        name: a.username, email: a.email || '\u2014',
+        role: a.role === 'Administrator' ? 'Admin' : a.role,
+        envs: [(window.QL.broker || {}).environment || 'development'],
+        last: a.invited_by ? 'invited by ' + a.invited_by : '\u2014',
+        status: a.active === false ? 'Invited' : 'Active',
+      };
+    });
+  }
+
   function Users({ nav }) {
+    const [users, setUsers] = React.useState(mapAccounts);
+    const [inviting, setInviting] = React.useState(false);
+    const [draft, setDraft] = React.useState({ username: '', role: 'Operator', email: '' });
+    const [result, setResult] = React.useState(null);
+    const [error, setError] = React.useState(null);
+    const { Input, Select, Alert, CodeBlock } = window.__NS;
+    const invite = async () => {
+      setError(null);
+      try {
+        const outcome = await window.QL.postJson('/api/users/invite', {
+          username: draft.username.trim(), role: draft.role, email: draft.email.trim() || null,
+        });
+        setResult(outcome);
+        setInviting(false);
+        setUsers(mapAccounts());
+      } catch (e) { setError(e.message); }
+    };
     return (
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <PageHeader title="Users" subtitle="Manage who can browse, recover, and configure QueueLens."
-            actions={<Button icon="user-plus">Invite User</Button>} />
+            actions={<Button icon="user-plus" onClick={() => { setResult(null); setInviting(!inviting); }}>Invite User</Button>} />
+          {error && <Alert tone="danger" style={{ marginBottom: 14 }}>{error}</Alert>}
+          {inviting && (
+            <Card title="Invite User" subtitle="Creates a real account (stored server-side). The password is shown exactly once." style={{ marginBottom: 18 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 0.7fr 1fr auto', gap: 12, alignItems: 'end', marginTop: 4 }}>
+                <Input label="Username" required placeholder="new.sre" value={draft.username} onChange={(v) => setDraft({ ...draft, username: v })} />
+                <Select label="Role" options={['Operator', 'Admin', 'Viewer']} value={draft.role} onChange={(v) => setDraft({ ...draft, role: v })} />
+                <Input label="Email (optional — invite is emailed if a channel is configured)" placeholder="person@acme.io" value={draft.email} onChange={(v) => setDraft({ ...draft, email: v })} />
+                <Button style={{ height: 38 }} disabled={!draft.username.trim()} onClick={invite}>Send Invite</Button>
+              </div>
+            </Card>
+          )}
+          {result && (
+            <Alert tone="success" title={`Invited ${result.username} as ${result.role}`} style={{ marginBottom: 18 }}>
+              One-time password (copy it now — it is not stored in plain text):
+              <div style={{ marginTop: 8 }}><CodeBlock code={result.password} copy /></div>
+              {result.email_delivery && (
+                <div style={{ marginTop: 8, fontSize: 12.5 }}>
+                  Invite email: {result.email_delivery.ok ? `delivered (attempt ${result.email_delivery.attempts})` : `failed after ${result.email_delivery.attempts} attempts`}
+                </div>
+              )}
+            </Alert>
+          )}
           <Card pad={false}>
             <DataTable rowKey="name"
               columns={[
@@ -49,7 +108,7 @@
                 { key: 'status', label: 'Status', render: (r) => <StatusPill tone={STATUS_TONE[r.status]}>{r.status}</StatusPill> },
                 { key: 'a', label: '', align: 'right', render: () => <IconButton icon="ellipsis-vertical" size={28} /> },
               ]}
-              rows={D.users} footer={`${D.users.length} users`} />
+              rows={users} footer={`${users.length} users`} />
           </Card>
         </div>
 

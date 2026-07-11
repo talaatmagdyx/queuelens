@@ -52,6 +52,18 @@ class RabbitMQManagementClient:
         response = await self.client.get(f"/api/exchanges/{vhost}")
         return cast(list[dict[str, Any]], await self._json_or_raise(response))
 
+    async def ensure_vhost(self, vhost: str) -> None:
+        """Create the vhost if missing and grant the management user full permissions."""
+        name = quote(vhost, safe="")
+        response = await self.client.get(f"/api/vhosts/{name}")
+        if response.status_code == 404:
+            (await self.client.put(f"/api/vhosts/{name}")).raise_for_status()
+        user = quote(self._settings.rabbitmq_management_username, safe="")
+        await self.client.put(
+            f"/api/permissions/{name}/{user}",
+            json={"configure": ".*", "write": ".*", "read": ".*"},
+        )
+
     async def list_bindings(self) -> list[dict[str, Any]]:
         vhost = quote(self._settings.rabbitmq_vhost, safe="")
         response = await self.client.get(f"/api/bindings/{vhost}")

@@ -18,11 +18,15 @@ async def list_messages(
     request: Request,
     queue_name: str,
     _username: str = Depends(get_current_username),
-    limit: int = Query(default=100, ge=1, le=100),
+    limit: int | None = Query(default=None, ge=1, le=1000),
 ) -> dict[str, object]:
     settings = request.app.state.settings
+    stored = await request.app.state.settings_store.get("limits", {}) or {}
+    effective = limit or int(
+        stored.get("max_preview_messages") or settings.max_preview_messages
+    )
     PREVIEW_REQUESTS.inc()
-    messages = await _service(request).list_messages(queue_name, limit)
+    messages = await _service(request).list_messages(queue_name, min(effective, 1000))
     return {
         "messages": [
             message_to_dict(

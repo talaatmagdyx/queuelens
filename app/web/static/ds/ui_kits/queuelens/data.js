@@ -165,10 +165,10 @@ window.QL.screens = window.QL.screens || {};
 
   // XHR rather than fetch: fetch() rejects relative URLs when the page URL carries
   // basic-auth credentials (http://user:pass@host/), a common way to open QueueLens.
-  window.QL.postJson = function (path, body) {
+  window.QL.requestJson = function (method, path, body) {
     return new Promise(function (resolve, reject) {
       var x = new XMLHttpRequest();
-      x.open('POST', path);
+      x.open(method, path);
       x.setRequestHeader('Content-Type', 'application/json');
       x.onload = function () {
         var detail = {};
@@ -177,8 +177,22 @@ window.QL.screens = window.QL.screens || {};
         else reject(new Error(detail.detail || ('HTTP ' + x.status)));
       };
       x.onerror = function () { reject(new Error('Network error')); };
-      x.send(JSON.stringify(body));
+      x.send(body === undefined ? null : JSON.stringify(body));
     });
+  };
+  window.QL.postJson = function (path, body) { return window.QL.requestJson('POST', path, body); };
+  window.QL.putJson = function (path, body) { return window.QL.requestJson('PUT', path, body); };
+
+  window.QL.fetchServerSettings = function () { return getJson('/api/settings') || {}; };
+  window.QL.saveSettings = function (values) {
+    return window.QL.putJson('/api/settings', { values: values });
+  };
+  window.QL.fetchAlerts = function () { return (getJson('/api/alerts') || {}).rules || []; };
+  window.QL.fetchNotificationsStored = function () {
+    return (getJson('/api/notifications') || {}).notifications || [];
+  };
+  window.QL.fetchEnvironments = function () {
+    return (getJson('/api/environments') || {}).environments || [];
   };
 
   var messagesRaw = defaultQueue
@@ -218,6 +232,15 @@ window.QL.screens = window.QL.screens || {};
   });
 
   var notifications = [];
+  var LEVELS = { Alert: 1, Warning: 1, Info: 1, Success: 1 };
+  window.QL.fetchNotificationsStored().forEach(function (n) {
+    notifications.push({
+      time: n.timestamp ? rel(n.timestamp) : '\u2014',
+      level: LEVELS[n.level] ? n.level : 'Info',
+      title: n.title, message: n.message, source: n.source || 'Alert Engine',
+      delivery: n.delivery || {},
+    });
+  });
   queues.forEach(function (q) {
     if (q.status === 'attention') {
       notifications.push({ time: 'now', level: 'Warning', title: 'DLQ queue needs attention',

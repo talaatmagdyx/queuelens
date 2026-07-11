@@ -1,6 +1,6 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import delete, desc, func, select
 
 from app.domain.models import AuditEntry
 from app.infrastructure.persistence.database import Database
@@ -88,3 +88,15 @@ class AuditRepository:
             "metadata": model.metadata_json,
         }
 
+
+    async def delete_older_than(self, days: int) -> int:
+        """Retention cleanup: drop audit rows older than N days."""
+        from datetime import UTC, datetime
+
+        cutoff = datetime.now(UTC) - timedelta(days=days)
+        async with self._database.session() as session:
+            result = await session.execute(
+                delete(AuditEventModel).where(AuditEventModel.timestamp < cutoff)
+            )
+            await session.commit()
+            return int(getattr(result, "rowcount", 0) or 0)

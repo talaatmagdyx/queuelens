@@ -19,13 +19,15 @@ class ActionService:
         target: ReplayTarget | None,
         username: str,
         annotate: bool = True,
+        extra_headers: dict[str, object] | None = None,
     ) -> dict[str, object]:
         resolved_target = target or self._configured_target(source_queue)
         if resolved_target is None:
             raise ValueError("No replay target configured for this queue")
-        headers: dict[str, object] = {}
+        headers: dict[str, object] = dict(extra_headers or {})
         if annotate:
             headers = {
+                **headers,
                 "x-queuelens-replayed": True,
                 "x-queuelens-action": f"replay_{mode}",
                 "x-queuelens-replayed-at": datetime.now(UTC).isoformat(),

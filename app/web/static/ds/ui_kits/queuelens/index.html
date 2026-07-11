@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <title>QueueLens</title>
-<link rel="stylesheet" href="/static/ds/styles.css?v=0.7.4">
+<link rel="stylesheet" href="/static/ds/styles.css?v=0.8.0">
 <script src="/static/vendor/react.production.min.js"></script>
 <script src="/static/vendor/react-dom.production.min.js"></script>
 <script src="/static/vendor/babel.min.js"></script>
 <script src="/static/vendor/lucide.js"></script>
-<script src="/static/ds/ds-loader.js?v=0.7.4"></script>
+<script src="/static/ds/ds-loader.js?v=0.8.0"></script>
 <style>
   html, body { margin: 0; background: var(--slate-50); font-family: var(--font-ui); }
   * { box-sizing: border-box; }
@@ -27,33 +27,40 @@ setInterval(function () {
   if (el && el.getAttribute('data-screen-label') === 'Dashboard') location.reload();
 }, 30000);
 </script>
-<script src="/static/ds/ui_kits/queuelens/data.js?v=0.7.4"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/shared.jsx?v=0.7.4"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Dashboard.jsx?v=0.7.4"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Queues.jsx?v=0.7.4"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Messages.jsx?v=0.7.4"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Wizard.jsx?v=0.7.4"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/AuditLog.jsx?v=0.7.4"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Configuration.jsx?v=0.7.4"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Users.jsx?v=0.7.4"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Parking.jsx?v=0.7.4"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/QueueDetail.jsx?v=0.7.4"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Topology.jsx?v=0.7.4"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Composer.jsx?v=0.7.4"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Alerts.jsx?v=0.7.4"></script>
-<script type="text/babel" src="/static/ds/ui_kits/queuelens/Notifications.jsx?v=0.7.4"></script>
+<script src="/static/ds/ui_kits/queuelens/data.js?v=0.8.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/shared.jsx?v=0.8.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Dashboard.jsx?v=0.8.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Queues.jsx?v=0.8.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Messages.jsx?v=0.8.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Wizard.jsx?v=0.8.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/AuditLog.jsx?v=0.8.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Configuration.jsx?v=0.8.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Users.jsx?v=0.8.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Parking.jsx?v=0.8.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/QueueDetail.jsx?v=0.8.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Topology.jsx?v=0.8.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Composer.jsx?v=0.8.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Alerts.jsx?v=0.8.0"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Notifications.jsx?v=0.8.0"></script>
 <script type="text/babel">
 const { SidebarNav, TopBar, Alert, Icon } = window.__NS;
 const S = window.QL.screens;
 
-// Single real environment, discovered from the running broker (/api/broker).
+// Environments from /api/environments — profiles defined in QUEUELENS_ENVIRONMENTS_JSON.
 const B = window.QL.broker || { environment: 'development', host: 'rabbitmq:5672', api: '', vhost: '/', live: true, latency: '—' };
-const ENVS = [
-  { id: B.environment, label: (B.environment || 'development').toUpperCase(), host: B.host,
-    api: (window.QL.config || {}).management_url || B.host,
-    vhosts: [{ id: B.vhost, sub: (window.QL.data.queues || []).length + ' queues' }] },
-];
+const REMOTE_ENVS = window.QL.fetchEnvironments();
+const ENVS = (REMOTE_ENVS.length ? REMOTE_ENVS : [{ id: B.environment, api: '', vhosts: [B.vhost], active: true }]).map((e) => ({
+  id: e.id, label: e.id.toUpperCase(), host: B.host, api: e.api,
+  vhosts: e.vhosts.map((v) => ({ id: v })), active: e.active, activeVhost: e.active_vhost,
+}));
 window.QL.ENVS = ENVS;
+const ACTIVE_ENV = ENVS.find((e) => e.active) || ENVS[0];
+function activateEnvironment(envId, vhost) {
+  window.QL.postJson('/api/environments/activate', { environment: envId, vhost: vhost || undefined })
+    .then(() => location.reload())
+    .catch((e) => window.alert('Could not switch environment: ' + e.message));
+}
+window.QL.activateEnvironment = activateEnvironment;
 
 const PALETTE_SCREENS = [
   ['dashboard', 'Dashboard', 'layout-grid'], ['queues', 'Queues', 'list'],
@@ -126,8 +133,8 @@ function App() {
   // Auth is HTTP Basic, enforced by the server before this page loads — no in-app login step.
   const [route, setRoute] = React.useState({ id: 'dashboard', params: {} });
   const [bellOpen, setBellOpen] = React.useState(false);
-  const [envId, setEnvId] = React.useState(ENVS[0].id);
-  const [vhost, setVhost] = React.useState(B.vhost || '/');
+  const [envId] = React.useState(ACTIVE_ENV.id);
+  const [vhost] = React.useState(ACTIVE_ENV.activeVhost || B.vhost || '/');
   const brokerLive = B.live !== false;
   const [paletteOpen, setPaletteOpen] = React.useState(false);
   const [theme, setTheme] = React.useState(localStorage.getItem('ql_theme') || 'light');
@@ -144,7 +151,7 @@ function App() {
     localStorage.setItem('ql_theme', theme);
   }, [theme]);
   const envObj = ENVS.find((e) => e.id === envId) || ENVS[0];
-  const switchEnv = (id) => { setEnvId(id); setVhost(B.vhost || '/'); };
+  const switchEnv = (id) => activateEnvironment(id, null);  // real switch: server re-points, page reloads
   const nav = (id, params = {}) => { setRoute({ id, params }); setBellOpen(false); window.scrollTo(0, 0); };
 
   const screenLabelMap = {
@@ -203,7 +210,7 @@ function App() {
       <div style={{ flex: 1, minWidth: 0, position: 'relative', background: 'var(--surface-page)' }}>
         <TopBar version={B.api} userName={window.QL.user || 'admin'} notifications={window.QL.alertCount || 0} onBell={() => setBellOpen(!bellOpen)}
           envs={ENVS} activeEnv={envId} onEnvChange={switchEnv}
-          vhosts={envObj.vhosts} vhost={vhost} onVhostChange={setVhost}
+          vhosts={envObj.vhosts} vhost={vhost} onVhostChange={(v) => activateEnvironment(envId, v)}
           brokerLive={brokerLive}
           theme={theme} onThemeToggle={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
           onRefresh={() => location.reload()}

@@ -46,6 +46,16 @@ class MessageActionRequest(BaseModel):
     confirm: bool = False
 
 
+async def _custom_headers(request: Request) -> dict[str, object]:
+    """Admin-configured headers stamped on every message QueueLens publishes."""
+    stored = await request.app.state.settings_store.get("custom_headers", []) or []
+    return {
+        str(item["key"]): str(item["value"])
+        for item in stored
+        if isinstance(item, dict) and item.get("key")
+    }
+
+
 def _service(request: Request) -> ActionService:
     return cast(ActionService, request.app.state.action_service)
 
@@ -149,6 +159,7 @@ async def replay(
 ) -> dict[str, object]:
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Replay confirmation is required")
+    custom_headers = await _custom_headers(request)
     return await _run_action(
         request,
         username,
@@ -162,6 +173,7 @@ async def replay(
             target=body.target.to_domain() if body.target else None,
             username=username,
             annotate=body.annotate,
+            extra_headers=custom_headers,
         ),
         target=body.target.to_domain() if body.target else None,
         mode=body.mode,
@@ -239,6 +251,7 @@ async def publish(
     except ValueError:
         content_type = "text/plain"
     headers: dict[str, Any] = {
+        **(await _custom_headers(request)),
         "x-queuelens-published-by": username,
         "x-queuelens-published-at": datetime.now(UTC).isoformat(),
     }

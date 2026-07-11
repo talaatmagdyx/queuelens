@@ -33,10 +33,19 @@ services:
       QUEUELENS_OPERATION_TIMEOUT_SECONDS: 10
       QUEUELENS_REFETCH_WINDOW_SIZE: 100
       QUEUELENS_REPLAY_TARGETS_JSON: '{}'
+      QUEUELENS_SMTP_HOST: mailpit
+      QUEUELENS_SMTP_PORT: 1025
+      QUEUELENS_ENVIRONMENTS_JSON: '{"staging": {"vhosts": ["/", "staging"]}, "payments": {"vhosts": ["payments"]}}'
     ports:
       - "8000:8000"
     volumes:
       - queuelens-data:/app/data
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "8026:8025"
     restart: unless-stopped
 
 volumes:
