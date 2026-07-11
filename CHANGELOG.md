@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Removed
+- **The legacy server-rendered console.** Every old page (`/config`, `/queues`,
+  `/audit`, `/classic`, …) now 301-redirects to the SPA at `/app`, which has
+  been the default and the only UI receiving features for several releases.
+  The Jinja templates are gone except for the standalone error page.
+- The `outputs/` scoping-notes folder.
+
 ## v0.9.0 — 2026-07-11
 
 ### Added

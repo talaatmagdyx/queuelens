@@ -6,7 +6,7 @@ go through infrastructure adapters.
 
 ```text
 app/
-  web/routes.py            HTML pages (Jinja2)          ┐
+  web/routes.py            SPA entry (/app) + legacy redirects          ┐
   api/routes/*.py          JSON API                     ├─ presentation
   auth/basic.py            HTTP Basic Auth dependency   ┘
   application/

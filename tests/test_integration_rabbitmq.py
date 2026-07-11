@@ -103,10 +103,10 @@ async def test_browse_park_replay_delete_against_real_broker(tmp_path) -> None:
                 by_id = {m["message_id"]: m["fingerprint"] for m in listing}
                 assert set(by_id) == {"it-0", "it-1"}
 
-                # Regression: the HTML detail page renders datetime-bearing x-death.
-                detail = await client.get(f"/messages/{dlq}/{by_id['it-0']}")
+                # Regression: the detail endpoint serializes datetime-bearing x-death.
+                detail = await client.get(f"/api/queues/{dlq}/messages/{by_id['it-0']}")
                 assert detail.status_code == 200
-                assert "rejected" in detail.text
+                assert detail.json()["message"]["x_death"][0]["reason"] == "rejected"
 
                 # Regression: replay to a missing queue fails cleanly and the
                 # message is NOT lost.

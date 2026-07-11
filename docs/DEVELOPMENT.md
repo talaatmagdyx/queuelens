@@ -69,7 +69,8 @@ per test with explicit `Settings`, `tmp_path` SQLite URLs for anything touching 
   (2) publish before ack, (3) verify the target exists or use mandatory publish,
   (4) requeue everything on failure. Read [SAFETY.md](SAFETY.md) before touching
   `MessageOperator`.
-- **Frontend** — server-rendered Jinja2 + a small amount of vanilla JS in the templates.
+- **Frontend** — the React SPA at `/app` (see the front-end pipeline section below);
+  the only remaining Jinja template is the standalone error page.
   Build DOM nodes (`textContent`), never `innerHTML` with server data.
 
 ## Adding an endpoint (checklist)
