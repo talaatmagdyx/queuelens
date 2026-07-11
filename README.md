@@ -63,6 +63,45 @@ Every design decision follows one rule: **a failed action must never lose a mess
 The full safety model — each guarantee, its enforcement point, and the failure matrix —
 is documented in [docs/SAFETY.md](docs/SAFETY.md).
 
+## Light on your broker
+
+The second rule: **an observability tool must never become the incident.** QueueLens is
+deliberately lazy toward RabbitMQ:
+
+- **The dashboard reads metadata only** — queue lists and counts from the Management API;
+  message bodies are never fetched in the background
+- **Message preview is manual and bounded** — bodies are read only when *you* open a queue,
+  capped at `QUEUELENS_MAX_PREVIEW_MESSAGES`, and requeued immediately
+- **No automatic payload scanning** — there is no crawler walking your queues; payload
+  filters run only inside a user-initiated, size-capped bulk dry-run
+- **Topology is cached** — the exchanges/bindings/queues snapshot (the most expensive
+  management read) is served from a 30-second cache
+- **Connection diagnostics run only on demand** — the broker test fires when you click it,
+  not on a timer
+- **Alerts check counts, not contents** — the evaluator reads queue statistics on a
+  configurable interval (`QUEUELENS_ALERT_INTERVAL_SECONDS`, default 15s) and never
+  touches message bodies
+- **Auto-refresh is optional** — the dashboard's 30-second refresh can be switched off in
+  General Settings; every other screen loads on navigation only
+
+## Feature status
+
+| Feature | Status |
+|---|---|
+| Safe message preview | ✅ Stable |
+| Single-message replay / park / delete | ✅ Stable |
+| Bulk operations (dry-run → execute) | ✅ Stable |
+| Compressed-payload decode (gzip / deflate) | ✅ Stable |
+| Multi-environment (per-env credentials) | ✅ Stable |
+| Multi-vhost (switchable, one active per instance) | ✅ Stable |
+| RBAC (Viewer / Operator / Admin) | ✅ Stable |
+| Audit log + full-history export | ✅ Stable |
+| Alerts — in-app notifications | ✅ Stable |
+| Alerts — external delivery (email / Slack / PagerDuty / webhook) | 🧪 Experimental |
+| Prometheus metrics + bundled rules | ✅ Stable |
+| Simultaneous multi-vhost browsing | 🗺️ Roadmap |
+| PostgreSQL audit store (multi-replica) | 🗺️ Roadmap |
+
 ## Features
 
 ### 🔬 Inspect

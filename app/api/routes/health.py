@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import cast
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Request
@@ -114,17 +115,28 @@ async def config(
     }
 
 
+TOPOLOGY_CACHE_SECONDS = 30.0
+
+
 @router.get("/api/topology")
 async def topology(
     request: Request,
     _username: str = Depends(get_current_username),
 ) -> dict[str, object]:
-    """Exchanges, bindings, and queues (with dead-letter args) for the topology view."""
+    """Exchanges, bindings, and queues (with dead-letter args) for the topology view.
+
+    Cached for TOPOLOGY_CACHE_SECONDS: three management-API list calls per hit is
+    the most expensive read in the app, and bindings rarely change that fast."""
+    import time
+
+    cached = getattr(request.app.state, "topology_cache", None)
+    if cached is not None and time.monotonic() < cached[0]:
+        return cast(dict[str, object], cached[1])
     client = request.app.state.management_client
     exchanges_raw = await client.list_exchanges()
     bindings_raw = await client.list_bindings()
     queues_raw = await client.list_queues()
-    return {
+    result: dict[str, object] = {
         "exchanges": [
             {"name": e.get("name", ""), "type": e.get("type", "direct")}
             for e in exchanges_raw
@@ -150,6 +162,8 @@ async def topology(
             for q in queues_raw
         ],
     }
+    request.app.state.topology_cache = (time.monotonic() + TOPOLOGY_CACHE_SECONDS, result)
+    return result
 
 
 @router.get("/api/alert-rules")

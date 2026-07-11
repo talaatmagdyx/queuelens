@@ -184,6 +184,36 @@ section{position:relative;padding:104px 0;overflow:hidden}
 .clause p{color:var(--fog);font-size:15.5px}
 .clause p code{font-family:var(--mono);font-size:13px;color:var(--cyan);background:rgba(56,225,198,.07);padding:2px 6px;border-radius:5px}
 
+/* ── light on broker + status ────────────────────────── */
+.lite-grid{display:grid;grid-template-columns:1.25fr 1fr;gap:40px;align-items:start}
+@media (max-width:860px){.lite-grid{grid-template-columns:1fr}}
+.lite-list{list-style:none}
+.lite-list li{
+  display:flex;gap:14px;padding:15px 0;border-bottom:1px solid var(--line);
+  font-size:15.5px;color:var(--fog);line-height:1.55;
+}
+.lite-list li:first-child{border-top:1px solid var(--line)}
+.lite-list b{color:var(--paper);font-weight:600}
+.lite-list .tick{color:var(--cyan);flex:none;font-family:var(--mono);font-size:14px;padding-top:2px}
+.status-card{
+  border:1px solid var(--line);border-radius:16px;background:var(--ink-2);overflow:hidden;
+}
+.status-card .head{
+  padding:16px 20px;border-bottom:1px solid var(--line);font-family:var(--mono);
+  font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--fog);
+}
+.status-card table{width:100%;border-collapse:collapse;font-size:14px}
+.status-card td{padding:11px 20px;border-bottom:1px solid var(--line);color:var(--paper)}
+.status-card tr:last-child td{border-bottom:none}
+.status-card td:last-child{text-align:right;white-space:nowrap}
+.pill{
+  font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.06em;
+  padding:3px 11px;border-radius:99px;
+}
+.pill.stable{background:rgba(56,225,198,.1);color:var(--cyan);border:1px solid rgba(56,225,198,.3)}
+.pill.exp{background:rgba(255,181,71,.1);color:var(--amber);border:1px solid rgba(255,181,71,.3)}
+.pill.road{background:rgba(100,115,255,.1);color:var(--indigo-hot);border:1px solid rgba(100,115,255,.3)}
+
 /* ── features ────────────────────────────────────────── */
 .feat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px}
 .feat{
@@ -364,6 +394,42 @@ footer a{color:var(--fog)}
       <div class="clause"><span class="no">§ 04</span><h3>Deletes are deliberate</h3><p>Type-to-confirm, Admin role only. There is no "oops" path.</p></div>
       <div class="clause"><span class="no">§ 05</span><h3>Everything is on the record</h3><p>An <em>attempt</em> event is written before every action and an <em>outcome</em> after. If the attempt can't be persisted, the action is refused.</p></div>
       <div class="clause"><span class="no">§ 06</span><h3>Ambiguity fails closed</h3><p>A message fingerprint matching zero or multiple messages aborts the action instead of guessing.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="broker-load" style="padding-top:0">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="kicker">the second rule</span>
+      <h2>An observability tool must never become the incident.</h2>
+      <p>QueueLens is deliberately lazy toward your broker — it reads metadata, not messages, unless you ask.</p>
+    </div>
+    <div class="lite-grid rv">
+      <ul class="lite-list">
+        <li><span class="tick">✓</span><span><b>Dashboard reads metadata only</b> — queue lists and counts from the Management API; message bodies are never fetched in the background.</span></li>
+        <li><span class="tick">✓</span><span><b>Preview is manual and bounded</b> — bodies are read only when you open a queue, capped, and requeued immediately.</span></li>
+        <li><span class="tick">✓</span><span><b>No automatic payload scanning</b> — no crawler walks your queues; filters run only inside a user-initiated, size-capped dry-run.</span></li>
+        <li><span class="tick">✓</span><span><b>Topology is cached</b> — the exchanges/bindings snapshot is served from a 30-second cache.</span></li>
+        <li><span class="tick">✓</span><span><b>Diagnostics on demand</b> — the connection test fires when you click it, not on a timer.</span></li>
+        <li><span class="tick">✓</span><span><b>Alerts check counts, not contents</b> — queue statistics on a configurable interval; message bodies are never touched.</span></li>
+        <li><span class="tick">✓</span><span><b>Auto-refresh is optional</b> — the dashboard's 30-second refresh can be switched off; every other screen loads on navigation only.</span></li>
+      </ul>
+      <div class="status-card">
+        <div class="head">feature status</div>
+        <table>
+          <tr><td>Safe message preview</td><td><span class="pill stable">STABLE</span></td></tr>
+          <tr><td>Replay · park · delete</td><td><span class="pill stable">STABLE</span></td></tr>
+          <tr><td>Bulk operations</td><td><span class="pill stable">STABLE</span></td></tr>
+          <tr><td>Compressed-payload decode</td><td><span class="pill stable">STABLE</span></td></tr>
+          <tr><td>Multi-environment &amp; vhost</td><td><span class="pill stable">STABLE</span></td></tr>
+          <tr><td>RBAC + audit export</td><td><span class="pill stable">STABLE</span></td></tr>
+          <tr><td>Alerts — in-app</td><td><span class="pill stable">STABLE</span></td></tr>
+          <tr><td>Alerts — email / Slack / PagerDuty</td><td><span class="pill exp">EXPERIMENTAL</span></td></tr>
+          <tr><td>Simultaneous multi-vhost view</td><td><span class="pill road">ROADMAP</span></td></tr>
+          <tr><td>PostgreSQL / multi-replica</td><td><span class="pill road">ROADMAP</span></td></tr>
+        </table>
+      </div>
     </div>
   </div>
 </section>

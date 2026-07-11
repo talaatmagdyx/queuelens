@@ -513,3 +513,32 @@ async def test_publish_requires_confirm_and_audits_success(tmp_path) -> None:
     assert events[0]["action"] == "publish" and events[0]["result"] == "failed"
     assert events[1]["action"] == "publish" and events[1]["result"] == "success"
     assert events[1]["target_queue"] == "orders.q"
+
+
+@pytest.mark.asyncio
+async def test_topology_is_cached(tmp_path) -> None:
+    """The topology view is the most expensive management read — served from a
+    short TTL cache so repeated visits don't re-poll the broker."""
+    app = create_app(
+        Settings(auth_enabled=False, database_url=f"sqlite+aiosqlite:///{tmp_path}/tc.db")
+    )
+    calls = {"n": 0}
+
+    class CountingManagementClient:
+        async def list_exchanges(self) -> list[dict[str, object]]:
+            calls["n"] += 1
+            return []
+
+        async def list_bindings(self) -> list[dict[str, object]]:
+            return []
+
+        async def list_queues(self) -> list[dict[str, object]]:
+            return []
+
+    app.state.management_client = CountingManagementClient()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        assert (await client.get("/api/topology")).status_code == 200
+        assert (await client.get("/api/topology")).status_code == 200
+
+    assert calls["n"] == 1  # second hit came from the cache
