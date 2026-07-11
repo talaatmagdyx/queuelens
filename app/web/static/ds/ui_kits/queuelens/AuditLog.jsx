@@ -40,23 +40,12 @@
     const filtersOn = q || from || to || actionF !== 'All Actions' || resultF !== 'All Results';
 
     const exportFormat = ((((window.QL.serverSettings || {}).ui) || {}).export_format || 'CSV');
+    // server-side streaming export: the COMPLETE history, not just the loaded page
     const exportCsv = () => {
-      let blob, filename;
-      if (exportFormat === 'JSON') {
-        blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
-        filename = 'queuelens-audit.json';
-      } else {
-        const head = 'time,user,action,queue,target,result,duration';
-        const esc = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-        const body = rows.map((r) => [r.time, r.user, r.action, r.queue, r.target, r.result, r.duration].map(esc).join(','));
-        blob = new Blob([[head].concat(body).join('\n')], { type: 'text/csv' });
-        filename = 'queuelens-audit.csv';
-      }
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = filename;
+      a.href = '/api/audit/export?format=' + exportFormat.toLowerCase();
+      a.download = 'queuelens-audit.' + exportFormat.toLowerCase();
       a.click();
-      URL.revokeObjectURL(a.href);
     };
 
     const clearFilters = () => { setQ(''); setActionF('All Actions'); setResultF('All Results'); setFrom(''); setTo(''); setPage(1); };

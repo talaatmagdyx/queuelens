@@ -1,3 +1,12 @@
+# ── Stage 1: precompile the SPA (JSX → JS, drop Babel standalone) ──────────
+FROM node:20-slim AS frontend
+WORKDIR /build
+COPY app/web/static ./static
+COPY scripts/build_frontend.mjs scripts/
+RUN npm install --no-save --no-audit --no-fund @babel/core@7 @babel/preset-react@7 \
+    && node scripts/build_frontend.mjs static
+
+# ── Stage 2: the application image ─────────────────────────────────────────
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -5,8 +14,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 
 COPY pyproject.toml README.md ./
 COPY app ./app
+COPY scripts/build_ds_bundle.py scripts/
 COPY deploy/prometheus ./deploy/prometheus
+# precompiled SPA replaces the raw JSX tree
+COPY --from=frontend /build/static ./app/web/static
 RUN pip install --no-cache-dir . \
+    && python scripts/build_ds_bundle.py \
     && mkdir -p /app/data \
     && useradd --system --no-create-home queuelens \
     && chown -R queuelens /app/data

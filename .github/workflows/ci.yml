@@ -46,6 +46,48 @@ jobs:
           curl -sf http://127.0.0.1:8123/api/config > /dev/null
           kill %1
 
+  e2e:
+    runs-on: ubuntu-latest
+    needs: test
+    services:
+      rabbitmq:
+        image: rabbitmq:3.13-management
+        env:
+          RABBITMQ_DEFAULT_USER: queuelens
+          RABBITMQ_DEFAULT_PASS: queuelens
+        ports:
+          - 5672:5672
+          - 15672:15672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install app + playwright
+        run: |
+          pip install -e ".[dev]" playwright
+          playwright install chromium --with-deps
+      - name: Boot app against the service broker
+        env:
+          QUEUELENS_AUTH_ENABLED: "false"
+          QUEUELENS_RABBITMQ_URL: amqp://queuelens:queuelens@127.0.0.1:5672/
+          QUEUELENS_RABBITMQ_MANAGEMENT_URL: http://127.0.0.1:15672
+          QUEUELENS_RABBITMQ_MANAGEMENT_USERNAME: queuelens
+          QUEUELENS_RABBITMQ_MANAGEMENT_PASSWORD: queuelens
+          QUEUELENS_DATABASE_URL: sqlite+aiosqlite:///./e2e.db
+        run: |
+          python -m uvicorn app.main:app --port 8123 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8123/ready && break; sleep 1; done
+      - name: Browser smoke
+        env:
+          E2E: "1"
+        run: pytest tests/e2e -q
+
   docker:
     runs-on: ubuntu-latest
     steps:
@@ -75,6 +117,7 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=semver,pattern={{version}}
+            type=semver,pattern=v{{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
       - uses: docker/build-push-action@v6

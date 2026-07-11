@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Precompiled front end in the container image**: JSX is compiled at image
+  build (two-stage Dockerfile) and Babel standalone is removed from the
+  browser entirely — faster first paint, CSP-compatible. Local development
+  still uses in-browser compilation; the design-system bundle can be built
+  anywhere with `python scripts/build_ds_bundle.py`.
+- **Durable state**: bulk dry-run tokens now live in the database (they
+  survive restarts), and alert fired-state persists on the rule — a restart
+  no longer re-sends notifications for conditions that already fired.
+- **Full-history audit export**: `GET /api/audit/export?format=csv|json`
+  streams the complete audit log; the UI export button now uses it.
+- **Browser e2e smoke suite** (Playwright) running in CI against a real
+  broker: dashboard, all screens, wizard confirmation gating.
+- GHCR images now also carry `vX.Y.Z`-style tags alongside `X.Y.Z`.
+
 ## v0.7.0 — 2026-07-11
 
 The platform release: everything configurable is now server-backed and real.

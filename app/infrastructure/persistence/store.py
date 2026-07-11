@@ -102,6 +102,7 @@ class AlertRuleRepository:
             "enabled": row.enabled,
             "created_by": row.created_by,
             "last_fired_at": row.last_fired_at.isoformat() if row.last_fired_at else None,
+            "fired": bool(row.fired),
         }
 
     async def list(self) -> list[dict[str, Any]]:
@@ -149,6 +150,14 @@ class AlertRuleRepository:
             row = await session.get(AlertRuleModel, rule_id)
             if row is not None:
                 row.last_fired_at = at
+                row.fired = True
+                await session.commit()
+
+    async def set_fired(self, rule_id: int, fired: bool) -> None:
+        async with self._database.session() as session:
+            row = await session.get(AlertRuleModel, rule_id)
+            if row is not None:
+                row.fired = fired
                 await session.commit()
 
 
@@ -310,3 +319,54 @@ class UserRepository:
             if row is None or not row.active:
                 return False
             return verify_password(password, row.password_hash)
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+class BulkBatchRepository:
+    """Durable one-shot dry-run batches — they survive restarts and are safe to
+    share once state moves out of process memory."""
+
+    def __init__(self, database: Database) -> None:
+        self._database = database
+
+    async def save(self, batch_id: str, payload: dict[str, Any], expires_at: datetime) -> None:
+        from app.infrastructure.persistence.models import BulkBatchModel
+
+        async with self._database.session() as session:
+            session.add(BulkBatchModel(id=batch_id, payload=payload, expires_at=expires_at))
+            await session.commit()
+
+    async def peek(self, batch_id: str) -> dict[str, Any] | None:
+        from app.infrastructure.persistence.models import BulkBatchModel
+
+        async with self._database.session() as session:
+            row = await session.get(BulkBatchModel, batch_id)
+            if row is None or _as_utc(row.expires_at) < datetime.now(UTC):
+                return None
+            return dict(row.payload)
+
+    async def take(self, batch_id: str) -> dict[str, Any] | None:
+        """One-shot: return and delete atomically."""
+        from app.infrastructure.persistence.models import BulkBatchModel
+
+        async with self._database.session() as session:
+            row = await session.get(BulkBatchModel, batch_id, with_for_update=True)
+            if row is None or _as_utc(row.expires_at) < datetime.now(UTC):
+                return None
+            payload = dict(row.payload)
+            await session.delete(row)
+            await session.commit()
+            return payload
+
+    async def prune_expired(self) -> int:
+        from app.infrastructure.persistence.models import BulkBatchModel
+
+        async with self._database.session() as session:
+            result = await session.execute(
+                delete(BulkBatchModel).where(BulkBatchModel.expires_at < datetime.now(UTC))
+            )
+            await session.commit()
+            return int(getattr(result, "rowcount", 0) or 0)

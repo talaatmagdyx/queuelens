@@ -533,3 +533,110 @@ async def test_pagerduty_events_v2_payload(tmp_path, monkeypatch) -> None:
     assert sent["payload"]["event_action"] == "trigger"
     assert sent["payload"]["payload"]["severity"] == "critical"
     await app.state.database.close()
+
+
+@pytest.mark.asyncio
+async def test_dry_run_batches_survive_restart(tmp_path) -> None:
+    """DB-backed batches: a token minted before a restart executes after it."""
+    from app.application.bulk_service import BulkActionService
+    from app.domain.models import MessageRecord
+    from app.infrastructure.persistence.store import BulkBatchRepository
+
+    app = _app(tmp_path)
+    await app.state.database.start()
+    store = BulkBatchRepository(app.state.database)
+
+    def record(n: int) -> MessageRecord:
+        return MessageRecord(
+            fingerprint=f"{n:064d}", source_queue="orders.dlq", body=b"{}",
+            payload={}, payload_format="json", payload_size=2,
+            content_type="application/json", message_id=f"m-{n}",
+            correlation_id=None, timestamp=None, exchange="",
+            routing_key="orders.dlq", headers={}, properties={}, redelivered=False,
+        )
+
+    class FakeBrowser:
+        async def list_messages(self, _queue, _limit):
+            return [record(1), record(2)]
+
+    class FakeOperator:
+        async def operate_bulk(self, **kwargs):
+            # the service builds the summary; the operator returns per-message results
+            return [{"fingerprint": f, "status": "success"} for f in kwargs["fingerprints"]]
+
+    settings = app.state.settings
+    first = BulkActionService(settings, FakeBrowser(), FakeOperator(), store)
+    preview = await first.dry_run(source_queue="orders.dlq", action="delete")
+    batch_id = str(preview["batch_id"])
+
+    # "restart": a brand-new service instance sharing only the database
+    second = BulkActionService(settings, FakeBrowser(), FakeOperator(), store)
+    assert (await second.peek_batch(batch_id)) is not None
+    batch, outcome = await second.execute(batch_id, replay_headers={})
+    assert batch.source_queue == "orders.dlq"
+    assert outcome["summary"]["succeeded"] == 2
+    # one-shot: consumed everywhere
+    assert (await first.peek_batch(batch_id)) is None
+    await app.state.database.close()
+
+
+@pytest.mark.asyncio
+async def test_alert_fired_state_survives_restart(tmp_path) -> None:
+    """A rule that fired must not re-notify after an engine restart."""
+    from app.application.alert_engine import AlertEngine
+    from app.domain.models import QueueInfo
+
+    app = _app(tmp_path)
+    await app.state.database.start()
+
+    class FakeQueueService:
+        async def list_queues(self, dlq_only: bool = False):
+            return [QueueInfo(
+                name="orders.dlq", vhost="/", messages=500, messages_ready=500,
+                messages_unacked=0, consumers=0, durable=True, is_dlq=True,
+            )]
+
+    app.state.queue_service = FakeQueueService()
+    await app.state.alert_rules.create(
+        name="r", pattern="*", metric="messages_ready", operator=">",
+        threshold=1, duration_seconds=0, severity="Alert", channels=[],
+        enabled=True, created_by="t",
+    )
+    assert len(await app.state.alert_engine.evaluate_once()) == 1
+
+    # "restart": a fresh engine with no in-memory state
+    fresh = AlertEngine(
+        rules=app.state.alert_rules,
+        notifications=app.state.notifications,
+        settings_store=app.state.settings_store,
+        get_queue_service=lambda: app.state.queue_service,
+    )
+    assert await fresh.evaluate_once() == []  # no duplicate notification
+    await app.state.database.close()
+
+
+@pytest.mark.asyncio
+async def test_audit_export_streams_full_history(tmp_path) -> None:
+    from datetime import UTC, datetime
+
+    from app.domain.models import AuditEntry
+
+    app = _app(tmp_path)
+    await app.state.database.start()
+    for n in range(7):
+        await app.state.audit_repository.record(
+            AuditEntry(username="u", action="replay", timestamp=datetime.now(UTC),
+                       source_queue=f"q{n}", result="success")
+        )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        csv = await client.get("/api/audit/export?format=csv")
+        js = await client.get("/api/audit/export?format=json")
+    await app.state.database.close()
+
+    assert csv.status_code == 200
+    assert csv.headers["content-type"].startswith("text/csv")
+    assert csv.text.count("\n") == 8  # header + 7 rows
+    assert "q6" in csv.text
+    parsed = js.json()
+    assert len(parsed) == 7

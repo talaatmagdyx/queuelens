@@ -90,7 +90,7 @@ async def execute(
     user: CurrentUser = Depends(require_operator),
 ) -> dict[str, object]:
     username = user.username
-    pending_check = request.app.state.bulk_service.peek(body.batch_id)
+    pending_check = await request.app.state.bulk_service.peek_batch(body.batch_id)
     if pending_check and pending_check.action == "delete" and not user.is_admin:
         raise HTTPException(status_code=403, detail="Deleting messages requires the Admin role")
     if not body.confirm:
@@ -103,7 +103,7 @@ async def execute(
         "x-queuelens-replayed-by": username,
     }
     started_at = time.perf_counter()
-    pending = service.peek(body.batch_id)  # batch context for failure audits
+    pending = await service.peek_batch(body.batch_id)  # batch context for failure audits
     try:
         batch, outcome = await service.execute(body.batch_id, replay_headers=replay_headers)
     except UnknownBulkBatch as error:

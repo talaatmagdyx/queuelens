@@ -29,7 +29,7 @@ class Bundle:
     started: bool = False
 
 
-def _build_bundle(settings: Settings) -> Bundle:
+def _build_bundle(settings: Settings, batch_store: Any = None) -> Bundle:
     connection = RabbitMQConnection(settings)
     browser = MessageBrowser(connection)
     operator = MessageOperator(connection)
@@ -40,7 +40,7 @@ def _build_bundle(settings: Settings) -> Bundle:
         management=management,
         message_service=MessageService(browser),
         action_service=ActionService(settings, operator),
-        bulk_service=BulkActionService(settings, browser, operator),
+        bulk_service=BulkActionService(settings, browser, operator, batch_store),
         queue_service=QueueService(management),
     )
 
@@ -57,7 +57,8 @@ def _amqp_url_for_vhost(url: str, vhost: str) -> str:
 class EnvironmentManager:
     """Owns one service bundle per (environment, vhost) and swaps app.state on activate."""
 
-    def __init__(self, app_state: Any, base_settings: Settings) -> None:
+    def __init__(self, app_state: Any, base_settings: Settings, batch_store: Any = None) -> None:
+        self._batch_store = batch_store
         self._state = app_state
         self._base = base_settings
         self._bundles: dict[tuple[str, str], Bundle] = {}
@@ -157,7 +158,9 @@ class EnvironmentManager:
         key = (self.active_env, self.active_vhost)
         bundle = self._bundles.get(key)
         if bundle is None:
-            bundle = _build_bundle(self._settings_for(self.active_env, self.active_vhost))
+            bundle = _build_bundle(
+                self._settings_for(self.active_env, self.active_vhost), self._batch_store
+            )
             self._bundles[key] = bundle
         self._swap(bundle)
         return bundle
@@ -171,7 +174,7 @@ class EnvironmentManager:
         key = (env, vhost)
         bundle = self._bundles.get(key)
         if bundle is None:
-            bundle = _build_bundle(self._settings_for(env, vhost))
+            bundle = _build_bundle(self._settings_for(env, vhost), self._batch_store)
             self._bundles[key] = bundle
         if not bundle.started:
             await bundle.management.start()

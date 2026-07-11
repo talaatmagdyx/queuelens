@@ -1,6 +1,7 @@
 import json as _json
 import logging
 import sys
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
 
 from sqlalchemy import delete, desc, func, select
@@ -109,6 +110,31 @@ class AuditRepository:
             "metadata": model.metadata_json,
         }
 
+
+    async def iter_all(
+        self, batch_size: int = 500
+    ) -> "AsyncIterator[dict[str, object]]":
+        """Yield every audit event, oldest first, in batches (for exports)."""
+        offset = 0
+        while True:
+            async with self._database.session() as session:
+                rows = (
+                    (
+                        await session.execute(
+                            select(AuditEventModel)
+                            .order_by(AuditEventModel.timestamp, AuditEventModel.id)
+                            .offset(offset)
+                            .limit(batch_size)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            if not rows:
+                return
+            for row in rows:
+                yield self._to_dict(row)
+            offset += batch_size
 
     async def delete_older_than(self, days: int) -> int:
         """Retention cleanup: drop audit rows older than N days."""

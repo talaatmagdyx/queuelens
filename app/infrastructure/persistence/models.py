@@ -54,6 +54,7 @@ class AlertRuleModel(Base):
     enabled: Mapped[bool] = mapped_column(default=True)
     created_by: Mapped[str] = mapped_column(String(128), default="")
     last_fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    fired: Mapped[bool] = mapped_column(default=False)  # condition currently held
 
 
 class NotificationModel(Base):
@@ -79,3 +80,11 @@ class UserModel(Base):
     invited_by: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     active: Mapped[bool] = mapped_column(default=True)
+
+
+class BulkBatchModel(Base):
+    __tablename__ = "bulk_batches"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

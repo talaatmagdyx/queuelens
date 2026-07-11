@@ -65,10 +65,9 @@ class AlertEngine:
         self._settings_store = settings_store
         self._get_queue_service = get_queue_service
         self._interval = interval_seconds
-        # (rule_id, queue) -> first time the condition was observed true
+        # (rule_id, queue) -> first time the condition was observed true.
+        # Fired-state itself lives on the rule row so restarts don't re-notify.
         self._pending: dict[tuple[int, str], datetime] = {}
-        # rule ids currently in the fired state (for recovery notices)
-        self._fired: set[int] = set()
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -120,8 +119,7 @@ class AlertEngine:
             if offenders:
                 first = self._pending.setdefault((key_base, "*"), now)
                 held = (now - first).total_seconds()
-                if held >= rule["duration_seconds"] and key_base not in self._fired:
-                    self._fired.add(key_base)
+                if held >= rule["duration_seconds"] and not rule["fired"]:
                     await self._rules.mark_fired(key_base, now)
                     detail = ", ".join(f"{name}={value}" for name, value in offenders[:5])
                     notification = await self._fire(
@@ -136,8 +134,8 @@ class AlertEngine:
                     created.append(notification)
             else:
                 self._pending.pop((key_base, "*"), None)
-                if key_base in self._fired:
-                    self._fired.discard(key_base)
+                if rule["fired"]:
+                    await self._rules.set_fired(key_base, False)
                     notification = await self._fire(
                         rule,
                         level="Success",

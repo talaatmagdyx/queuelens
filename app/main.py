@@ -16,6 +16,7 @@ from app.infrastructure.persistence.audit_repository import AuditRepository
 from app.infrastructure.persistence.database import Database
 from app.infrastructure.persistence.store import (
     AlertRuleRepository,
+    BulkBatchRepository,
     NotificationRepository,
     SettingsRepository,
     UserRepository,
@@ -131,7 +132,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.alert_rules = AlertRuleRepository(database)
     app.state.notifications = NotificationRepository(database)
     app.state.users = UserRepository(database)
-    manager = EnvironmentManager(app.state, app.state.settings)
+    app.state.bulk_batches = BulkBatchRepository(database)
+    manager = EnvironmentManager(app.state, app.state.settings, app.state.bulk_batches)
     app.state.environment_manager = manager
     manager.attach_default()  # services exist pre-lifespan so tests can override them
     app.state.alert_engine = AlertEngine(

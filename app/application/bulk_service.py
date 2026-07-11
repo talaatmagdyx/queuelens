@@ -28,23 +28,88 @@ class BulkBatch:
     expires_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
+def _batch_to_payload(batch: BulkBatch) -> dict[str, object]:
+    return {
+        "id": batch.id,
+        "source_queue": batch.source_queue,
+        "action": batch.action,
+        "operator_action": batch.operator_action,
+        "target": (
+            {
+                "type": batch.target.type,
+                "queue": batch.target.queue,
+                "exchange": batch.target.exchange,
+                "routing_key": batch.target.routing_key,
+            }
+            if batch.target
+            else None
+        ),
+        "fingerprints": sorted(batch.fingerprints),
+        "message_count": batch.message_count,
+        "duplicate_fingerprints": batch.duplicate_fingerprints,
+        "sample_fingerprints": batch.sample_fingerprints,
+        "expires_at": batch.expires_at.isoformat(),
+    }
+
+
+def _batch_from_payload(raw: dict[str, object]) -> BulkBatch:
+    from typing import Any, cast
+
+    payload = cast(dict[str, Any], raw)
+    target = payload.get("target")
+    return BulkBatch(
+        id=str(payload["id"]),
+        source_queue=str(payload["source_queue"]),
+        action=str(payload["action"]),
+        operator_action=str(payload["operator_action"]),
+        target=ReplayTarget(**target) if isinstance(target, dict) else None,
+        fingerprints=frozenset(str(f) for f in payload.get("fingerprints", [])),
+        message_count=int(payload.get("message_count", 0)),
+        duplicate_fingerprints=int(payload.get("duplicate_fingerprints", 0)),
+        sample_fingerprints=[str(f) for f in payload.get("sample_fingerprints", [])],
+        expires_at=datetime.fromisoformat(str(payload["expires_at"])),
+    )
+
+
 class BulkActionService:
     """Two-phase bulk actions: a dry-run captures exactly which messages were
     seen (a fingerprint set behind a one-shot token); execute acts only on that
-    approved set. Batches live in process memory — a restart voids pending
-    dry-runs, which fail safe with "run the dry-run again"."""
+    approved set. Batches persist in the database when a batch store is
+    provided (surviving restarts); otherwise they live in process memory."""
 
     def __init__(
-        self, settings: Settings, browser: MessageBrowser, operator: MessageOperator
+        self,
+        settings: Settings,
+        browser: MessageBrowser,
+        operator: MessageOperator,
+        batch_store: object | None = None,  # BulkBatchRepository
     ) -> None:
         self._settings = settings
         self._browser = browser
         self._operator = operator
+        self._batch_store = batch_store
         self._batches: dict[str, BulkBatch] = {}
         self._lock = asyncio.Lock()  # one bulk execution at a time
 
-    def peek(self, batch_id: str) -> BulkBatch | None:
-        """Look up a dry-run batch without consuming it (for audit context)."""
+    async def _store_batch(self, batch: BulkBatch) -> None:
+        if self._batch_store is not None:
+            await self._batch_store.save(  # type: ignore[attr-defined]
+                batch.id, _batch_to_payload(batch), batch.expires_at
+            )
+        else:
+            self._batches[batch.id] = batch
+
+    async def _take_batch(self, batch_id: str) -> BulkBatch | None:
+        if self._batch_store is not None:
+            payload = await self._batch_store.take(batch_id)  # type: ignore[attr-defined]
+            return _batch_from_payload(payload) if payload else None
+        self._prune_expired()
+        return self._batches.pop(batch_id, None)
+
+    async def peek_batch(self, batch_id: str) -> BulkBatch | None:
+        if self._batch_store is not None:
+            payload = await self._batch_store.peek(batch_id)  # type: ignore[attr-defined]
+            return _batch_from_payload(payload) if payload else None
         return self._batches.get(batch_id)
 
     async def dry_run(
@@ -101,8 +166,7 @@ class BulkActionService:
             expires_at=datetime.now(UTC)
             + timedelta(seconds=self._settings.bulk_dry_run_ttl_seconds),
         )
-        self._prune_expired()
-        self._batches[batch.id] = batch
+        await self._store_batch(batch)
         return {
             "batch_id": batch.id,
             "source_queue": source_queue,
@@ -122,8 +186,7 @@ class BulkActionService:
         self, batch_id: str, *, replay_headers: dict[str, object] | None = None
     ) -> tuple[BulkBatch, dict[str, object]]:
         async with self._lock:
-            self._prune_expired()
-            batch = self._batches.pop(batch_id, None)  # one-shot token
+            batch = await self._take_batch(batch_id)  # one-shot token
             if batch is None:
                 raise UnknownBulkBatch(
                     "Unknown or expired dry-run batch; run the dry-run again"

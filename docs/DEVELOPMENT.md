@@ -92,3 +92,14 @@ git push --tags
 
 Version lives in `pyproject.toml` (and `create_app`'s `version=`) — keep them in sync with
 the tag.
+
+
+## Front-end pipeline
+
+In development the SPA compiles JSX in the browser (Babel standalone) so you
+can edit `.jsx` files and refresh. The production image precompiles everything:
+`scripts/build_frontend.mjs` (node stage) compiles the ui-kit and the inline
+shell and removes Babel; `scripts/build_ds_bundle.py` emits
+`_ds_bundle.js`, which `ds-loader.js` prefers over evaluating raw component
+sources. Remember to bump the `?v=` cache parameter in `index.html` whenever
+you touch front-end files.
