@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.8.0 — 2026-07-11
 
 ### Added
 - **Precompiled front end in the container image**: JSX is compiled at image
@@ -16,6 +16,9 @@
 - **Browser e2e smoke suite** (Playwright) running in CI against a real
   broker: dashboard, all screens, wizard confirmation gating.
 - GHCR images now also carry `vX.Y.Z`-style tags alongside `X.Y.Z`.
+- Rewritten README with a fresh screenshot tour of the console.
+- App version is now kept in sync between `pyproject.toml` and the API
+  (both previously reported 0.5.0).
 
 ## v0.7.0 — 2026-07-11
 

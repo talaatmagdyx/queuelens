@@ -1,83 +1,120 @@
-# QueueLens
+<div align="center">
+
+# 🔍 QueueLens
+
+**See inside your dead-letter queues. Recover messages without fear.**
 
 [![CI](https://github.com/talaatmagdyx/queuelens/actions/workflows/ci.yml/badge.svg)](https://github.com/talaatmagdyx/queuelens/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/talaatmagdyx/queuelens)](https://github.com/talaatmagdyx/queuelens/releases)
+[![Docker](https://img.shields.io/badge/ghcr.io-queuelens-blue?logo=docker)](https://github.com/talaatmagdyx/queuelens/pkgs/container/queuelens)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Async RabbitMQ DLQ inspector with safe replay.
+*An async RabbitMQ DLQ inspector with safe replay — browse, understand, replay, park,
+and delete dead-lettered messages without ever losing one.*
 
-## Why QueueLens?
+![QueueLens Dashboard](docs/screenshots/dashboard.png)
 
-RabbitMQ dead-letter queues are easy to create but painful to operate. During an incident,
-engineers need to inspect failed messages, understand their `x-death` history, and then
-replay, park, or delete them — usually with risky one-off scripts that can lose data.
+</div>
 
-QueueLens gives backend teams a safe UI and API for exactly that flow:
+---
+
+## The 3 a.m. problem
+
+A deploy goes out. An hour later, `payments.retry.dlq` has 220 messages in it and
+someone is paging you. Now you need answers, fast:
+
+- **What died?** Which payloads, from which exchange, rejected how many times, and why?
+- **Can I put it back?** Replay to the original queue — but *only* the ones that are safe.
+- **What about the rest?** Park the poison messages somewhere they can't hurt anyone.
+- **Who touched what?** When the incident review comes, you need a paper trail.
+
+The RabbitMQ Management UI shows you queue *counts*. Your options beyond that are
+`rabbitmqadmin get` (which **consumes the message while you look at it**) or a one-off
+Python script written at 3 a.m. by someone whose hands are shaking.
+
+QueueLens is the tool you wish you'd installed before the incident:
 
 ```text
-inspect DLQ safely -> understand the message -> replay / park / delete safely -> audit everything
+   inspect safely  →  understand the failure  →  act deliberately  →  audit everything
+  (never consumes)    (parsed x-death, journey)   (replay / park /     (attempt + outcome,
+                                                   delete, dry-run      full export)
+                                                   first, confirmed)
 ```
 
-QueueLens is a **focused RabbitMQ DLQ recovery tool, not a replacement for the RabbitMQ
-Management UI** — the Management UI shows queues; QueueLens helps engineers safely recover
-failed messages.
+## Why it's safe — the part that matters
+
+Every design decision follows one rule: **a failed action must never lose a message.**
+
+| Guarantee | How it's enforced |
+|---|---|
+| Browsing never consumes | Non-destructive preview with requeue — read 220 messages, all 220 stay put |
+| Replay can't drop messages | **Publish-before-ack**: the original is removed only *after* the broker confirms the publish. Unroutable publishes bounce back as errors, not silence |
+| Bulk actions can't surprise you | A **mandatory dry-run** counts exactly what will be touched; execute runs on that exact set via a one-shot confirmation token |
+| Deletes are deliberate | Explicit type-to-confirm, Admin role only |
+| Everything is on the record | An *attempt* event is written before every action and an *outcome* event after — if the attempt can't be persisted, the action is refused |
+| Ambiguity fails closed | Message fingerprints that match zero or multiple messages abort the action instead of guessing |
+
+The full safety model — each guarantee, its enforcement point, and the failure matrix —
+is documented in [docs/SAFETY.md](docs/SAFETY.md).
 
 ## Features
 
-- **DLQ auto-detection** — by name convention (`.dlq`, `_dlq`, `dead`) or by being the queue
-  another queue dead-letters into
-- **Non-destructive browsing** — preview messages without consuming them
-- **Message inspection** — payload (JSON / text / base64), headers, properties, routing data,
-  and parsed `x-death` history
-- **Copy & move replay** — to a queue or exchange + routing key, per action or preconfigured,
-  with `x-queuelens-*` provenance headers stamped on every replayed message
-- **Park & delete** — park moves a message to `{queue}.parking` (created on demand);
-  both require explicit confirmation
-- **Bulk operations** — replay/park/delete many messages at once, scoped by checkbox
-  selection or a payload filter, with a mandatory dry-run first, hard caps, per-message
-  results, and duplicates skipped rather than guessed at
-- **Sensitive-field masking** — values under configurable keys (`password`, `token`, `email`, …)
-  render as `***`; display-only, replay payloads are never modified
-- **Audit log** — every action writes an attempt event before execution and an outcome event after
-- **Preview honesty** — the queue view says "showing 100 of 4,812" instead of pretending you saw everything
-- **Honest failure modes** — friendly 404 for unknown queues and ambiguous messages, 400 for
-  unroutable targets, 503 while the broker is down, and a `/ready` probe that reports real
-  broker connectivity
+### 🔬 Inspect
+- **DLQ auto-detection** — by naming convention (`.dlq`, `_dlq`, `dead`) or by being the
+  target another queue dead-letters into
+- **Message X-ray** — payload (JSON / text / base64), headers, properties, routing data,
+  and the parsed **`x-death` history** as a readable failure journey
+- **Risk-sorted dashboard** — the queues most likely to be your problem float to the top
+- **Topology view** — which queues dead-letter into which, as a graph, not a hunch
+- **Sensitive-field masking** — `password`, `token`, `email`, … render as `***`
+  (display-only; replayed payloads are never modified)
 
-## Safety guarantees
+### ⚡ Act
+- **Replay (copy or move)** — to a queue or an exchange + routing key, with
+  `x-queuelens-*` provenance headers stamped on every replayed message
+- **Park** — quarantine a message to `{queue}.parking` (created on demand)
+- **Bulk operations** — replay/park/delete many at once, scoped by selection or payload
+  filter, dry-run first, hard caps, per-message results
+- **Test message composer** — publish a crafted message to reproduce a failure
 
-- Browsing uses non-destructive preview with requeue.
-- Copy replay keeps the source DLQ message.
-- Move replay publishes first and removes the original only after publish succeeds.
-- Park publishes first and removes the original only after publish succeeds.
-- Delete requires explicit confirmation.
-- Queue replay targets are verified to exist before publishing, and publishes are mandatory
-  with returned-message errors enabled — a failed or unroutable publish never removes the
-  original DLQ message.
-- Every action writes audit attempt and outcome events; if the attempt cannot be persisted,
-  the action is rejected.
-- Detail lookup and mutation use a bounded re-fetch window and fail safely when a message
-  fingerprint matches zero or multiple messages.
+### 🚨 Operate
+- **Alert rules** — pattern-match queues (`payments.*`), threshold + duration, with
+  fire *and* recovery notifications
+- **Delivery channels** — email (SMTP/TLS), Slack, PagerDuty (Events API v2), and generic
+  webhooks — all with 3-attempt backoff retry and per-channel outcome tracking
+- **Quiet hours** — mute Info/Warning notifications overnight; real alerts always deliver
+- **Multiple environments** — development / staging / production brokers with **per-environment
+  credentials**, switchable from the UI
+- **Prometheus metrics** at `/metrics` + ready-made [alert rules](deploy/prometheus/alerts.yml)
+
+### 🛡️ Govern
+- **Role-based access** — Viewer (read-only), Operator (recover), Admin (delete, config,
+  users) — enforced server-side on every endpoint
+- **Audit log** — filterable, with per-action durations, and **full-history streaming
+  export** (CSV / JSON)
+- **Write-only secrets** — credentials go in through the API but never come back out;
+  optional Fernet **encryption at rest**
+- **Login rate limiting** — failed Basic-auth attempts are throttled per IP
 
 ## Quick start
 
-Local demo with a bundled broker:
+One command, bundled broker, demo DLQs included:
 
 ```bash
+git clone https://github.com/talaatmagdyx/queuelens && cd queuelens
 docker compose up --build
 ```
 
-Open [http://localhost:8000](http://localhost:8000). The default local credentials are
-`admin` / `change-me`; change them before using a shared environment.
+Open **[http://localhost:8000/app](http://localhost:8000/app)** — sign in with
+`admin` / `change-me` (change it before sharing the URL with anyone).
+The bundled RabbitMQ Management UI is at [http://localhost:15672](http://localhost:15672)
+(`queuelens` / `queuelens`).
 
-**New console preview:** [http://localhost:8000/app](http://localhost:8000/app) serves the
-design-system React console (imported from the QueueLens Claude Design kit) wired to the
-live API — fully self-hosted, no CDN.
-RabbitMQ Management UI is available at [http://localhost:15672](http://localhost:15672)
-with `queuelens` / `queuelens`.
+## Point it at your cluster
 
-## Connect to an existing RabbitMQ cluster
-
-Prebuilt images are published to GHCR on every release:
+Prebuilt multi-stage images (non-root, precompiled UI, health-checked) are published to
+GHCR on every release:
 
 ```bash
 docker run --rm -p 8000:8000 \
@@ -87,127 +124,134 @@ docker run --rm -p 8000:8000 \
   -e QUEUELENS_RABBITMQ_MANAGEMENT_PASSWORD='…' \
   -e QUEUELENS_ADMIN_USERNAME='admin' \
   -e QUEUELENS_ADMIN_PASSWORD='change-me-now' \
+  -e QUEUELENS_SECRET_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" \
   -v queuelens-data:/app/data \
   ghcr.io/talaatmagdyx/queuelens:latest
 ```
 
-See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for every variable and the required
-broker permissions.
+Every `QUEUELENS_*` variable — including multi-environment JSON, alert channels, and
+least-privilege broker permissions — is documented with a full worked example in
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## Production readiness checklist
+## A tour
 
-Before pointing QueueLens at a real cluster:
+<table>
+<tr>
+<td width="50%">
 
-- [ ] Change the default `QUEUELENS_ADMIN_PASSWORD`.
-- [ ] Run behind a VPN, private network, or authenticating reverse proxy — never public.
-- [ ] Terminate TLS in front of the app; use `amqps://` / HTTPS Management URLs to the broker.
-- [ ] Use a least-privilege RabbitMQ user (read on DLQs, write on replay targets,
-      configure only for `*.parking`; Management user needs only the `monitoring` tag).
-- [ ] Review `QUEUELENS_MASKED_FIELDS` for your payloads (masking is display-only).
-- [ ] Set preview / bulk limits (`QUEUELENS_MAX_PREVIEW_MESSAGES`, `QUEUELENS_MAX_BULK_SIZE`).
-- [ ] Persist `/app/data` on a volume and back up the audit database if history matters.
-- [ ] Run a single replica — the SQLite audit store and in-memory bulk tokens are
-      single-process by design (PostgreSQL backend is on the roadmap).
-- [ ] Scrape `/metrics` and load [deploy/prometheus/alerts.yml](deploy/prometheus/alerts.yml).
+**Message X-ray** — payload, headers, and the
+parsed `x-death` journey, with replay / park /
+delete one deliberate click away.
 
-See [SECURITY.md](SECURITY.md) for the full security model and reporting policy.
+![Message detail](docs/screenshots/message-detail.png)
 
-## QueueLens vs RabbitMQ Management UI
+</td>
+<td width="50%">
 
-| Capability | RabbitMQ Management UI | QueueLens |
-|---|---|---|
-| Queue inspection | ✅ | ✅ |
-| DLQ-focused workflow | limited | ✅ |
-| Parsed `x-death` history | raw headers | ✅ |
-| Safe replay (publish-before-ack) | manual + risky | ✅ |
+**Replay wizard** — pick the action, pick the
+target, see exactly what will happen. Execution
+stays locked until you confirm.
+
+![Replay wizard](docs/screenshots/replay-wizard.png)
+
+</td>
+</tr>
+<tr>
+<td>
+
+**Alerts** — rules that watch queue patterns and
+deliver to email, Slack, PagerDuty, or webhooks —
+with retries and recovery notifications.
+
+![Alerts](docs/screenshots/alerts.png)
+
+</td>
+<td>
+
+**Audit log** — every attempt and outcome, with
+durations, filters, and full-history CSV/JSON
+export for the incident review.
+
+![Audit log](docs/screenshots/audit.png)
+
+</td>
+</tr>
+<tr>
+<td>
+
+**Topology** — the dead-letter graph of your
+broker: who routes failures where.
+
+![Topology](docs/screenshots/topology.png)
+
+</td>
+<td>
+
+**Configuration** — brokers, environments with
+per-env credentials, delivery channels, limits —
+all managed from the UI, secrets write-only.
+
+![Configuration](docs/screenshots/configuration.png)
+
+</td>
+</tr>
+<tr>
+<td>
+
+**Dark mode** — one toggle, persisted per browser.
+
+![Dashboard dark](docs/screenshots/dashboard-dark.png)
+
+</td>
+<td>
+
+**Notifications** — alert fires, recoveries, and
+environment switches, delivered in-app too.
+
+![Notifications](docs/screenshots/notifications.png)
+
+</td>
+</tr>
+</table>
+
+## QueueLens vs. RabbitMQ Management UI
+
+QueueLens is a **focused DLQ recovery tool**, not a Management UI replacement — the
+Management UI manages the broker; QueueLens recovers your messages.
+
+| Capability | Management UI | QueueLens |
+|---|:---:|:---:|
+| Queue counts & broker admin | ✅ | read-only |
+| Browse messages without consuming them | ⚠️ requeue quirks | ✅ |
+| Parsed `x-death` failure history | raw headers | ✅ |
+| Safe replay (publish-before-ack) | manual & risky | ✅ |
 | Bulk actions with mandatory dry-run | ❌ | ✅ |
-| Audit trail (attempt + outcome) | ❌ | ✅ |
-| Display masking of sensitive fields | ❌ | ✅ |
-| Prometheus metrics for DLQ health | broker-level only | app + DLQ level |
+| Attempt + outcome audit trail | ❌ | ✅ |
+| Alert rules → email / Slack / PagerDuty | ❌ | ✅ |
+| Role-based access (Viewer / Operator / Admin) | broker perms only | ✅ |
+| Sensitive-field display masking | ❌ | ✅ |
+
+## Before production
+
+The short version (the full checklist lives in [docs/OPERATIONS.md](docs/OPERATIONS.md)):
+
+- [ ] Change `QUEUELENS_ADMIN_PASSWORD` and set `QUEUELENS_SECRET_KEY` (secrets-at-rest encryption)
+- [ ] Run behind a VPN or authenticating reverse proxy with TLS — never expose it publicly
+- [ ] Use a least-privilege broker user (read DLQs, write replay targets, configure only `*.parking`)
+- [ ] Persist `/app/data` on a volume and back it up if audit history matters
+- [ ] **Run a single replica** — environment switching and SQLite are single-process by design
+- [ ] Scrape `/metrics` and load the bundled Prometheus alert rules
 
 ## Documentation
 
 | Doc | What's inside |
 |---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layering, components, request flows, design decisions (fingerprints, publish-before-ack, health tracking) |
-| [docs/API.md](docs/API.md) | Full REST API reference: endpoints, request/response shapes, error matrix |
-| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every `QUEUELENS_*` environment variable, replay-target format, broker permissions |
-| [docs/SAFETY.md](docs/SAFETY.md) | The safety model: each guarantee, how it's enforced, the failure matrix, known limits |
-| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Deployment, security posture, health probes, audit store, troubleshooting |
-| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Local setup, test strategy, CI, code conventions, release checklist |
-
-Interactive OpenAPI docs are served by the app itself at `/docs`.
-
-## Screenshots
-
-**DLQ Recovery Dashboard** — risk-sorted queues with type and severity badges, live broker
-status, recent actions, and failure counts:
-
-![Dashboard](docs/screenshots/dashboard.png)
-
-**Dark mode** — one toggle, persisted per browser:
-
-![Dashboard (dark)](docs/screenshots/dashboard-dark.png)
-
-**Queues** — every queue on the broker with search, type/status filters, and tabs:
-
-![Queues](docs/screenshots/queue.png)
-
-**Message detail** — payload / headers / properties / parsed `x-death` tabs with syntax
-coloring, a summary panel, and safe actions:
-
-![Message detail](docs/screenshots/message-detail.png)
-
-**Replay wizard** — action cards, target selection, provenance-header toggle, and type-to-confirm safety:
-
-![Replay wizard](docs/screenshots/replay-wizard.png)
-
-**Bulk actions** — dry-run first, then execute on exactly what the dry run counted:
-
-![Bulk actions](docs/screenshots/bulk-actions.png)
-
-**Notifications** — live alerts derived from queue state and audit outcomes:
-
-![Notifications](docs/screenshots/notifications.png)
-
-**Audit log** — stats, filters, CSV export, per-action durations, and a details panel:
-
-![Audit log](docs/screenshots/audit.png)
-
-**Configuration** — read-only view of the running config with a live connection test:
-
-![Configuration](docs/screenshots/configuration.png)
-
-## Configuration
-
-All external I/O is asynchronous (`aio-pika`, `httpx.AsyncClient`, SQLAlchemy asyncio with
-`aiosqlite`). Everything is configured through `QUEUELENS_*` environment variables — broker
-URLs, credentials, preview/scan limits, and preconfigured replay targets. See
-[docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference and
-[`config/replay-targets.example.json`](config/replay-targets.example.json) for the replay
-target format. A replay target can also be entered per action in the message detail UI.
-
-> **Sensitive data warning:** masking is key-based and display-only — secrets under
-> unlisted keys are shown, and replayed messages carry the original payload. Do not expose
-> QueueLens publicly; run it inside a trusted private network or behind secure internal
-> access controls.
-
-## Known limitations (Phase 1)
-
-- Bulk operations act on the scan window (up to `QUEUELENS_MAX_BULK_SIZE` from the head of
-  the queue), not the whole queue
-- Preview capped at `QUEUELENS_MAX_PREVIEW_MESSAGES` messages (the UI says so when it happens)
-- HTTP Basic Auth only
-- SQLite audit store (PostgreSQL deferred for teams needing stronger concurrency and retention)
-- Masking is key-based and display-only — it does not detect secrets under unlisted keys
-- Message fingerprints are best-effort identifiers for the current preview batch, bounded
-  re-fetch matching, and audit correlation; they are not globally stable RabbitMQ message IDs.
-  Mutating actions fail safely unless exactly one matching message is found.
-
-## Roadmap
-
-1. Full pagination beyond the preview window
-2. PostgreSQL audit store, alerts, metrics, RBAC
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layering, components, request flows, the design decisions (fingerprints, publish-before-ack) |
+| [docs/API.md](docs/API.md) | Full REST API reference — interactive OpenAPI docs also served at `/docs` |
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every environment variable, precedence rules, a complete worked `.env` example |
+| [docs/SAFETY.md](docs/SAFETY.md) | The safety model: every guarantee, its enforcement, the failure matrix |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Deployment model & constraints, security posture, backups, troubleshooting |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Local setup, test strategy, front-end pipeline, release checklist |
 
 ## Development
 
@@ -216,14 +260,22 @@ python -m pip install '.[dev]'
 ruff check app tests && mypy app && pytest -q
 ```
 
-`tests/test_integration_rabbitmq.py` runs the browse → park → replay → delete flow against a
-real broker (`docker compose up -d rabbitmq`) and is skipped automatically when none is
-reachable. CI runs lint, strict type-checks, the full suite against a real RabbitMQ service
-container, and a Docker image build on every push.
+Fully async stack: FastAPI + aio-pika + httpx + SQLAlchemy asyncio. CI runs lint,
+`mypy --strict`, the unit suite with coverage, an integration flow against a real
+RabbitMQ container, a Playwright browser e2e suite, and the Docker build — on every push.
+See [CONTRIBUTING.md](CONTRIBUTING.md) to get started; good first issues are labeled.
 
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the test strategy, code conventions, and
-the release checklist.
+## Honest limitations
+
+- Single replica by design (SQLite + instance-global environment switching) —
+  PostgreSQL and per-request env scoping are the path to multi-replica, on the roadmap
+- Bulk operations act on the scan window (up to `QUEUELENS_MAX_BULK_SIZE` from the head
+  of the queue), not the whole queue
+- Masking is key-based and display-only — it will not detect secrets under unlisted keys
+- Message fingerprints are best-effort identifiers, not global message IDs; ambiguous
+  matches fail safely
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Built for the on-call engineer who deserves better than
+`rabbitmqadmin get` at 3 a.m.
