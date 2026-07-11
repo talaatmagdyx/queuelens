@@ -2,6 +2,39 @@
 
 All settings come from environment variables with the `QUEUELENS_` prefix
 (pydantic-settings, case-insensitive). Defaults target the bundled Docker Compose setup.
+Copy [`.env.example`](../.env.example) to `.env` for a documented starting point.
+
+## Sources & precedence — who wins on conflict
+
+QueueLens reads configuration from three places. When the same knob appears in more
+than one, this is the order (highest wins):
+
+1. **Real environment variables** — compose `environment:`, Kubernetes env, shell exports.
+2. **`.env` file** in the working directory (loaded by pydantic-settings; gitignored).
+3. **Built-in defaults** (the tables below).
+
+Separately, the **settings store** (a table in `QUEUELENS_DATABASE_URL`) holds everything
+managed at runtime from the UI. It is not a fourth layer of the same knobs — it owns
+*different* knobs — but a few areas touch both worlds. The exact rules:
+
+| Area | Env vars / `.env` provide | UI / settings store provides | On conflict |
+|---|---|---|---|
+| **Environments** | Full profiles via `QUEUELENS_ENVIRONMENTS_JSON` (own broker + credentials) | Runtime-added profiles and extra vhosts (`POST /api/environments`) | Merged by name at startup: a stored entry with the same name **adds vhosts and overrides broker fields** on top of the env-var profile. The default environment itself always comes from env vars |
+| **Preview / bulk limits** | `QUEUELENS_MAX_PREVIEW_MESSAGES`, `QUEUELENS_MAX_BULK_SIZE`, … as defaults | Configuration → Limits saves overrides | **Stored overrides win** at request time; "Reset to Defaults" returns to the env-var values |
+| **Email channel** | `QUEUELENS_SMTP_HOST/_PORT` **seed** the channel on first boot only | Alerts → Delivery Channels edits (incl. SMTP auth + TLS) | After first boot the **stored channel config wins**; the env vars are never re-applied unless the channel is missing entirely |
+| **Users** | `QUEUELENS_ADMIN_*` + `QUEUELENS_USERS_JSON` are seeded into the users table at startup (idempotent — existing rows are not overwritten) and always authenticate | UI invites add more accounts | No conflict possible: env accounts always work; DB accounts add to them |
+| **Custom headers, retention, alert rules, UI toggles** | — (no env vars) | Settings store only | n/a |
+
+Practical consequences:
+
+- Changing `QUEUELENS_SMTP_HOST` after first boot does nothing visible — edit the
+  channel in Alerts → Delivery Channels instead (or delete the `channels` row).
+- Changing an env-var environment's credentials requires a restart; runtime-added
+  environments update immediately via the API.
+- Wiping the database (`data/queuelens.db`) resets every UI-managed setting to the
+  env-var/seeded state on next boot — audit history included, so treat it as data.
+- Secrets stored via the UI (SMTP password, environment credentials) are write-only:
+  no API response ever includes them.
 
 ## Authentication
 
