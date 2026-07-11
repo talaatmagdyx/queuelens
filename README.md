@@ -13,6 +13,11 @@
 *An async RabbitMQ DLQ inspector with safe replay — browse, understand, replay, park,
 and delete dead-lettered messages without ever losing one.*
 
+**[🌐 Website](https://talaatmagdyx.github.io/queuelens/)** ·
+**[🚀 Quick start](#quick-start)** ·
+**[📖 Docs](docs/)** ·
+**[📦 Releases](https://github.com/talaatmagdyx/queuelens/releases)**
+
 ![QueueLens Dashboard](docs/screenshots/dashboard.png)
 
 </div>

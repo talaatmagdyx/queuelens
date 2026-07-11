@@ -13,3 +13,4 @@ data/*.db
 .env
 app/web/static/ds/_ds_bundle.js
 app/web/static/ds/ui_kits/queuelens/*.compiled.js
+site/screenshots
