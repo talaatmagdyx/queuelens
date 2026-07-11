@@ -103,6 +103,8 @@ window.QL.screens = window.QL.screens || {};
       headersText: Object.keys(m.headers || {}).length ? JSON.stringify(m.headers, null, 2) : '(no headers)',
       propsText: Object.keys(m.properties || {}).length
         ? JSON.stringify(m.properties, null, 2) : '(no properties)',
+      decodedFrom: m.decoded_from || null,
+      payloadEncoded: m.payload_encoded || null,
       xdeathList: mapXDeath(m.x_death),
       xdeathRaw: m.x_death || [],
     };

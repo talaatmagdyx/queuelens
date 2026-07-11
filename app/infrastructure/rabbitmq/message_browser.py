@@ -1,5 +1,6 @@
 import base64
 import json
+import zlib
 from typing import Any, cast
 
 from aio_pika.abc import AbstractIncomingMessage
@@ -39,7 +40,7 @@ class MessageBrowser:
         headers = dict(message.headers or {})
         timestamp = message.timestamp
         body = bytes(message.body)
-        payload, payload_format = _decode_payload(body)
+        payload, payload_format, decoded_from = _decode_payload(body, message.content_encoding)
         fingerprint = message_fingerprint(
             queue=queue_name,
             body=body,
@@ -80,14 +81,48 @@ class MessageBrowser:
             properties=properties,
             redelivered=bool(message.redelivered),
             x_death=parse_x_death(headers),
+            decoded_from=decoded_from,
+            payload_encoded=base64.b64encode(body).decode("ascii") if decoded_from else None,
         )
 
 
-def _decode_payload(body: bytes) -> tuple[object, str]:
+# Cap decompression output so a hostile message can't balloon memory (zip bomb).
+MAX_DECODED_BYTES = 4 * 1024 * 1024
+
+
+def _decompress(body: bytes, encoding: str) -> bytes | None:
+    """gzip / zlib / raw-deflate, size-capped; None when it doesn't inflate cleanly."""
+    # 32+MAX_WBITS auto-detects gzip and zlib headers; "deflate" in the wild is
+    # sometimes raw deflate (no header), so fall back to -MAX_WBITS for it.
+    tries = [32 + zlib.MAX_WBITS] + ([-zlib.MAX_WBITS] if encoding == "deflate" else [])
+    for wbits in tries:
+        try:
+            inflater = zlib.decompressobj(wbits)
+            out = inflater.decompress(body, MAX_DECODED_BYTES)
+            if inflater.unconsumed_tail:  # would exceed the cap — leave it encoded
+                return None
+            return out + inflater.flush()
+        except zlib.error:
+            continue
+    return None
+
+
+def _decode_payload(body: bytes, content_encoding: str | None) -> tuple[object, str, str | None]:
+    """Render the payload, transparently inflating compressed bodies.
+
+    Returns (payload, format, decoded_from) — decoded_from names the compression
+    that was undone ("gzip"/"deflate") or is None when the body was used as-is."""
+    encoding = (content_encoding or "").strip().lower()
+    decoded_from = None
+    if encoding in ("gzip", "x-gzip", "deflate"):
+        inflated = _decompress(body, encoding)
+        if inflated is not None:
+            body = inflated
+            decoded_from = "gzip" if "gzip" in encoding else "deflate"
     try:
-        return json.loads(body.decode("utf-8")), "json"
+        return json.loads(body.decode("utf-8")), "json", decoded_from
     except (UnicodeDecodeError, json.JSONDecodeError):
         try:
-            return body.decode("utf-8"), "text"
+            return body.decode("utf-8"), "text", decoded_from
         except UnicodeDecodeError:
-            return base64.b64encode(body).decode("ascii"), "base64"
+            return base64.b64encode(body).decode("ascii"), "base64", decoded_from

@@ -57,6 +57,10 @@ class MessageRecord:
     properties: dict[str, Any]
     redelivered: bool
     x_death: list[dict[str, Any]] = field(default_factory=list)
+    # Set when the body was transparently decompressed for display:
+    # decoded_from names the compression, payload_encoded keeps the original as base64.
+    decoded_from: str | None = None
+    payload_encoded: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

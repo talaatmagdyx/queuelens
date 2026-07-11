@@ -212,3 +212,64 @@ async def test_message_route_returns_message_detail() -> None:
 
     assert response.status_code == 200
     assert response.json()["message"] == message_to_dict(message)
+
+
+class TestCompressedPayloads:
+    """content_encoding-aware decode: gzip/deflate bodies inflate for display,
+    the original bytes stay available as base64."""
+
+    # A production-shaped body: gzip-compressed JSON (like content_encoding: gzip
+    # messages from lumedia.events.deadletters).
+    def test_gzip_json_decodes_with_encoded_original(self) -> None:
+        import base64
+        import gzip
+        import json
+
+        from app.infrastructure.rabbitmq.message_browser import _decode_payload
+
+        original = {"name": "post_inserted", "post_id": 42, "priority": 1}
+        body = gzip.compress(json.dumps(original).encode())
+
+        payload, fmt, decoded_from = _decode_payload(body, "gzip")
+        assert payload == original
+        assert fmt == "json"
+        assert decoded_from == "gzip"
+        # sanity: the same body without the encoding hint stays base64
+        raw_payload, raw_fmt, raw_from = _decode_payload(body, None)
+        assert raw_fmt == "base64"
+        assert raw_from is None
+        assert base64.b64decode(raw_payload) == body
+
+    def test_deflate_and_raw_deflate_decode(self) -> None:
+        import zlib
+
+        from app.infrastructure.rabbitmq.message_browser import _decode_payload
+
+        text = "plain text body"
+        payload, fmt, decoded_from = _decode_payload(zlib.compress(text.encode()), "deflate")
+        assert (payload, fmt, decoded_from) == (text, "text", "deflate")
+
+        raw = zlib.compressobj(wbits=-15)
+        body = raw.compress(text.encode()) + raw.flush()
+        payload, fmt, decoded_from = _decode_payload(body, "deflate")
+        assert (payload, fmt, decoded_from) == (text, "text", "deflate")
+
+    def test_corrupt_gzip_falls_back_to_raw(self) -> None:
+        from app.infrastructure.rabbitmq.message_browser import _decode_payload
+
+        payload, fmt, decoded_from = _decode_payload(b"\x1f\x8bnot really gzip", "gzip")
+        assert decoded_from is None
+        assert fmt == "base64"
+
+    def test_zip_bomb_is_left_encoded(self) -> None:
+        import gzip
+
+        from app.infrastructure.rabbitmq.message_browser import (
+            MAX_DECODED_BYTES,
+            _decode_payload,
+        )
+
+        bomb = gzip.compress(b"0" * (MAX_DECODED_BYTES + 1024))
+        payload, fmt, decoded_from = _decode_payload(bomb, "gzip")
+        assert decoded_from is None  # refused: would exceed the cap
+        assert fmt == "base64"

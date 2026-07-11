@@ -49,6 +49,8 @@ def message_to_dict(
         "payload_truncated": payload_truncated,
         "payload_format": message.payload_format,
         "payload_size": message.payload_size,
+        "decoded_from": message.decoded_from,
+        "payload_encoded": message.payload_encoded,
         "content_type": message.content_type,
         "message_id": message.message_id,
         "correlation_id": message.correlation_id,

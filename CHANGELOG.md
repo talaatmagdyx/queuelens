@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- **Compressed-payload decode**: messages with `content_encoding: gzip` or
+  `deflate` now display their inflated payload (JSON pretty-printed), with a
+  decoded/encoded toggle showing the original bytes as base64. Decompression
+  is capped at 4 MiB (zip-bomb guard) and is display-only — replay publishes
+  the original compressed body unchanged.
 - **Metrics screen in the console**: live `queuelens_*` values (broker status,
   DLQ backlog per queue, action counters, average broker-operation latency),
   a ready-to-paste Prometheus scrape config, and the bundled alert rules with

@@ -70,6 +70,9 @@ is documented in [docs/SAFETY.md](docs/SAFETY.md).
   target another queue dead-letters into
 - **Message X-ray** — payload (JSON / text / base64), headers, properties, routing data,
   and the parsed **`x-death` history** as a readable failure journey
+- **Compressed payloads decoded** — `content_encoding: gzip`/`deflate` bodies are
+  transparently inflated for display (zip-bomb capped), with a toggle back to the raw
+  base64 bytes; replay always publishes the original compressed body
 - **Risk-sorted dashboard** — the queues most likely to be your problem float to the top
 - **Topology view** — which queues dead-letter into which, as a graph, not a hunch
 - **Sensitive-field masking** — `password`, `token`, `email`, … render as `***`

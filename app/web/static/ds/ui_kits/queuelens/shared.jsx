@@ -61,6 +61,34 @@
 
   const PAYLOAD_TONE = { JSON: 'success', TEXT: 'neutral', BASE64: 'data' };
 
+  // Payload with a Decoded/Encoded toggle when the broker body was compressed
+  // (content_encoding gzip/deflate): decoded shows the inflated text, encoded
+  // shows the original bytes as base64 — exactly what a client would receive.
+  function PayloadView({ text, msg, maxHeight = 300 }) {
+    const [view, setView] = React.useState('decoded');
+    if (!msg || !msg.decodedFrom) return <CodeBlock code={text || '{}'} copy maxHeight={maxHeight} />;
+    const chip = (id, label) => (
+      <button key={id} onClick={() => setView(id)} style={{
+        fontFamily: 'var(--font-mono)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
+        padding: '4px 12px', borderRadius: 99, border: '1px solid',
+        borderColor: view === id ? 'var(--blue-600)' : 'var(--border-default)',
+        background: view === id ? 'var(--blue-50)' : 'var(--surface-card)',
+        color: view === id ? 'var(--blue-700)' : 'var(--slate-500)',
+      }}>{label}</button>
+    );
+    return (
+      <div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center' }}>
+          {chip('decoded', 'decoded · ' + msg.decodedFrom + ' → ' + (msg.type || 'json').toLowerCase())}
+          {chip('encoded', 'encoded · base64')}
+        </div>
+        {view === 'decoded'
+          ? <CodeBlock code={text || '{}'} copy maxHeight={maxHeight} />
+          : <CodeBlock code={msg.payloadEncoded || '(original bytes unavailable)'} copy maxHeight={maxHeight} />}
+      </div>
+    );
+  }
+
   // Right-hand Message Summary panel (Replay / Park wizards)
   function MessageSummaryPanel({ msg, payload, xdeath }) {
     const [tab, setTab] = React.useState('payload');
@@ -79,7 +107,7 @@
             { id: 'payload', label: 'Payload' }, { id: 'headers', label: 'Headers' },
             { id: 'props', label: 'Properties' }, { id: 'xdeath', label: 'x-death' }]} style={{ gap: 18 }} />
           <div style={{ marginTop: 12 }}>
-            {tab === 'payload' && <CodeBlock code={payload} copy maxHeight={280} />}
+            {tab === 'payload' && <PayloadView text={payload} msg={msg} maxHeight={280} />}
             {tab === 'headers' && <CodeBlock code={msg.headersText || '(no headers)'} maxHeight={280} />}
             {tab === 'props' && <CodeBlock code={msg.propsText || '(no properties)'} maxHeight={280} />}
             {tab === 'xdeath' && <XDeathTable rows={xdeath} />}
@@ -125,5 +153,5 @@
   }
 
   window.QL = window.QL || {};
-  Object.assign(window.QL, { PageHeader, Card, ArrowLink, Breadcrumbs, MessageSummaryPanel, XDeathTable, EmptyState, PAYLOAD_TONE });
+  Object.assign(window.QL, { PageHeader, Card, ArrowLink, Breadcrumbs, MessageSummaryPanel, XDeathTable, EmptyState, PayloadView, PAYLOAD_TONE });
 })();

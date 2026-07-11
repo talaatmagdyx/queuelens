@@ -243,7 +243,7 @@
                 { id: 'payload', label: 'Payload' }, { id: 'headers', label: 'Headers' },
                 { id: 'xdeath', label: 'x-death' }, { id: 'journey', label: 'Journey' }]} style={{ gap: 16 }} />
               <div style={{ marginTop: 12 }}>
-                {tab === 'payload' && <CodeBlock code={msg.payloadText || '{}'} maxHeight={300} />}
+                {tab === 'payload' && <window.QL.PayloadView text={msg.payloadText} msg={msg} maxHeight={300} />}
                 {tab === 'headers' && <CodeBlock code={msg.headersText || '(no headers)'} maxHeight={300} />}
                 {tab === 'xdeath' && ((msg.xdeathList || []).length
                   ? <XDeathTable rows={msg.xdeathList} />
