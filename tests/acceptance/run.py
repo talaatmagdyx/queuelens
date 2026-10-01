@@ -1062,23 +1062,27 @@ async def g13():
         "source_queue": "t13.dlq", "action": "replay", "mode": "move",
         "target": {"type": "queue", "queue": "t13.target"}, "fingerprints": [m["fingerprint"] for m in msgs[1:]]})).json()
     db_exec("ALTER TABLE audit_events RENAME TO audit_events_off")
+    # These fail inside the app (500 from an unhandled error), after which uvicorn closes
+    # the keep-alive connection; "Connection: close" keeps httpx from reusing it for the
+    # next request (on Linux that reuse races the FIN and surfaces as ReadError).
+    once = {"Connection": "close"}
     try:
-        r1 = await api("POST", "/api/messages/replay", json={"source_queue": "t13.dlq", "fingerprint": msgs[0]["fingerprint"],
-                                                               "mode": "move", "confirm": True,
-                                                               "target": {"type": "queue", "queue": "t13.target"}})
+        r1 = await api("POST", "/api/messages/replay", headers=once, json={"source_queue": "t13.dlq", "fingerprint": msgs[0]["fingerprint"],
+                                                                           "mode": "move", "confirm": True,
+                                                                           "target": {"type": "queue", "queue": "t13.target"}})
         n_single = (await count("t13.dlq"), await count("t13.target"))
-        r2 = await api("POST", "/api/messages/bulk/execute", json={"batch_id": dr["batch_id"], "confirm": True})
+        r2 = await api("POST", "/api/messages/bulk/execute", headers=once, json={"batch_id": dr["batch_id"], "confirm": True})
         n_bulk = (await count("t13.dlq"), await count("t13.target"))
-        r3 = await api("POST", "/api/messages/publish", json={"routing_key": "t13.target", "payload": "x", "confirm": True})
+        r3 = await api("POST", "/api/messages/publish", headers=once, json={"routing_key": "t13.target", "payload": "x", "confirm": True})
         n_pub = await count("t13.target")
     finally:
         db_exec("ALTER TABLE audit_events_off RENAME TO audit_events")
     check(13, "Single action refused when the audit attempt can't be written",
           r1.status_code >= 500 and n_single == (3, 0), f"HTTP {r1.status_code}, (dlq, target)={n_single}")
     check(13, "Bulk execute refused when the audit can't be written",
-          n_bulk == (3, 0), f"HTTP {r2.status_code} but (dlq, target)={n_bulk} — 2 messages moved, zero audit rows")
+          n_bulk == (3, 0), f"HTTP {r2.status_code}, (dlq, target)={n_bulk} — must stay (3, 0): nothing moves unaudited")
     check(13, "Composer publish refused when the audit can't be written",
-          n_pub == n_bulk[1], f"HTTP {r3.status_code} but target went {n_bulk[1]}→{n_pub} — published, unaudited")
+          n_pub == n_bulk[1], f"HTTP {r3.status_code}, target {n_bulk[1]}→{n_pub} — must not change: nothing publishes unaudited")
 
 
 # ================================================================== G20 configuration
