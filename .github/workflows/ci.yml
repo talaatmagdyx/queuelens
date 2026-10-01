@@ -7,9 +7,15 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 4.x changed quorum-queue delivery limits (default 20, -1 = unlimited) —
+        # the integration suite checks the browse guard against both
+        rabbitmq: ["3.13-management", "4.1-management"]
     services:
       rabbitmq:
-        image: rabbitmq:3.13-management
+        image: rabbitmq:${{ matrix.rabbitmq }}
         env:
           RABBITMQ_DEFAULT_USER: queuelens
           RABBITMQ_DEFAULT_PASS: queuelens
@@ -17,6 +23,7 @@ jobs:
           - 5672:5672
           - 15672:15672
         options: >-
+          --user 999:999
           --health-cmd "rabbitmq-diagnostics -q ping"
           --health-interval 5s
           --health-timeout 5s

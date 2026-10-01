@@ -12,24 +12,38 @@ class UnsafeToBrowse(RuntimeError):
     """Browsing this queue would count as deliveries and could drop messages."""
 
 
+def _major(rabbitmq_version: str | None) -> int:
+    try:
+        return int(str(rabbitmq_version or "0").split(".")[0])
+    except ValueError:
+        return 0  # unknown → treated like 3.x, the stricter reading
+
+
 def delivery_limit(raw: dict[str, Any], rabbitmq_version: str | None) -> int | None:
     """Effective delivery limit of a quorum queue, or None when it has none.
 
     AMQP 0-9-1 has no browse: a preview is basic.get + requeue, and quorum queues
-    count every requeue as a delivery — past the limit the message is dropped
-    (or dead-lettered away). Classic queues don't count, so they're always safe."""
+    count every return as a delivery (AMQP 1.0 `released` too, on 4.x) — past the
+    limit the message is dropped or dead-lettered away. Classic queues don't count.
+
+    Semantics measured against real brokers (3.13.7, 4.1.8):
+    - 4.x: the lowest non-negative value of the queue argument and the policy wins;
+      -1 means "no limit from this source"; nothing configured means the default, 20.
+    - 3.x: no default; every configured value is a limit — -1 is *not* unlimited,
+      it drops a message on its first return."""
     arguments = raw.get("arguments") or {}
     if (raw.get("type") or arguments.get("x-queue-type")) != "quorum":
         return None
     policy = raw.get("effective_policy_definition")
     policy = policy if isinstance(policy, dict) else {}
-    limits = [int(v) for v in (arguments.get("x-delivery-limit"), policy.get("delivery-limit"))
+    values = [int(v) for v in (arguments.get("x-delivery-limit"), policy.get("delivery-limit"))
               if v is not None]
-    if not limits:
-        major = int(str(rabbitmq_version or "0").split(".")[0] or 0)
-        return 20 if major >= 4 else None  # RabbitMQ 4.0 made 20 the default
-    limit = min(limits)
-    return None if limit < 0 else limit  # -1 means unlimited (4.0+)
+    if _major(rabbitmq_version) < 4:
+        return max(0, min(values)) if values else None
+    limits = [v for v in values if v >= 0]
+    if limits:
+        return min(limits)
+    return None if values else 20
 
 
 class QueueService:
@@ -48,13 +62,27 @@ class QueueService:
         if self._rabbitmq_version is None:
             overview = await self._management.overview()
             self._rabbitmq_version = str(overview.get("rabbitmq_version"))
+        quorum = (raw.get("type") or (raw.get("arguments") or {}).get("x-queue-type")) == "quorum"
+        if quorum and "messages" not in raw:
+            # the first stats emission (seconds after declaration) also carries the
+            # applied policy — until then a policy-defined limit is invisible: fail closed
+            raise UnsafeToBrowse(
+                f"{queue_name} is a quorum queue whose statistics aren't available yet, so its "
+                "delivery limit can't be checked — try again in a few seconds."
+            )
         limit = delivery_limit(raw, self._rabbitmq_version)
         if limit is not None:
+            fix = (
+                "set the limit to -1 on dead-letter queues (policy delivery-limit or "
+                "x-delivery-limit)"
+                if _major(self._rabbitmq_version) >= 4
+                else "remove x-delivery-limit / the delivery-limit policy from dead-letter "
+                "queues (on RabbitMQ 3.x, -1 is not unlimited — it drops on the first return)"
+            )
             raise UnsafeToBrowse(
                 f"{queue_name} is a quorum queue with a delivery limit of {limit}: every preview "
                 "or scan counts as a delivery and would eventually drop messages, so QueueLens "
-                "will not browse or act on it. Remove the limit on dead-letter queues "
-                "(x-delivery-limit / policy delivery-limit; -1 on RabbitMQ 4+)."
+                f"will not browse or act on it. To browse it, {fix}."
             )
 
     async def list_queues(self, dlq_only: bool = False) -> list[QueueInfo]:

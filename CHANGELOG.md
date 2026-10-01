@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Security / data safety
+- **RabbitMQ 3.x: `x-delivery-limit: -1` is no longer treated as unlimited.** On 3.x it drops
+  a message on its first return, so 0.10.0 allowed previews that destroyed messages there.
+- **RabbitMQ 4.x: a `-1` from the policy (or argument) no longer cancels a real limit from
+  the other source** — the lowest non-negative value wins, as the broker does.
+- Quorum queues are refused until their first statistics (and applied policy) are visible.
+
+### Added
+- CI runs the integration suite against RabbitMQ 3.13 **and 4.1**, including a real-broker
+  check that previews never cost a quorum queue a message.
+
 ## v0.10.0 — 2026-10-01
 
 ### Security / data safety

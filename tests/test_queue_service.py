@@ -120,21 +120,28 @@ async def test_queue_type_extracted_from_type_field_or_arguments() -> None:
     assert by_name["legacy.dlq"] == "classic"
 
 
+# Every case below was measured against real brokers (RabbitMQ 3.13.7 and 4.1.8).
 @pytest.mark.parametrize(
     ("raw", "version", "expected"),
     [
-        ({"type": "classic", "arguments": {"x-delivery-limit": 2}}, "4.1.0", None),
-        ({"type": "quorum", "arguments": {}}, "3.13.7", None),
-        ({"type": "quorum", "arguments": {}}, "4.0.5", 20),  # RabbitMQ 4 default
+        ({"type": "classic", "arguments": {"x-delivery-limit": 2}}, "4.1.8", None),
+        ({"type": "quorum", "arguments": {}}, "3.13.7", None),  # 3.x: no default
+        ({"type": "quorum", "arguments": {}}, "4.1.8", 20),  # 4.x default, invisible in mgmt
         ({"type": "quorum", "arguments": {"x-delivery-limit": 3}}, "3.13.7", 3),
         ({"type": "quorum", "effective_policy_definition": {"delivery-limit": 5}}, "3.13.7", 5),
-        (
-            {"type": "quorum", "arguments": {"x-delivery-limit": 9},
-             "effective_policy_definition": {"delivery-limit": 4}},
-            "3.13.7",
-            4,
-        ),
-        ({"type": "quorum", "arguments": {"x-delivery-limit": -1}}, "4.0.5", None),
+        ({"type": "quorum", "arguments": {"x-delivery-limit": 9},
+          "effective_policy_definition": {"delivery-limit": 4}}, "3.13.7", 4),
+        # -1: unlimited on 4.x, but on 3.x it drops a message on its first return
+        ({"type": "quorum", "arguments": {"x-delivery-limit": -1}}, "4.1.8", None),
+        ({"type": "quorum", "effective_policy_definition": {"delivery-limit": -1}}, "4.1.8", None),
+        ({"type": "quorum", "arguments": {"x-delivery-limit": -1}}, "3.13.7", 0),
+        # 4.x: the lowest non-negative value wins; -1 doesn't cancel the other source
+        ({"type": "quorum", "arguments": {"x-delivery-limit": 3},
+          "effective_policy_definition": {"delivery-limit": -1}}, "4.1.8", 3),
+        ({"type": "quorum", "arguments": {"x-delivery-limit": -1},
+          "effective_policy_definition": {"delivery-limit": 3}}, "4.1.8", 3),
+        ({"type": "quorum", "arguments": {"x-delivery-limit": 5},
+          "effective_policy_definition": {"delivery-limit": 3}}, "4.1.8", 3),
         ({"arguments": {"x-queue-type": "quorum", "x-delivery-limit": 2},
           "effective_policy_definition": []}, None, 2),
     ],
@@ -150,9 +157,11 @@ async def test_assert_browsable_refuses_quorum_queues_with_a_delivery_limit() ->
     from app.application.queue_service import UnsafeToBrowse
 
     queues = {
-        "safe.dlq": {"name": "safe.dlq", "type": "classic", "arguments": {}},
-        "quorum.dlq": {"name": "quorum.dlq", "type": "quorum",
+        "safe.dlq": {"name": "safe.dlq", "type": "classic", "arguments": {}, "messages": 1},
+        "quorum.dlq": {"name": "quorum.dlq", "type": "quorum", "messages": 1,
                        "arguments": {"x-delivery-limit": 2}},
+        # just declared: no stats yet, so a policy-defined limit would be invisible
+        "fresh.dlq": {"name": "fresh.dlq", "type": "quorum", "arguments": {}},
     }
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -167,4 +176,6 @@ async def test_assert_browsable_refuses_quorum_queues_with_a_delivery_limit() ->
     await service.assert_browsable("missing.dlq")  # 404 → the AMQP path reports it as usual
     with pytest.raises(UnsafeToBrowse, match="delivery limit of 2"):
         await service.assert_browsable("quorum.dlq")
+    with pytest.raises(UnsafeToBrowse, match="statistics aren't available yet"):
+        await service.assert_browsable("fresh.dlq")
     await client.aclose()

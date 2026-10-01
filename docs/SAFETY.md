@@ -15,12 +15,34 @@ channel closes and the broker requeues everything itself — unacked deliveries 
 `basic_get` and does not affect message content or ordering guarantees consumers rely on.
 
 *Quorum queues with a delivery limit are refused.* AMQP 0-9-1 has no browse, and quorum
-queues count every requeue as a delivery — past `x-delivery-limit` (or a `delivery-limit`
-policy, or RabbitMQ 4.x's default of 20) the broker drops or dead-letters the message.
+queues count every return as a delivery — `basic.nack`/`basic.reject` with requeue and a
+channel closing with unacked messages alike, and on RabbitMQ 4.x even AMQP 1.0 `released`
+and `modified` (not failed). There is no non-counting way to put a message back. Past the
+limit the broker drops the message, or dead-letters it with `reason: delivery_limit`.
 There, a preview *is* a destructive read, so `QueueService.assert_browsable` makes every
 preview, detail lookup, single action, and bulk scan fail with `409` before any
-`basic_get`. Remove the limit on dead-letter queues (`-1` on RabbitMQ 4+) to browse them.
-The console never previews on page load or auto-refresh — only when a screen is opened.
+`basic_get`. The console never previews on page load or auto-refresh — only when a screen
+is opened.
+
+How the effective limit is worked out (measured against RabbitMQ 3.13.7 and 4.1.8, and
+covered by the integration suite on both in CI):
+
+| Broker | Nothing configured | `-1` | Argument and policy both set |
+|---|---|---|---|
+| 4.x | default **20** (not shown by the Management API) | no limit from that source | lowest non-negative value wins |
+| 3.x | no limit | **drops on the first return** — not unlimited | lowest value wins |
+
+A quorum queue whose first statistics haven't arrived yet (a few seconds after
+declaration — the applied policy only shows up with them) is refused too: unknown means no.
+
+To browse a quorum dead-letter queue, give it no limit — on RabbitMQ 4.x:
+
+```bash
+rabbitmqctl set_policy dlq-unlimited '\.dlq$' '{"delivery-limit": -1}' --apply-to quorum_queues
+```
+
+(only one policy applies per queue — merge `delivery-limit` into an existing DLQ policy
+instead of adding a second one). On 3.x, remove `x-delivery-limit` / the policy key.
 
 Scans of one queue are serialized in-process (`QueueLocks`): a scan holds messages unacked
 until it requeues them, so two at once would each see part of the queue.
