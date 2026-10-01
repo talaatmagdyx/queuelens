@@ -274,3 +274,65 @@ async def test_bulk_dry_run_and_execute_against_real_broker(tmp_path) -> None:
             for queue_name in (dlq, parking):
                 with contextlib.suppress(Exception):
                     await cleanup.queue_delete(queue_name)
+
+
+@pytest.mark.asyncio
+async def test_quorum_delivery_limits_against_real_broker(tmp_path) -> None:
+    """Every preview is a delivery on a quorum queue with a delivery limit — the guard
+    must refuse exactly the queues where the broker would drop messages, on 3.x and 4.x."""
+    import asyncio
+
+    suffix = uuid.uuid4().hex[:8]
+    auth = (_amqp.username or "guest", _amqp.password or "guest")
+    async with httpx.AsyncClient(base_url=MANAGEMENT_URL, auth=auth, timeout=10) as mgmt:
+        major = int((await mgmt.get("/api/overview")).json()["rabbitmq_version"].split(".")[0])
+    queues = {  # name → (arguments, refused?)
+        f"it.classic.{suffix}": ({}, False),
+        f"it.q.limit2.{suffix}": ({"x-queue-type": "quorum", "x-delivery-limit": 2}, True),
+        # 4.x applies a default limit of 20 that the Management API never shows
+        f"it.q.default.{suffix}": ({"x-queue-type": "quorum"}, major >= 4),
+        # -1 is unlimited on 4.x — and drops on the first return on 3.x
+        f"it.q.unlimited.{suffix}": ({"x-queue-type": "quorum", "x-delivery-limit": -1}, major < 4),
+    }
+    connection = await aio_pika.connect_robust(AMQP_URL)
+    channel = await connection.channel()
+    try:
+        async with httpx.AsyncClient(base_url=MANAGEMENT_URL, auth=auth, timeout=10) as mgmt:
+            for name, (arguments, _refused) in queues.items():
+                # over HTTP: aio-pika's table encoder can't send the negative limit
+                await mgmt.put(f"/api/queues/%2F/{name}",
+                               json={"durable": True, "arguments": arguments})
+                await channel.default_exchange.publish(
+                    aio_pika.Message(b'{"precious": true}', message_id="p-1"), routing_key=name
+                )
+            for name in queues:  # the guard fails closed until a queue's first stats land
+                for _ in range(60):
+                    if "messages" in (await mgmt.get(f"/api/queues/%2F/{name}")).json():
+                        break
+                    await asyncio.sleep(0.5)
+
+        app = create_app(_settings(tmp_path))
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                for name, (_arguments, refused) in queues.items():
+                    for _ in range(25):  # past the 4.x default of 20
+                        response = await client.get(f"/api/queues/{name}/messages")
+                        expected = 409 if refused else 200
+                        assert response.status_code == expected, (name, response.text)
+                    if refused:
+                        assert "delivery limit" in response.json()["detail"]
+                    # quorum requeues apply asynchronously (Raft): let the count settle —
+                    # a dropped message stays at 0
+                    for _ in range(25):
+                        left = await channel.declare_queue(name, passive=True)
+                        if left.declaration_result.message_count == 1:
+                            break
+                        await asyncio.sleep(0.2)
+                    assert left.declaration_result.message_count == 1, f"{name} lost its message"
+    finally:
+        cleanup = await connection.channel()
+        for name in queues:
+            with contextlib.suppress(Exception):
+                await cleanup.queue_delete(name)
+        await connection.close()
