@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.10.1 — 2026-10-01
 
 ### Security / data safety
 - **RabbitMQ 3.x: `x-delivery-limit: -1` is no longer treated as unlimited.** On 3.x it drops
