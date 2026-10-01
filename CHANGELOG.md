@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.10.2 — 2026-10-01
 
 ### Fixed
 - PagerDuty `dedup_key` is per incident (`queuelens-rule-<id>-<fired at>`). Alert-rule ids
