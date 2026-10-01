@@ -273,3 +273,48 @@ class TestCompressedPayloads:
         payload, fmt, decoded_from = _decode_payload(bomb, "gzip")
         assert decoded_from is None  # refused: would exceed the cap
         assert fmt == "base64"
+
+
+@pytest.mark.asyncio
+async def test_scans_of_one_queue_never_interleave() -> None:
+    """A scan holds messages unacked; two at once would each see part of the queue."""
+    import asyncio
+
+    from app.infrastructure.rabbitmq.message_browser import QueueLocks
+    from app.infrastructure.rabbitmq.message_operator import MessageOperator
+
+    state = {"active": 0, "peak": 0}
+
+    class SlowChannel:
+        async def __aenter__(self) -> "SlowChannel":
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            state["active"] -= 1
+
+        async def declare_queue(self, *_args: object, **_kwargs: object) -> "SlowChannel":
+            await asyncio.sleep(0.01)
+            return self
+
+        async def get(self, **_kwargs: object) -> None:
+            return None
+
+    class Connection:
+        def channel(self) -> SlowChannel:
+            return SlowChannel()
+
+    locks = QueueLocks()
+    browser = MessageBrowser(Connection(), locks)  # type: ignore[arg-type]
+    operator = MessageOperator(Connection(), locks)  # type: ignore[arg-type]
+    await asyncio.gather(
+        browser.list_messages("orders.dlq", 5),
+        browser.list_messages("orders.dlq", 5),
+        operator.operate(source_queue="orders.dlq", fingerprint="f" * 64, action="delete"),
+        return_exceptions=True,  # the operate finds nothing → LookupError, as it should
+    )
+    assert state["peak"] == 1
+    state["peak"] = 0
+    await asyncio.gather(browser.list_messages("a.dlq", 5), browser.list_messages("b.dlq", 5))
+    assert state["peak"] == 2  # different queues still scan concurrently

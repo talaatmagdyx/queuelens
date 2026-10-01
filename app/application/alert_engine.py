@@ -14,6 +14,7 @@ from app.infrastructure.persistence.store import (
     NotificationRepository,
     SettingsRepository,
 )
+from app.observability.metrics import ALERT_DELIVERIES
 
 logger = logging.getLogger(__name__)
 
@@ -141,14 +142,24 @@ class AlertEngine:
                         level="Success",
                         title=f"Recovered: {rule['name']}",
                         message=f"{rule['pattern']} · condition no longer holds",
+                        resolve=True,
                     )
                     created.append(notification)
         return created
 
     async def _fire(
-        self, rule: dict[str, Any], *, level: str, title: str, message: str
+        self, rule: dict[str, Any], *, level: str, title: str, message: str, resolve: bool = False
     ) -> dict[str, Any]:
-        delivery = await self.dispatch(rule["channels"], title, message, severity=level)
+        # the rule's severity drives quiet hours + PagerDuty for both edges, so a
+        # recovery is never muted while the incident it closes was paged
+        delivery = await self.dispatch(
+            rule["channels"],
+            title,
+            message,
+            severity=rule["severity"],
+            dedup_key=f"queuelens-rule-{rule['id']}",
+            resolve=resolve,
+        )
         return await self._notifications.add(
             level=level,
             title=title,
@@ -174,9 +185,28 @@ class AlertEngine:
         title: str,
         message: str,
         severity: str = "Alert",
+        dedup_key: str | None = None,
+        resolve: bool = False,
     ) -> dict[str, Any]:
         """Deliver to each configured channel; returns per-channel outcomes.
         Quiet hours mute Info/Warning deliveries — Alert severity always sends."""
+        outcomes = await self._deliver(channels, title, message, severity, dedup_key, resolve)
+        for channel, outcome in outcomes.items():
+            result = "ok" if outcome.get("ok") else "failed"
+            ALERT_DELIVERIES.labels(
+                channel=channel, result="skipped" if outcome.get("skipped") else result
+            ).inc()
+        return outcomes
+
+    async def _deliver(
+        self,
+        channels: list[str],
+        title: str,
+        message: str,
+        severity: str,
+        dedup_key: str | None,
+        resolve: bool,
+    ) -> dict[str, Any]:
         config = await self._settings_store.get("channels", {}) or {}
         ui = await self._settings_store.get("ui", {}) or {}
         now_hhmm = datetime.now(UTC).strftime("%H:%M")
@@ -196,18 +226,21 @@ class AlertEngine:
                     channel_config, f"[QueueLens] {title}", f"{title}\n\n{message}"
                 )
             elif channel == "pagerduty" and channel_config.get("routing_key"):
-                # native PagerDuty Events API v2
+                # native PagerDuty Events API v2 — one incident per rule, resolved on recovery
+                event: dict[str, Any] = {
+                    "routing_key": channel_config["routing_key"],
+                    "event_action": "resolve" if resolve else "trigger",
+                }
+                if dedup_key:
+                    event["dedup_key"] = dedup_key
+                if not resolve:
+                    event["payload"] = {
+                        "summary": f"{title} — {message}"[:1024],
+                        "source": "queuelens",
+                        "severity": "critical" if severity == "Alert" else "warning",
+                    }
                 outcomes[channel] = await post_webhook(
-                    "https://events.pagerduty.com/v2/enqueue",
-                    {
-                        "routing_key": channel_config["routing_key"],
-                        "event_action": "trigger",
-                        "payload": {
-                            "summary": f"{title} — {message}"[:1024],
-                            "source": "queuelens",
-                            "severity": "critical" if severity == "Alert" else "warning",
-                        },
-                    },
+                    "https://events.pagerduty.com/v2/enqueue", event
                 )
             elif channel in ("webhook", "slack", "pagerduty"):
                 url = channel_config.get("url")

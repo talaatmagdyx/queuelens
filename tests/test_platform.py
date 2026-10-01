@@ -15,6 +15,13 @@ def _app(tmp_path, **overrides):
     return create_app(Settings(**kwargs))
 
 
+def _cred() -> str:
+    """Throwaway credential generated per test — no secret-looking literals in the repo."""
+    import secrets
+
+    return secrets.token_urlsafe(12)
+
+
 @pytest.mark.asyncio
 async def test_settings_roundtrip_and_unknown_key_rejected(tmp_path) -> None:
     app = _app(tmp_path)
@@ -243,8 +250,8 @@ async def test_smtp_auth_tls_and_password_redaction(tmp_path) -> None:
         def __exit__(self, *args):  # type: ignore[no-untyped-def]
             return False
 
-        def starttls(self):  # type: ignore[no-untyped-def]
-            calls["starttls"] = True
+        def starttls(self, context=None):  # type: ignore[no-untyped-def]
+            calls["starttls"] = context
 
         def login(self, username, password):  # type: ignore[no-untyped-def]
             calls["login"] = (username, password)
@@ -265,7 +272,12 @@ async def test_smtp_auth_tls_and_password_redaction(tmp_path) -> None:
 
     assert result["ok"] is True
     assert calls["endpoint"] == ("smtp.acme.io", 587)
-    assert calls["starttls"] is True  # implied by credentials on a non-465 port
+    # implied by credentials on a non-465 port — and the certificate is verified
+    import ssl
+
+    context = calls["starttls"]
+    assert isinstance(context, ssl.SSLContext)
+    assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
     assert calls["login"] == ("apikey", "sg-secret")
 
     # the API never echoes the stored password back
@@ -640,3 +652,148 @@ async def test_audit_export_streams_full_history(tmp_path) -> None:
     assert "q6" in csv.text
     parsed = js.json()
     assert len(parsed) == 7
+
+
+@pytest.mark.asyncio
+async def test_channel_secrets_are_write_only(tmp_path) -> None:
+    app = _app(tmp_path)
+    await app.state.database.start()
+    secret = _cred()
+    channels = {
+        "slack": {"url": f"https://chat.example/hooks/{secret}"},
+        "webhook": {"url": f"https://ops.example/hook?token={secret}"},
+        "pagerduty": {"url": "https://pd.example/x", "routing_key": secret},
+    }
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.put("/api/settings", json={"values": {"channels": channels}})
+        shown = await client.get("/api/settings")
+        # saving the sentinels back (what the UI does) keeps every stored secret
+        await client.put("/api/settings", json={"values": {"channels": shown.json()["channels"]}})
+    stored = await app.state.settings_store.get("channels")
+    await app.state.database.close()
+
+    assert secret not in shown.text
+    pagerduty = shown.json()["channels"]["pagerduty"]
+    assert pagerduty == {"url": "__secret__", "routing_key": "__secret__"}
+    assert stored == channels
+
+
+@pytest.mark.asyncio
+async def test_activate_only_accepts_listed_vhosts(tmp_path) -> None:
+    """Activating creates the vhost on the broker — Operators must not mint vhosts."""
+    app = _app(tmp_path, environments_json='{"staging": {"vhosts": ["/"]}}')
+    await app.state.database.start()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        rogue = await client.post(
+            "/api/environments/activate", json={"environment": "staging", "vhost": "rogue"}
+        )
+        envs = await client.get("/api/environments")
+    await app.state.database.close()
+
+    assert rogue.status_code == 404
+    staging = next(e for e in envs.json()["environments"] if e["id"] == "staging")
+    assert staging["vhosts"] == ["/"]
+
+
+@pytest.mark.asyncio
+async def test_add_environment_audit_names_the_acting_admin(tmp_path) -> None:
+    admin = ("admin", _cred())
+    app = _app(tmp_path, auth_enabled=True, admin_password=admin[1])
+    await app.state.database.start()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post(
+            "/api/environments", auth=admin,
+            json={"name": "stg", "vhosts": ["/"], "host": "rmq:5672",
+                  "username": "amqp-user", "password": _cred()},
+        )
+        events = await client.get("/api/audit?action=add_environment", auth=admin)
+    await app.state.database.close()
+
+    assert [e["username"] for e in events.json()["events"]] == ["admin"]
+
+
+@pytest.mark.asyncio
+async def test_throttling_one_account_does_not_lock_out_others(tmp_path) -> None:
+    import json
+
+    from app.auth import basic as auth_basic
+
+    auth_basic._failures.clear()
+    admin, ops = ("admin", _cred()), ("ops", _cred())
+    app = _app(tmp_path, auth_enabled=True, admin_password=admin[1],
+               users_json=json.dumps(dict([ops])))
+    await app.state.database.start()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        for _ in range(10):
+            await client.get("/api/me", auth=(admin[0], _cred()))
+        admin_blocked = await client.get("/api/me", auth=admin)
+        colleague = await client.get("/api/me", auth=ops)
+    await app.state.database.close()
+    auth_basic._failures.clear()
+
+    assert admin_blocked.status_code == 429
+    assert colleague.status_code == 200  # same IP (shared proxy), different account
+
+
+@pytest.mark.asyncio
+async def test_unknown_usernames_cost_the_same_pbkdf2_as_known_ones(tmp_path, monkeypatch) -> None:
+    from app.infrastructure.persistence import store
+
+    app = _app(tmp_path)
+    await app.state.database.start()
+    calls: list[str] = []
+    real = store.verify_password
+    monkeypatch.setattr(store, "verify_password", lambda pw, h: calls.append(h) or real(pw, h))
+    await app.state.users.create(username="known", password=_cred(), role="Viewer",
+                                 email=None, invited_by="admin")
+    assert await app.state.users.verify("ghost", _cred()) is False
+    assert await app.state.users.verify("known", _cred()) is False
+    await app.state.database.close()
+
+    assert len(calls) == 2  # the ghost paid a full PBKDF2 round too
+
+
+@pytest.mark.asyncio
+async def test_pagerduty_resolves_on_recovery_even_in_quiet_hours(tmp_path, monkeypatch) -> None:
+    from app.application import alert_engine as engine_module
+    from app.observability.metrics import ALERT_DELIVERIES
+
+    app = _app(tmp_path)
+    await app.state.database.start()
+    routing_key = _cred()
+    await app.state.settings_store.put({
+        "channels": {"pagerduty": {"routing_key": routing_key}},
+        "ui": {"quiet_hours": True, "quiet_from": "00:00", "quiet_until": "23:59"},
+    })
+    sent: list[dict] = []
+
+    async def fake_post(_url, payload):
+        sent.append(payload)
+        return {"ok": True, "attempts": 1, "errors": []}
+
+    monkeypatch.setattr(engine_module, "post_webhook", fake_post)
+    before = ALERT_DELIVERIES.labels(channel="pagerduty", result="ok")._value.get()
+    rule = {"id": 7, "severity": "Alert", "channels": ["pagerduty"]}
+    engine = app.state.alert_engine
+    await engine._fire(rule, level="Alert", title="Rule fired: x", message="m")
+    await engine._fire(rule, level="Success", title="Recovered: x", message="m", resolve=True)
+    after = ALERT_DELIVERIES.labels(channel="pagerduty", result="ok")._value.get()
+    await app.state.database.close()
+
+    trigger, resolve = sent
+    assert trigger["event_action"] == "trigger" and trigger["dedup_key"] == "queuelens-rule-7"
+    assert resolve == {"routing_key": routing_key, "event_action": "resolve",
+                       "dedup_key": "queuelens-rule-7"}
+    assert after - before == 2
+
+
+@pytest.mark.asyncio
+async def test_environment_switch_drops_the_cached_topology(tmp_path) -> None:
+    app = _app(tmp_path)
+    app.state.topology_cache = (float("inf"), {"queues": [{"name": "other.broker.q"}]})
+    app.state.environment_manager.attach_default()  # every bundle swap goes through _swap
+    assert app.state.topology_cache is None

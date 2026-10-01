@@ -334,3 +334,70 @@ async def test_dry_run_failure_is_audited_and_maps_missing_queue_to_404(tmp_path
     assert events[0]["result"] == "failed"
     assert events[0]["source_queue"] == "ghost.dlq"
     assert "no queue 'ghost.dlq'" in events[0]["error_message"]
+
+
+@pytest.mark.asyncio
+async def test_bulk_execute_records_its_attempt_before_touching_the_broker(tmp_path) -> None:
+    from app.application.bulk_service import BulkBatch
+    from app.infrastructure.persistence.audit_repository import AuditRepository
+
+    app = create_app(
+        Settings(auth_enabled=False, database_url=f"sqlite+aiosqlite:///{tmp_path}/a.db")
+    )
+    await app.state.database.start()
+    await app.state.settings_store.put({"custom_headers": [{"key": "x-team", "value": "sre"}]})
+    batch = BulkBatch(id="batch-5678", source_queue="orders.dlq", action="park",
+                      operator_action="park",
+                      target=ReplayTarget(type="queue", queue="orders.dlq.parking"),
+                      fingerprints=frozenset({"a" * 64}), message_count=1,
+                      duplicate_fingerprints=0)
+    seen: dict[str, Any] = {}
+
+    class FakeBulkService:
+        async def peek_batch(self, _batch_id: str) -> BulkBatch:
+            return batch
+
+        async def execute(self, batch_id: str, *, replay_headers: dict[str, Any]):
+            seen["events"] = await AuditRepository(app.state.database).list()
+            seen["headers"] = replay_headers
+            return batch, {"batch_id": batch_id, "action": "park", "source_queue": "orders.dlq",
+                           "target": None,
+                           "results": [{"fingerprint": "a" * 64, "status": "success"}],
+                           "summary": {"fingerprints_requested": 1, "succeeded": 1, "failed": 0,
+                                       "skipped_duplicates": 0, "not_found": 0}}
+
+    app.state.bulk_service = FakeBulkService()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/messages/bulk/execute", json={"batch_id": "batch-5678", "confirm": True}
+        )
+    await app.state.database.close()
+
+    assert response.status_code == 200
+    assert [(e["action"], e["result"]) for e in seen["events"]] == [("bulk_park", "started")]
+    headers = seen["headers"]
+    assert headers["x-queuelens-action"] == "park"
+    assert headers["x-queuelens-source-queue"] == "orders.dlq"
+    assert headers["x-team"] == "sre" and "x-queuelens-replayed" not in headers
+
+
+@pytest.mark.asyncio
+async def test_execute_scans_the_window_its_dry_run_approved() -> None:
+    class Browser:
+        async def list_messages(self, _queue: str, limit: int) -> list[MessageRecord]:
+            self.limit = limit
+            return []
+
+    class Operator:
+        async def operate_bulk(self, **kwargs: Any) -> list[dict[str, object]]:
+            self.kwargs = kwargs
+            return []
+
+    browser, operator = Browser(), Operator()
+    service = BulkActionService(Settings(max_bulk_size=20), browser, operator)  # type: ignore[arg-type]
+    dry_run = await service.dry_run(source_queue="orders.dlq", action="park", max_bulk=50)
+    await service.execute(str(dry_run["batch_id"]))
+
+    assert browser.limit == 50 and dry_run["scan_limit"] == 50
+    assert operator.kwargs["max_scan"] == 50

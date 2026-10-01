@@ -242,6 +242,11 @@ def verify_password(password: str, stored: str) -> bool:
     return secrets.compare_digest(hash_password(password, salt=salt), stored)
 
 
+# Unknown or inactive users still pay one PBKDF2 round, so a failed login takes the
+# same time whether or not the username exists (no enumeration by timing).
+_TIMING_DECOY = hash_password(secrets.token_hex(16))
+
+
 class UserRepository:
     def __init__(self, database: Database) -> None:
         self._database = database
@@ -317,6 +322,7 @@ class UserRepository:
         async with self._database.session() as session:
             row = await session.get(UserModel, username)
             if row is None or not row.active:
+                verify_password(password, _TIMING_DECOY)
                 return False
             return verify_password(password, row.password_hash)
 

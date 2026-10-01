@@ -2,12 +2,14 @@ import React from 'react';
 import { Icon } from '../icons/Icon.jsx';
 
 /** Square bordered (or borderless) icon-only button: kebab menus, eye/view, copy, close. */
-export function IconButton({ icon, size = 32, iconSize, bordered = true, color = 'var(--slate-500)', badge, onClick, title, style }) {
+export function IconButton({ icon, size = 32, iconSize, bordered = true, color = 'var(--slate-500)', badge, onClick, title, label, style }) {
   const [hover, setHover] = React.useState(false);
   return React.createElement(
     'button',
     {
       onClick, title,
+      // icon-only: screen readers need a name (falls back to the tooltip, then the icon)
+      'aria-label': label || title || icon,
       onMouseEnter: () => setHover(true),
       onMouseLeave: () => setHover(false),
       style: {

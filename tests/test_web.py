@@ -272,9 +272,12 @@ async def test_publish_requires_confirm_and_audits_success(tmp_path) -> None:
     assert published == [(b'{"n": 1}', "orders.q")]
     assert missing.status_code == 404
     events = audit.json()["events"]
-    assert events[0]["action"] == "publish" and events[0]["result"] == "failed"
-    assert events[1]["action"] == "publish" and events[1]["result"] == "success"
-    assert events[1]["target_queue"] == "orders.q"
+    # every publish records its attempt before touching the broker, then the outcome
+    assert [(e["action"], e["result"]) for e in events[:4]] == [
+        ("publish", "failed"), ("publish", "started"),
+        ("publish", "success"), ("publish", "started"),
+    ]
+    assert events[2]["target_queue"] == "orders.q"
 
 
 @pytest.mark.asyncio
@@ -304,3 +307,109 @@ async def test_topology_is_cached(tmp_path) -> None:
         assert (await client.get("/api/topology")).status_code == 200
 
     assert calls["n"] == 1  # second hit came from the cache
+
+
+@pytest.mark.asyncio
+async def test_unsafe_queues_are_refused_before_any_basic_get(tmp_path) -> None:
+    """Quorum DLQs with a delivery limit: preview, detail and actions answer 409."""
+    from app.application.action_service import ActionService
+    from app.application.message_service import MessageService
+    from app.application.queue_service import UnsafeToBrowse
+
+    app = create_app(
+        Settings(auth_enabled=False, database_url=f"sqlite+aiosqlite:///{tmp_path}/g.db")
+    )
+    await app.state.database.start()
+
+    async def guard(queue: str) -> None:
+        raise UnsafeToBrowse(f"{queue} is a quorum queue with a delivery limit of 2")
+
+    class NeverTouched:
+        async def list_messages(self, *_args: object) -> None:
+            raise AssertionError("basic.get must not run")
+
+        async def operate(self, **_kwargs: object) -> None:
+            raise AssertionError("basic.get must not run")
+
+    app.state.message_service = MessageService(NeverTouched(), guard)  # type: ignore[arg-type]
+    app.state.action_service = ActionService(app.state.settings, NeverTouched(), guard)  # type: ignore[arg-type]
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        preview = await client.get("/api/queues/q.dlq/messages")
+        detail = await client.get(f"/api/queues/q.dlq/messages/{'a' * 64}")
+        park = await client.post(
+            "/api/messages/park",
+            json={"source_queue": "q.dlq", "fingerprint": "a" * 64, "confirm": True},
+        )
+    await app.state.database.close()
+
+    assert (preview.status_code, detail.status_code, park.status_code) == (409, 409, 409)
+    assert "delivery limit of 2" in preview.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_preview_limit_can_lower_the_cap_but_never_raise_it(tmp_path) -> None:
+    from app.application.message_service import MessageService
+
+    app = create_app(Settings(auth_enabled=False, max_preview_messages=10,
+                              database_url=f"sqlite+aiosqlite:///{tmp_path}/c.db"))
+    await app.state.database.start()
+    asked: list[int] = []
+
+    class Browser:
+        async def list_messages(self, _queue: str, limit: int) -> list[object]:
+            asked.append(limit)
+            return []
+
+    app.state.message_service = MessageService(Browser())  # type: ignore[arg-type]
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        for query in ("?limit=70", "?limit=3", ""):
+            await client.get(f"/api/queues/q.dlq/messages{query}")
+        await client.put("/api/settings", json={"values": {"limits": {"max_preview_messages": 50}}})
+        await client.get("/api/queues/q.dlq/messages?limit=70")
+    await app.state.database.close()
+
+    assert asked == [10, 3, 10, 50]
+
+
+@pytest.mark.asyncio
+async def test_publish_carries_caller_headers_and_properties(tmp_path) -> None:
+    from contextlib import asynccontextmanager
+
+    app = create_app(
+        Settings(auth_enabled=False, database_url=f"sqlite+aiosqlite:///{tmp_path}/h.db")
+    )
+    await app.state.database.start()
+    sent: list[object] = []
+
+    class Exchange:
+        async def publish(self, message: object, routing_key: str) -> None:
+            sent.append(message)
+
+    class Channel:
+        default_exchange = Exchange()
+
+        async def declare_queue(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+    class Connection:
+        @asynccontextmanager
+        async def channel(self):  # type: ignore[no-untyped-def]
+            yield Channel()
+
+    app.state.rabbitmq_connection = Connection()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/messages/publish", json={
+            "routing_key": "orders.q", "payload": "{}", "confirm": True,
+            "headers": {"x-tenant": "acme", "x-queuelens-published-by": "spoofed"},
+            "properties": {"message_id": "ord-1", "correlation_id": "c-9", "priority": 4},
+        })
+    await app.state.database.close()
+
+    message = sent[0]
+    assert response.status_code == 200
+    assert message.headers["x-tenant"] == "acme"  # type: ignore[attr-defined]
+    assert message.headers["x-queuelens-published-by"] == "local"  # type: ignore[attr-defined]
+    assert (message.message_id, message.correlation_id, message.priority) == ("ord-1", "c-9", 4)  # type: ignore[attr-defined]

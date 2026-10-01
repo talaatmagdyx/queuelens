@@ -24,18 +24,27 @@
 
   function Dashboard({ nav, empty }) {
     const dlq = empty ? [] : D.queues.filter((q) => q.type !== 'NORMAL');
+    // Every card is computed from the live data layer (queues + audit), nothing sampled.
+    const total = dlq.reduce((sum, q) => sum + q.messages, 0);
+    const largest = dlq.reduce((top, q) => (!top || q.messages > top.messages ? q : top), null);
+    const today = new Date().toISOString().slice(0, 10); // audit times are UTC
+    const failedToday = empty ? 0 : D.audit.filter((r) => r.result === 'Failed' && r.time.slice(0, 10) === today).length;
+    const noConsumers = empty ? 0 : D.queues.filter((q) => q.consumers === 0).length;
+    const autoRefresh = (((window.QL.serverSettings || {}).ui || {}).auto) !== false;
+    const previewLimit = ((window.QL.serverSettings || {}).limits || {}).max_preview_messages
+      || (window.QL.config || {}).max_preview_messages || 100;
     return (
       <div>
         <PageHeader title="DLQ Recovery Dashboard" subtitle="Inspect failed RabbitMQ messages and recover them safely." />
-        <Alert tone="info" action={<ArrowLink onClick={() => {}}>Learn more</ArrowLink>} style={{ marginBottom: 20 }}>
-          Auto-refresh is ON every 30 seconds&nbsp;&nbsp;·&nbsp;&nbsp;Message preview is limited to 100 per queue&nbsp;&nbsp;·&nbsp;&nbsp;Counts from Management API
+        <Alert tone="info" style={{ marginBottom: 20 }}>
+          Auto-refresh is {autoRefresh ? 'ON every 30 seconds' : 'OFF'}&nbsp;&nbsp;·&nbsp;&nbsp;Message preview is limited to {previewLimit} per queue&nbsp;&nbsp;·&nbsp;&nbsp;Counts from Management API
         </Alert>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(215px, 1fr))', gap: 14, marginBottom: 22 }}>
-          <StatCard icon="database" tone="info" value={empty ? '0' : '4'} label="DLQ Queues" sublabel="Detected" />
-          <StatCard icon="inbox" tone="park" value={empty ? '0' : '128'} label="Total Messages" sublabel="In DLQs" />
-          <StatCard icon="bar-chart-3" tone="warning" value={empty ? '—' : '121'} label="Largest DLQ" sublabel={empty ? 'No DLQ messages' : 'payments.retry.dlq'} />
-          <StatCard icon="shield" tone="danger" value={empty ? '0' : '1'} label="Failed Actions" sublabel="Today" link={empty ? undefined : 'View failures'} onLinkClick={() => nav('audit')} />
-          <StatCard icon="users" tone="success" value="0" label="Queues with No" sublabel="Consumers" />
+          <StatCard icon="database" tone="info" value={String(dlq.length)} label="DLQ Queues" sublabel="Detected" />
+          <StatCard icon="inbox" tone="park" value={String(total)} label="Total Messages" sublabel="In DLQs" />
+          <StatCard icon="bar-chart-3" tone="warning" value={largest && largest.messages ? String(largest.messages) : '—'} label="Largest DLQ" sublabel={largest && largest.messages ? largest.name : 'No DLQ messages'} />
+          <StatCard icon="shield" tone="danger" value={String(failedToday)} label="Failed Actions" sublabel="Today" link={failedToday ? 'View failures' : undefined} onLinkClick={() => nav('audit')} />
+          <StatCard icon="users" tone="success" value={String(noConsumers)} label="Queues with No" sublabel="Consumers" />
         </div>
 
         <Card title="Queues Needing Attention" subtitle="Sorted by message count (desc)"

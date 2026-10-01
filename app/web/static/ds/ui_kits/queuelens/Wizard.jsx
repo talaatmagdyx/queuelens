@@ -76,6 +76,15 @@
             target: target || undefined,
             fingerprints: fingerprints,
           });
+          // the server's dry run is the source of truth — show it before anything runs
+          const notes = [];
+          if (preview.duplicate_fingerprints) notes.push(preview.duplicate_fingerprints + ' duplicate(s) will be skipped');
+          if (preview.selected_not_seen) notes.push(preview.selected_not_seen + ' no longer in the queue');
+          if (!window.confirm('Dry run: ' + preview.message_count + ' of ' + fingerprints.length + ' selected messages will be '
+            + (isPark ? 'parked' : 'replayed') + (notes.length ? ' (' + notes.join(', ') + ')' : '') + '. Continue?')) {
+            setStage('review');
+            return;
+          }
           const outcome = await postJson('/api/messages/bulk/execute',
             { batch_id: preview.batch_id, confirm: true });
           setSummary(outcome.summary);

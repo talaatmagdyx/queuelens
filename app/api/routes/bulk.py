@@ -6,8 +6,11 @@ from aiormq.exceptions import ChannelNotFoundEntity
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from app.api.routes.actions import TargetRequest
+from app.api.routes.actions import TargetRequest, _custom_headers
+from app.api.routes.messages import effective_limit
+from app.application.action_service import provenance_headers
 from app.application.bulk_service import BulkActionService, UnknownBulkBatch
+from app.application.queue_service import UnsafeToBrowse
 from app.auth.basic import CurrentUser, require_operator
 from app.domain.models import AuditEntry
 from app.observability.metrics import ACTIONS, OPERATION_SECONDS
@@ -42,8 +45,7 @@ async def dry_run(
     if body.action == "delete" and not user.is_admin:
         raise HTTPException(status_code=403, detail="Deleting messages requires the Admin role")
     username = user.username
-    stored = await request.app.state.settings_store.get_safe("limits", {}) or {}
-    max_bulk = stored.get("max_bulk_size")
+    max_bulk = await effective_limit(request, "max_bulk_size")
     try:
         return await _service(request).dry_run(
             source_queue=body.source_queue,
@@ -54,7 +56,7 @@ async def dry_run(
             selected_fingerprints=(
                 frozenset(body.fingerprints) if body.fingerprints is not None else None
             ),
-            max_bulk=min(int(max_bulk), 1000) if max_bulk else None,
+            max_bulk=max_bulk,
         )
     except Exception as error:
         # Dry-run failures are audited too — a rejected bulk attempt is still an attempt.
@@ -73,6 +75,8 @@ async def dry_run(
                 metadata={"stage": "dry_run", "mode": body.mode},
             )
         )
+        if isinstance(error, UnsafeToBrowse):
+            raise HTTPException(status_code=409, detail=str(error)) from error
         if isinstance(error, ChannelNotFoundEntity):
             raise HTTPException(
                 status_code=404,
@@ -97,13 +101,33 @@ async def execute(
         raise HTTPException(status_code=400, detail="Bulk execution confirmation is required")
     audit = request.app.state.audit_repository
     service = _service(request)
-    replay_headers: dict[str, Any] = {
-        "x-queuelens-replayed": True,
-        "x-queuelens-replayed-at": datetime.now(UTC).isoformat(),
-        "x-queuelens-replayed-by": username,
-    }
+    pending = pending_check  # batch context for the attempt + failure audits
+    replay_headers: dict[str, Any] = await _custom_headers(request)
+    if pending and pending.operator_action != "delete":
+        replay_headers.update(
+            provenance_headers(pending.operator_action, pending.source_queue, username)
+        )
+    if pending:
+        # the attempt is on record before the broker is touched — no audit, no action
+        await audit.record(
+            AuditEntry(
+                username=username,
+                action=f"bulk_{pending.action}",
+                timestamp=datetime.now(UTC),
+                source_queue=pending.source_queue,
+                target_type=pending.target.type if pending.target else None,
+                target_queue=pending.target.queue if pending.target else None,
+                target_exchange=pending.target.exchange if pending.target else None,
+                target_routing_key=pending.target.routing_key if pending.target else None,
+                result="started",
+                metadata={
+                    "batch_id": body.batch_id,
+                    "mode": pending.operator_action,
+                    "fingerprints": len(pending.fingerprints),
+                },
+            )
+        )
     started_at = time.perf_counter()
-    pending = await service.peek_batch(body.batch_id)  # batch context for failure audits
     try:
         batch, outcome = await service.execute(body.batch_id, replay_headers=replay_headers)
     except UnknownBulkBatch as error:
@@ -129,6 +153,8 @@ async def execute(
                 },
             )
         )
+        if isinstance(error, UnsafeToBrowse):
+            raise HTTPException(status_code=409, detail=str(error)) from error
         if isinstance(error, ChannelNotFoundEntity):
             raise HTTPException(
                 status_code=404,

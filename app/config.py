@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     bulk_dry_run_ttl_seconds: int = 600
     masking_enabled: bool = True
     masked_fields: str = (
-        "password,token,access_token,refresh_token,authorization,api_key,secret,email,phone"
+        "password,token,access_token,refresh_token,authorization,api_key,x_api_key,secret,email,phone"
     )
     users_json: str = "{}"
     environments_json: str = "{}"

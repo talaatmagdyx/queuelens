@@ -54,9 +54,8 @@
   function Messages({ nav, queue = 'payments.retry.dlq', role = 'Admin', fingerprint = null }) {
     const canDelete = role === 'Admin';
     const canAct = role !== 'Viewer';
-    const initialRows = React.useMemo(
-      () => (queue === window.QL.defaultQueue ? D.messages : window.QL.fetchMessages(queue)),
-      [queue]);
+    const initialRows = React.useMemo(() => window.QL.fetchMessages(queue), [queue]);
+    const loadError = React.useMemo(() => window.QL.messagesError, [initialRows]);
     const [rows, setRows] = React.useState(initialRows);
     React.useEffect(() => { setRows(initialRows); setChecked([]); }, [initialRows]);
     // Deep link (e.g. Audit Log "View Message"): preselect the message by fingerprint.
@@ -73,7 +72,7 @@
     const [deleting, setDeleting] = React.useState(false);
     const queueRow = D.queues.find((q) => q.name === queue) || { messages: rows.length, ready: rows.length, consumers: 0, rate: null, last: '—', type: 'DLQ' };
     const QUEUE_TONE = { DLQ: 'danger', PARKING: 'success', NORMAL: 'info' };
-    const msg = rows.find((m) => m.id === selected) || rows[0] || D.messages[0] || {};
+    const msg = rows.find((m) => m.id === selected) || rows[0] || {};
     const allChecked = rows.length > 0 && checked.length === rows.length;
     const toggle = (id) => { setConfirmDelete(false); setChecked((c) => c.includes(id) ? c.filter((x) => x !== id) : [...c, id]); };
     const toggleAll = () => { setConfirmDelete(false); setChecked(allChecked ? [] : rows.map((r) => r.id)); };
@@ -83,14 +82,19 @@
       fingerprints: rows.filter((r) => checked.includes(r.id)).map((r) => r.fingerprint),
     });
     const api = window.QL.postJson;
+    // Type-to-confirm, like the replay wizard — delete is the one action with no undo.
+    const typedConfirm = (text) => window.prompt(text + '\n\nType the queue name to confirm:') === queue;
     const doDelete = async () => {
       // Real deletion through the bulk API: dry-run on exactly the selected
-      // fingerprints, then execute the returned one-shot batch.
+      // fingerprints, show what the server will actually delete, then execute.
       const fingerprints = rows.filter((r) => checked.includes(r.id)).map((r) => r.fingerprint);
       setDeleting(true);
       try {
         const preview = await api('/api/messages/bulk/dry-run',
           { source_queue: queue, action: 'delete', fingerprints });
+        const skipped = (preview.duplicate_fingerprints || 0) + (preview.selected_not_seen || 0);
+        if (!typedConfirm('Dry run: ' + preview.message_count + ' of ' + fingerprints.length + ' selected messages will be deleted from ' + queue
+          + (skipped ? ' (' + skipped + ' skipped: duplicates or no longer in the queue)' : '') + '. This cannot be undone.')) return;
         await api('/api/messages/bulk/execute', { batch_id: preview.batch_id, confirm: true });
         setRows((rs) => rs.filter((r) => !checked.includes(r.id)));
         setDeletedNote(fingerprints.length);
@@ -104,7 +108,7 @@
       const parkHint = preferPark && msg.xdeath >= 3
         ? ' This message has died ' + msg.xdeath + ' times — consider Park instead to keep it recoverable.'
         : '';
-      if (!window.confirm('Delete this message from ' + queue + '? This cannot be undone.' + parkHint)) return;
+      if (!typedConfirm('Delete this message from ' + queue + '? This cannot be undone.' + parkHint)) return;
       try {
         await api('/api/messages/delete', { source_queue: queue, fingerprint: msg.fingerprint, confirm: true });
         setRows((rs) => rs.filter((r) => r.id !== msg.id));
@@ -134,6 +138,7 @@
               <StatusPill tone={QUEUE_TONE[queueRow.type] || 'info'} dot>{queueRow.type}{queueRow.retry ? ' · retry' : ''}</StatusPill>
             </span>}
             subtitle="Browse messages safely. Messages are fetched with requeue (non-destructive)." />
+          {loadError && <Alert tone="danger" title="Messages not loaded" style={{ marginBottom: 18 }}>{loadError}</Alert>}
 
           <Card pad={false} style={{ marginBottom: 18 }}>
             <div style={{ display: 'flex', divide: '1px' }}>

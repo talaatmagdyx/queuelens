@@ -2,6 +2,7 @@ import json as _json
 import logging
 import sys
 from collections.abc import AsyncIterator
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 
 from sqlalchemy import delete, desc, func, select
@@ -9,6 +10,12 @@ from sqlalchemy import delete, desc, func, select
 from app.domain.models import AuditEntry
 from app.infrastructure.persistence.database import Database
 from app.infrastructure.persistence.models import AuditEventModel
+
+# (client ip, user agent) of the HTTP request being served — set by the middleware
+# in app.main, so every audit row says where the action came from.
+REQUEST_CONTEXT: ContextVar[tuple[str | None, str | None]] = ContextVar(
+    "audit_request_context", default=(None, None)
+)
 
 
 def _audit_logger() -> logging.Logger:
@@ -31,6 +38,7 @@ class AuditRepository:
         self.stream_to_log = False
 
     async def record(self, entry: AuditEntry) -> dict[str, object]:
+        request_ip, user_agent = REQUEST_CONTEXT.get()
         async with self._database.session() as session:
             model = AuditEventModel(
                 timestamp=entry.timestamp,
@@ -45,8 +53,8 @@ class AuditRepository:
                 target_routing_key=entry.target_routing_key,
                 result=entry.result,
                 error_message=entry.error_message,
-                request_ip=entry.request_ip,
-                user_agent=entry.user_agent,
+                request_ip=entry.request_ip or request_ip,
+                user_agent=(entry.user_agent or user_agent or "")[:512] or None,
                 metadata_json=entry.metadata,
             )
             session.add(model)

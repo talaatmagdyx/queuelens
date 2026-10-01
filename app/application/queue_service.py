@@ -2,12 +2,60 @@ from collections.abc import Sequence
 from typing import Any
 
 from app.domain.models import QueueInfo
-from app.infrastructure.rabbitmq.management_client import RabbitMQManagementClient
+from app.infrastructure.rabbitmq.management_client import (
+    RabbitMQManagementClient,
+    RabbitMQManagementError,
+)
+
+
+class UnsafeToBrowse(RuntimeError):
+    """Browsing this queue would count as deliveries and could drop messages."""
+
+
+def delivery_limit(raw: dict[str, Any], rabbitmq_version: str | None) -> int | None:
+    """Effective delivery limit of a quorum queue, or None when it has none.
+
+    AMQP 0-9-1 has no browse: a preview is basic.get + requeue, and quorum queues
+    count every requeue as a delivery — past the limit the message is dropped
+    (or dead-lettered away). Classic queues don't count, so they're always safe."""
+    arguments = raw.get("arguments") or {}
+    if (raw.get("type") or arguments.get("x-queue-type")) != "quorum":
+        return None
+    policy = raw.get("effective_policy_definition")
+    policy = policy if isinstance(policy, dict) else {}
+    limits = [int(v) for v in (arguments.get("x-delivery-limit"), policy.get("delivery-limit"))
+              if v is not None]
+    if not limits:
+        major = int(str(rabbitmq_version or "0").split(".")[0] or 0)
+        return 20 if major >= 4 else None  # RabbitMQ 4.0 made 20 the default
+    limit = min(limits)
+    return None if limit < 0 else limit  # -1 means unlimited (4.0+)
 
 
 class QueueService:
     def __init__(self, management: RabbitMQManagementClient) -> None:
         self._management = management
+        self._rabbitmq_version: str | None = None
+
+    async def assert_browsable(self, queue_name: str) -> None:
+        """Refuse previews, scans and actions on queues where requeue is destructive."""
+        try:
+            raw = await self._management.get_queue(queue_name)
+        except RabbitMQManagementError as error:
+            if error.status_code == 404:
+                return  # the AMQP path reports the missing queue as usual
+            raise
+        if self._rabbitmq_version is None:
+            overview = await self._management.overview()
+            self._rabbitmq_version = str(overview.get("rabbitmq_version"))
+        limit = delivery_limit(raw, self._rabbitmq_version)
+        if limit is not None:
+            raise UnsafeToBrowse(
+                f"{queue_name} is a quorum queue with a delivery limit of {limit}: every preview "
+                "or scan counts as a delivery and would eventually drop messages, so QueueLens "
+                "will not browse or act on it. Remove the limit on dead-letter queues "
+                "(x-delivery-limit / policy delivery-limit; -1 on RabbitMQ 4+)."
+            )
 
     async def list_queues(self, dlq_only: bool = False) -> list[QueueInfo]:
         raw_queues = await self._management.list_queues()

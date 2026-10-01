@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 
 from app.application.message_service import MASKED_VALUE, message_to_dict
@@ -78,3 +79,20 @@ def test_masking_coexists_with_datetime_normalization() -> None:
     assert result["headers"]["token"] == MASKED_VALUE
     assert result["headers"]["x-death"][0]["time"] == died_at.isoformat()
     assert result["x_death"][0]["time"] == died_at.isoformat()
+
+
+def test_raw_view_is_withheld_when_it_would_reveal_masked_or_truncated_data() -> None:
+    import base64
+    import gzip
+
+    def compressed(payload: dict) -> MessageRecord:
+        raw = gzip.compress(json.dumps(payload).encode())
+        return record(body=raw, payload=payload, payload_size=len(raw), decoded_from="gzip",
+                      payload_encoded=base64.b64encode(raw).decode())
+
+    secret = compressed({"password": "pw", "id": 1})
+    harmless = compressed({"id": 1})
+    assert message_to_dict(secret, masked_fields=("password",))["payload_encoded"] is None
+    assert message_to_dict(secret)["payload_encoded"] is not None  # masking off: nothing hidden
+    assert message_to_dict(harmless, masked_fields=("password",))["payload_encoded"] is not None
+    assert message_to_dict(harmless, max_message_size_bytes=4)["payload_encoded"] is None

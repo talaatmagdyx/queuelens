@@ -47,12 +47,14 @@
     } catch (e) { return null; }
   }
 
-  window.__loadDS = function (root) {
+  // version: the app's cache-buster, so an upgrade never runs stale cached components
+  window.__loadDS = function (root, version) {
+    var v = version ? '?v=' + encodeURIComponent(version) : '';
     var ns = findBundleNS();
     if (ns) return (window.__NS = ns);
 
     // Try the compiled bundle first.
-    var bundle = fetchSync(root + '_ds_bundle.js');
+    var bundle = fetchSync(root + '_ds_bundle.js' + v);
     if (bundle) {
       try { new Function(bundle)(); } catch (e) {}
       ns = findBundleNS();
@@ -62,7 +64,7 @@
     // Fallback: evaluate raw sources (plain React.createElement, no JSX).
     var NS = (window.__NS = {});
     FILES.forEach(function (f) {
-      var src = fetchSync(root + f);
+      var src = fetchSync(root + f + v);
       if (!src) return;
       var importNames = [];
       src = src.replace(/import\s*\{([^}]*)\}\s*from\s*'[^']*';?/g, function (m, names) {

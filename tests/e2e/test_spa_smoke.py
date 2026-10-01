@@ -53,6 +53,26 @@ def test_dashboard_renders_live_data(page) -> None:
     page.wait_for_selector("text=DLQ Recovery Dashboard", timeout=30_000)
     assert page.evaluate("() => (window.QL.data.queues || []).length") >= 0
     assert page.evaluate("() => !!window.QL.me")
+    # the summary cards are computed from the live queue list the page loaded (the
+    # Management API lags a few seconds, so compare with the same snapshot, not a refetch)
+    dlqs = page.evaluate(
+        "() => window.QL.data.queues.filter((q) => q.type !== 'NORMAL').map((q) => q.messages)"
+    )
+    card = page.locator("text=Total Messages").locator("xpath=..")
+    assert card.inner_text().split("\n")[0] == str(sum(dlqs))
+    card = page.locator("text=DLQ Queues").first.locator("xpath=..")
+    assert card.inner_text().split("\n")[0] == str(len(dlqs))
+    assert "payments.retry.dlq" not in page.inner_text("main")  # the old sample value
+
+
+def test_page_load_never_previews_message_bodies(page) -> None:
+    """A preview is a broker read (basic.get + requeue); load + auto-refresh stay metadata-only."""
+    previews: list[str] = []
+    page.on("request", lambda r: "/messages" in r.url and previews.append(r.url))
+    page.goto(f"{BASE}/app")
+    page.wait_for_selector("text=DLQ Recovery Dashboard", timeout=30_000)
+    page.wait_for_timeout(1000)
+    assert previews == []
 
 
 def test_every_screen_renders(page) -> None:

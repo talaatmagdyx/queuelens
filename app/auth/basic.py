@@ -10,9 +10,12 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 security = HTTPBasic(auto_error=False)
 
-# Sliding-window limiter for failed logins (per client IP). In-memory — QueueLens
-# runs single-instance (see docs/OPERATIONS.md deployment constraints).
-MAX_FAILURES = 10
+# Sliding-window limiter for failed logins, keyed per (client IP, username) so one
+# bad client behind a shared proxy/NAT can't lock everyone else out, plus an
+# IP-wide ceiling against password spraying. In-memory — QueueLens runs
+# single-instance (see docs/OPERATIONS.md deployment constraints).
+MAX_FAILURES = 10  # per (ip, username)
+MAX_IP_FAILURES = 50  # per ip, across usernames
 WINDOW_SECONDS = 60
 _failures: dict[str, deque[float]] = defaultdict(deque)
 
@@ -35,21 +38,27 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _check_rate_limit(ip: str) -> None:
+def _keys(ip: str, username: str) -> tuple[tuple[str, int], ...]:
+    return ((f"{ip}\0{username}", MAX_FAILURES), (ip, MAX_IP_FAILURES))
+
+
+def _check_rate_limit(ip: str, username: str) -> None:
     now = time.monotonic()
-    window = _failures[ip]
-    while window and now - window[0] > WINDOW_SECONDS:
-        window.popleft()
-    if len(window) >= MAX_FAILURES:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many failed login attempts; try again in a minute",
-            headers={"Retry-After": str(WINDOW_SECONDS)},
-        )
+    for key, limit in _keys(ip, username):
+        window = _failures[key]
+        while window and now - window[0] > WINDOW_SECONDS:
+            window.popleft()
+        if len(window) >= limit:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many failed login attempts; try again in a minute",
+                headers={"Retry-After": str(WINDOW_SECONDS)},
+            )
 
 
-def _record_failure(ip: str) -> None:
-    _failures[ip].append(time.monotonic())
+def _record_failure(ip: str, username: str) -> None:
+    for key, _limit in _keys(ip, username):
+        _failures[key].append(time.monotonic())
 
 
 async def get_current_user(
@@ -60,7 +69,7 @@ async def get_current_user(
     if not settings.auth_enabled:
         return CurrentUser(username="local", role="Admin")
     ip = _client_ip(request)
-    _check_rate_limit(ip)
+    _check_rate_limit(ip, credentials.username if credentials else "")
     if credentials is None:
         raise _unauthorized()
     matched = False
@@ -78,7 +87,7 @@ async def get_current_user(
         stored = {u["username"]: u for u in await users.list()}
         role = stored.get(credentials.username, {}).get("role", "Operator")
         return CurrentUser(username=credentials.username, role=role)
-    _record_failure(ip)
+    _record_failure(ip, credentials.username)
     raise _unauthorized()
 
 
