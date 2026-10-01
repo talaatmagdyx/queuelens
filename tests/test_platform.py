@@ -4,6 +4,11 @@ import pytest
 from app.config import Settings
 from app.domain.models import QueueInfo
 from app.main import create_app
+from tests import cred
+
+# generated per run; looked up by name so no line reads like a hardcoded secret
+PW = {name: cred() for name in ("root", "smtp", "amqp", "mgmt", "pagerduty", "new",)}
+
 
 
 def _app(tmp_path, **overrides):
@@ -13,13 +18,6 @@ def _app(tmp_path, **overrides):
         **overrides,
     }
     return create_app(Settings(**kwargs))
-
-
-def _cred() -> str:
-    """Throwaway credential generated per test — no secret-looking literals in the repo."""
-    import secrets
-
-    return secrets.token_urlsafe(12)
 
 
 @pytest.mark.asyncio
@@ -264,7 +262,7 @@ async def test_smtp_auth_tls_and_password_redaction(tmp_path) -> None:
     try:
         result = await mailer.send_email(
             {"smtp_host": "smtp.acme.io", "smtp_port": 587,
-             "username": "apikey", "password": "sg-secret"},
+             "username": "apikey", "password": PW["smtp"]},
             "hello", "body",
         )
     finally:
@@ -278,7 +276,7 @@ async def test_smtp_auth_tls_and_password_redaction(tmp_path) -> None:
     context = calls["starttls"]
     assert isinstance(context, ssl.SSLContext)
     assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
-    assert calls["login"] == ("apikey", "sg-secret")
+    assert calls["login"] == ("apikey", PW["smtp"])
 
     # the API never echoes the stored password back
     app = _app(tmp_path)
@@ -288,7 +286,7 @@ async def test_smtp_auth_tls_and_password_redaction(tmp_path) -> None:
         await client.put(
             "/api/settings",
             json={"values": {"channels": {"email": {
-                "smtp_host": "smtp.acme.io", "password": "sg-secret"}}}},
+                "smtp_host": "smtp.acme.io", "password": PW["smtp"]}}}},
         )
         got = await client.get("/api/settings")
         # saving with the sentinel keeps the stored password
@@ -301,8 +299,8 @@ async def test_smtp_auth_tls_and_password_redaction(tmp_path) -> None:
     await app.state.database.close()
 
     assert got.json()["channels"]["email"]["password"] == "__secret__"
-    assert "sg-secret" not in got.text
-    assert stored["email"]["password"] == "sg-secret"
+    assert PW["smtp"] not in got.text
+    assert stored["email"]["password"] == PW["smtp"]
     assert stored["email"]["smtp_host"] == "smtp2.acme.io"
 
 
@@ -317,8 +315,8 @@ async def test_environment_with_own_broker_credentials(tmp_path) -> None:
             json={"name": "staging-2", "vhosts": ["/"],
                   "host": "rabbitmq-stg2:5672",
                   "management_url": "http://rabbitmq-stg2:15672",
-                  "username": "stg-user", "password": "stg-pass",
-                  "management_username": "mgmt-user", "management_password": "mgmt-pass"},
+                  "username": "stg-user", "password": PW["amqp"],
+                  "management_username": "mgmt-user", "management_password": PW["mgmt"]},
         )
         listing = await client.get("/api/environments")
         settings = await client.get("/api/settings")
@@ -333,14 +331,14 @@ async def test_environment_with_own_broker_credentials(tmp_path) -> None:
     assert env["api"] == "http://rabbitmq-stg2:15672"
     assert env["removable"] is True
     # secrets never leave the server
-    assert "stg-pass" not in listing.text
-    assert "stg-pass" not in settings.text
-    assert "mgmt-pass" not in listing.text
-    assert "mgmt-pass" not in settings.text
+    assert PW["amqp"] not in listing.text
+    assert PW["amqp"] not in settings.text
+    assert PW["mgmt"] not in listing.text
+    assert PW["mgmt"] not in settings.text
     # AMQP and management credentials are stored independently
     assert stored_before["staging-2"]["management_username"] == "mgmt-user"
-    assert stored_before["staging-2"]["management_password"] == "mgmt-pass"
-    assert "stg-user:stg-pass@" in stored_before["staging-2"]["rabbitmq_url"]
+    assert stored_before["staging-2"]["management_password"] == PW["mgmt"]
+    assert f"stg-user:{PW["amqp"]}@" in stored_before["staging-2"]["rabbitmq_url"]
     assert removed.status_code == 200
     assert all(e["id"] != "staging-2" for e in gone.json()["environments"])
     assert not_removable.status_code == 404
@@ -352,22 +350,22 @@ async def test_roles_enforced_viewer_operator_admin(tmp_path) -> None:
         tmp_path,
         auth_enabled=True,
         admin_username="admin",
-        admin_password="root-pw",
+        admin_password=PW["root"],
     )
     await app.state.database.start()
-    await app.state.users.seed_env_users({"admin": "root-pw"}, "admin")
+    await app.state.users.seed_env_users({"admin": PW["root"]}, "admin")
     # invite an operator and a viewer via the API (as admin)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         op = await client.post(
             "/api/users/invite",
             json={"username": "op.user", "role": "Operator"},
-            auth=("admin", "root-pw"),
+            auth=("admin", PW["root"]),
         )
         vw = await client.post(
             "/api/users/invite",
             json={"username": "view.user", "role": "Viewer"},
-            auth=("admin", "root-pw"),
+            auth=("admin", PW["root"]),
         )
         op_auth = ("op.user", op.json()["password"])
         vw_auth = ("view.user", vw.json()["password"])
@@ -412,7 +410,7 @@ async def test_roles_enforced_viewer_operator_admin(tmp_path) -> None:
 
         # Admin: settings PUT allowed
         admin_settings = await client.put(
-            "/api/settings", json={"values": {"ui": {}}}, auth=("admin", "root-pw")
+            "/api/settings", json={"values": {"ui": {}}}, auth=("admin", PW["root"])
         )
         assert admin_settings.status_code == 200
     await app.state.database.close()
@@ -423,7 +421,7 @@ async def test_failed_logins_are_rate_limited(tmp_path) -> None:
     from app.auth import basic as auth_basic
 
     auth_basic._failures.clear()
-    app = _app(tmp_path, auth_enabled=True, admin_password="root-pw")
+    app = _app(tmp_path, auth_enabled=True, admin_password=PW["root"])
     await app.state.database.start()
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -432,7 +430,7 @@ async def test_failed_logins_are_rate_limited(tmp_path) -> None:
             assert response.status_code == 401
         blocked = await client.get("/api/queues", auth=("admin", "wrong"))
         # even correct credentials are blocked while the window is hot
-        also_blocked = await client.get("/api/queues", auth=("admin", "root-pw"))
+        also_blocked = await client.get("/api/queues", auth=("admin", PW["root"]))
     await app.state.database.close()
     auth_basic._failures.clear()
 
@@ -450,52 +448,52 @@ async def test_settings_encrypted_at_rest_when_key_set(tmp_path) -> None:
     app = _app(tmp_path, secret_key=key)
     await app.state.database.start()
     await app.state.settings_store.put(
-        {"channels": {"email": {"smtp_host": "smtp.acme.io", "password": "topsecret"}}}
+        {"channels": {"email": {"smtp_host": "smtp.acme.io", "password": PW["smtp"]}}}
     )
     # raw row must not contain the secret
     async with app.state.database.session() as session:
         row = await session.get(AppSettingModel, "channels")
         raw = str(row.value)
-    assert "topsecret" not in raw
+    assert PW["smtp"] not in raw
     assert "__encrypted__" in raw
     # decrypted read round-trips
     channels = await app.state.settings_store.get("channels")
-    assert channels["email"]["password"] == "topsecret"
+    assert channels["email"]["password"] == PW["smtp"]
     await app.state.database.close()
 
 
 @pytest.mark.asyncio
 async def test_password_change_flow(tmp_path) -> None:
-    app = _app(tmp_path, auth_enabled=True, admin_password="root-pw")
+    app = _app(tmp_path, auth_enabled=True, admin_password=PW["root"])
     await app.state.database.start()
-    await app.state.users.seed_env_users({"admin": "root-pw"}, "admin")
+    await app.state.users.seed_env_users({"admin": PW["root"]}, "admin")
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         invited = await client.post(
             "/api/users/invite",
             json={"username": "rotate.me", "role": "Operator"},
-            auth=("admin", "root-pw"),
+            auth=("admin", PW["root"]),
         )
         old_password = invited.json()["password"]
         changed = await client.post(
             "/api/users/me/password",
-            json={"current_password": old_password, "new_password": "new-strong-pass"},
+            json={"current_password": old_password, "new_password": PW["new"]},
             auth=("rotate.me", old_password),
         )
         wrong = await client.post(
             "/api/users/me/password",
-            json={"current_password": "nope", "new_password": "whatever-strong"},
-            auth=("rotate.me", "new-strong-pass"),
+            json={"current_password": cred(), "new_password": cred()},
+            auth=("rotate.me", PW["new"]),
         )
         env_managed = await client.post(
             "/api/users/me/password",
-            json={"current_password": "root-pw", "new_password": "cannot-do-this"},
-            auth=("admin", "root-pw"),
+            json={"current_password": PW["root"], "new_password": cred()},
+            auth=("admin", PW["root"]),
         )
     assert changed.status_code == 200
     assert wrong.status_code == 403
     assert env_managed.status_code == 400
-    assert await app.state.users.verify("rotate.me", "new-strong-pass") is True
+    assert await app.state.users.verify("rotate.me", PW["new"]) is True
     assert await app.state.users.verify("rotate.me", old_password) is False
     await app.state.database.close()
 
@@ -524,7 +522,7 @@ async def test_pagerduty_events_v2_payload(tmp_path, monkeypatch) -> None:
     app = _app(tmp_path)
     await app.state.database.start()
     await app.state.settings_store.put(
-        {"channels": {"pagerduty": {"routing_key": "R0UT1NGKEY"}}}
+        {"channels": {"pagerduty": {"routing_key": PW["pagerduty"]}}}
     )
     sent = {}
 
@@ -541,7 +539,7 @@ async def test_pagerduty_events_v2_payload(tmp_path, monkeypatch) -> None:
     )
     assert outcome["pagerduty"]["ok"] is True
     assert sent["url"] == "https://events.pagerduty.com/v2/enqueue"
-    assert sent["payload"]["routing_key"] == "R0UT1NGKEY"
+    assert sent["payload"]["routing_key"] == PW["pagerduty"]
     assert sent["payload"]["event_action"] == "trigger"
     assert sent["payload"]["payload"]["severity"] == "critical"
     await app.state.database.close()
@@ -658,7 +656,7 @@ async def test_audit_export_streams_full_history(tmp_path) -> None:
 async def test_channel_secrets_are_write_only(tmp_path) -> None:
     app = _app(tmp_path)
     await app.state.database.start()
-    secret = _cred()
+    secret = cred()
     channels = {
         "slack": {"url": f"https://chat.example/hooks/{secret}"},
         "webhook": {"url": f"https://ops.example/hook?token={secret}"},
@@ -699,7 +697,7 @@ async def test_activate_only_accepts_listed_vhosts(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_add_environment_audit_names_the_acting_admin(tmp_path) -> None:
-    admin = ("admin", _cred())
+    admin = ("admin", cred())
     app = _app(tmp_path, auth_enabled=True, admin_password=admin[1])
     await app.state.database.start()
     transport = httpx.ASGITransport(app=app)
@@ -707,7 +705,7 @@ async def test_add_environment_audit_names_the_acting_admin(tmp_path) -> None:
         await client.post(
             "/api/environments", auth=admin,
             json={"name": "stg", "vhosts": ["/"], "host": "rmq:5672",
-                  "username": "amqp-user", "password": _cred()},
+                  "username": "amqp-user", "password": cred()},
         )
         events = await client.get("/api/audit?action=add_environment", auth=admin)
     await app.state.database.close()
@@ -722,14 +720,14 @@ async def test_throttling_one_account_does_not_lock_out_others(tmp_path) -> None
     from app.auth import basic as auth_basic
 
     auth_basic._failures.clear()
-    admin, ops = ("admin", _cred()), ("ops", _cred())
+    admin, ops = ("admin", cred()), ("ops", cred())
     app = _app(tmp_path, auth_enabled=True, admin_password=admin[1],
                users_json=json.dumps(dict([ops])))
     await app.state.database.start()
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         for _ in range(10):
-            await client.get("/api/me", auth=(admin[0], _cred()))
+            await client.get("/api/me", auth=(admin[0], cred()))
         admin_blocked = await client.get("/api/me", auth=admin)
         colleague = await client.get("/api/me", auth=ops)
     await app.state.database.close()
@@ -748,10 +746,10 @@ async def test_unknown_usernames_cost_the_same_pbkdf2_as_known_ones(tmp_path, mo
     calls: list[str] = []
     real = store.verify_password
     monkeypatch.setattr(store, "verify_password", lambda pw, h: calls.append(h) or real(pw, h))
-    await app.state.users.create(username="known", password=_cred(), role="Viewer",
+    await app.state.users.create(username="known", password=cred(), role="Viewer",
                                  email=None, invited_by="admin")
-    assert await app.state.users.verify("ghost", _cred()) is False
-    assert await app.state.users.verify("known", _cred()) is False
+    assert await app.state.users.verify("ghost", cred()) is False
+    assert await app.state.users.verify("known", cred()) is False
     await app.state.database.close()
 
     assert len(calls) == 2  # the ghost paid a full PBKDF2 round too
@@ -764,7 +762,7 @@ async def test_pagerduty_resolves_on_recovery_even_in_quiet_hours(tmp_path, monk
 
     app = _app(tmp_path)
     await app.state.database.start()
-    routing_key = _cred()
+    routing_key = cred()
     await app.state.settings_store.put({
         "channels": {"pagerduty": {"routing_key": routing_key}},
         "ui": {"quiet_hours": True, "quiet_from": "00:00", "quiet_until": "23:59"},
