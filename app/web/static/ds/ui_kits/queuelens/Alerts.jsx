@@ -28,9 +28,14 @@
     return Math.round(m / 60) + 'h ago';
   }
 
+  // native IANA list from the browser; the server validates the choice on save
+  const TIME_ZONES = ['UTC'].concat(
+    (Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone') : []).filter((z) => z !== 'UTC'));
+
   function ChannelChip({ id, config }) {
     const m = CHANNEL_META[id];
-    const label = id === 'email' ? ((config.email || {}).to || 'Email') : ((config[id] || {}).url ? m.name : m.name + ' (unconfigured)');
+    const c = config[id] || {};
+    const label = id === 'email' ? (c.to || 'Email') : ((c.url || c.routing_key) ? m.name : m.name + ' (unconfigured)');
     return (
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 8px', borderRadius: 6, background: 'var(--slate-100)', color: 'var(--slate-600)', fontSize: 11.5, fontWeight: 600 }}>
         <Icon name={m.icon} size={12} />{label}
@@ -41,12 +46,14 @@
   function ChannelRow({ id, config, onSave, onTest, testResult }) {
     const meta = CHANNEL_META[id];
     const current = config[id] || {};
-    const connected = id === 'email' ? !!current.smtp_host : !!current.url;
+    const connected = id === 'email' ? !!current.smtp_host : !!(current.url || current.routing_key);
     const [editing, setEditing] = React.useState(false);
     const [draft, setDraft] = React.useState(current);
     const detail = id === 'email'
       ? (connected ? `${current.smtp_host}:${current.smtp_port || 1025} · ${current.to || '—'}` : 'SMTP delivery (e.g. Mailpit)')
-      : (connected ? (current.url === '__secret__' ? 'URL saved (hidden — it is a credential)' : current.url) : 'POST JSON to your endpoint');
+      : !connected ? (id === 'pagerduty' ? 'Events API v2 routing key, or a URL' : 'POST JSON to your endpoint')
+      : current.routing_key ? 'Events API v2 · routing key saved (hidden)'
+      : current.url === '__secret__' ? 'URL saved (hidden — it is a credential)' : current.url;
     return (
       <div style={{ padding: '11px 0', borderTop: '1px solid var(--slate-100)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -83,7 +90,12 @@
                 </div>
               </div>
             ) : (
-              <Input label={meta.name + ' URL'} type={draft.url === '__secret__' ? 'password' : 'text'} value={draft.url || ''} onChange={(v) => setDraft({ ...draft, url: v })} placeholder="https://…" />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {id === 'pagerduty' && (
+                  <Input label="Routing Key (Events API v2 — preferred)" type="password" value={draft.routing_key || ''} onChange={(v) => setDraft({ ...draft, routing_key: v })} placeholder="32-character integration key" />
+                )}
+                <Input label={meta.name + ' URL' + (id === 'pagerduty' ? ' (used only without a routing key)' : '')} type={draft.url === '__secret__' ? 'password' : 'text'} value={draft.url || ''} onChange={(v) => setDraft({ ...draft, url: v })} placeholder="https://…" />
+              </div>
             )}
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               {connected && (
@@ -109,7 +121,7 @@
     const [error, setError] = React.useState(null);
     const [testResult, setTestResult] = React.useState(null);
     const emailConfigured = !!((serverSettings.channels || {}).email || {}).smtp_host;
-    const [draft, setDraft] = React.useState({ name: '', pattern: '*.dlq', metric: 'Messages ready', op: '>', threshold: '100', dur: 'for 5 minutes', severity: 'Warning', email: emailConfigured, slack: false, webhook: false });
+    const [draft, setDraft] = React.useState({ name: '', pattern: '*.dlq', metric: 'Messages ready', op: '>', threshold: '100', dur: 'for 5 minutes', severity: 'Warning', email: emailConfigured, slack: false, pagerduty: false, webhook: false });
     const d = (k) => (v) => setDraft((s) => ({ ...s, [k]: v }));
     const reload = () => setRules(window.QL.fetchAlerts());
 
@@ -138,7 +150,7 @@
           threshold: parseInt(draft.threshold, 10) || 0,
           duration_seconds: DUR_KEY[draft.dur] ?? 0,
           severity: draft.severity,
-          channels: ['email', 'slack', 'webhook'].filter((c) => draft[c]),
+          channels: ['email', 'slack', 'pagerduty', 'webhook'].filter((c) => draft[c]),
           enabled: true,
         });
         setBuilding(false);
@@ -177,6 +189,7 @@
                 <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--slate-700)' }}>Send to <span style={{ fontWeight: 400, color: 'var(--slate-400)' }}>(optional — unchecked = in-app notification only)</span></span>
                 <Checkbox checked={draft.email} onChange={d('email')} label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Icon name="mail" size={13} /> Email</span>} />
                 <Checkbox checked={draft.slack} onChange={d('slack')} label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Icon name="hash" size={13} /> Slack</span>} />
+                <Checkbox checked={draft.pagerduty} onChange={d('pagerduty')} label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Icon name={CHANNEL_META.pagerduty.icon} size={13} /> PagerDuty</span>} />
                 <Checkbox checked={draft.webhook} onChange={d('webhook')} label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Icon name="webhook" size={13} /> Webhook</span>} />
                 <div style={{ flex: 1 }} />
                 <Button variant="secondary" onClick={() => setBuilding(false)}>Cancel</Button>
@@ -229,6 +242,10 @@
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 14 }}>
                   <Input label="From" value={ui.quiet_from || '22:00'} onChange={(v) => saveSettings({ ui: { ...ui, quiet_from: v } })} />
                   <Input label="Until" value={ui.quiet_until || '07:00'} onChange={(v) => saveSettings({ ui: { ...ui, quiet_until: v } })} />
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <Select label="Time zone" value={ui.quiet_tz || 'UTC'} onChange={(v) => saveSettings({ ui: { ...ui, quiet_tz: v } }).catch((e) => setError(e.message))}
+                      options={TIME_ZONES.map((z) => ({ value: z, label: z }))} />
+                  </div>
                 </div>
               )}
             </div>

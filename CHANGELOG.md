@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Security
+- Invite emails no longer contain the initial password — the inviting admin sees it once
+  and hands it over directly.
+- `/docs`, `/redoc` and `/openapi.json` require the same authentication as the API.
+
+### Added
+- Quiet hours follow a configurable time zone (`ui.quiet_tz`, IANA name, validated on save;
+  default UTC) — picker in Alerts → Quiet Hours.
+- PagerDuty Events API v2 routing key can be set in the UI (write-only, like the URLs), and
+  PagerDuty can be selected as a rule channel when creating alert rules.
+
 ## v0.10.0 — 2026-10-01
 
 ### Security / data safety

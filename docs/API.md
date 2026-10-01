@@ -4,7 +4,8 @@ Base URL: `http://<host>:8000`. All endpoints except `/health`, `/ready`, and `/
 require **HTTP Basic Auth** (`QUEUELENS_ADMIN_USERNAME` / `QUEUELENS_ADMIN_PASSWORD`) unless
 `QUEUELENS_AUTH_ENABLED=false`.
 
-Interactive OpenAPI docs are served at `/docs` (Swagger UI) and `/redoc`.
+Interactive OpenAPI docs are served at `/docs` (Swagger UI) and `/redoc`, and the schema at
+`/openapi.json` — behind the same Basic Auth as the API.
 
 ## Health
 

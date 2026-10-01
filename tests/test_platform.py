@@ -797,3 +797,78 @@ async def test_environment_switch_drops_the_cached_topology(tmp_path) -> None:
     app.state.topology_cache = (float("inf"), {"queues": [{"name": "other.broker.q"}]})
     app.state.environment_manager.attach_default()  # every bundle swap goes through _swap
     assert app.state.topology_cache is None
+
+
+@pytest.mark.asyncio
+async def test_api_docs_require_authentication(tmp_path) -> None:
+    import secrets
+
+    admin = ("admin", secrets.token_urlsafe(12))
+    pages = ("/docs", "/redoc", "/openapi.json")
+    app = _app(tmp_path, auth_enabled=True, admin_password=admin[1])
+    await app.state.database.start()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        anonymous = [(await client.get(p)).status_code for p in pages]
+        signed_in = [(await client.get(p, auth=admin)).status_code for p in pages]
+        schema = await client.get("/openapi.json", auth=admin)
+    await app.state.database.close()
+
+    assert anonymous == [401, 401, 401]
+    assert signed_in == [200, 200, 200]
+    assert "/api/queues" in schema.json()["paths"]
+
+
+@pytest.mark.asyncio
+async def test_quiet_hours_follow_the_configured_time_zone(tmp_path) -> None:
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    app = _app(tmp_path)
+    await app.state.database.start()
+    # a 30-minute window around "now" in UTC+14 — which is 14 hours away from UTC's now
+    local = datetime.now(ZoneInfo("Pacific/Kiritimati"))
+    window = {"quiet_hours": True, "quiet_from": (local - timedelta(minutes=1)).strftime("%H:%M"),
+              "quiet_until": (local + timedelta(minutes=30)).strftime("%H:%M")}
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        bad = await client.put(
+            "/api/settings", json={"values": {"ui": {**window, "quiet_tz": "Mars/Base"}}}
+        )
+        await client.put("/api/settings", json={"values": {"ui": window}})  # UTC by default
+        in_utc = await app.state.alert_engine.dispatch(["webhook"], "t", "m", severity="Warning")
+        await client.put("/api/settings",
+                         json={"values": {"ui": {**window, "quiet_tz": "Pacific/Kiritimati"}}})
+        in_tz = await app.state.alert_engine.dispatch(["webhook"], "t", "m", severity="Warning")
+    await app.state.database.close()
+
+    assert bad.status_code == 400
+    assert "skipped" not in in_utc["webhook"]  # outside the window in UTC → attempted
+    assert in_tz["webhook"]["skipped"] == "quiet_hours"
+
+
+@pytest.mark.asyncio
+async def test_invite_email_never_contains_the_password(tmp_path, monkeypatch) -> None:
+    from app.infrastructure import mailer
+
+    app = _app(tmp_path)
+    await app.state.database.start()
+    await app.state.settings_store.put({"channels": {"email": {"smtp_host": "smtp.test"}}})
+    sent: list[str] = []
+
+    async def fake_send(_config, _subject, body):
+        sent.append(body)
+        return {"ok": True, "attempts": 1, "errors": []}
+
+    monkeypatch.setattr(mailer, "send_email", fake_send)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        invited = await client.post(
+            "/api/users/invite",
+            json={"username": "new.person", "role": "Viewer", "email": "new@test.local"},
+        )
+    await app.state.database.close()
+
+    password = invited.json()["password"]
+    assert password and sent and "new.person" in sent[0]
+    assert password not in sent[0]
