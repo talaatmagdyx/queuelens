@@ -130,7 +130,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    app = FastAPI(title="QueueLens", version="0.10.0", lifespan=lifespan)
+    # API docs and schema sit behind the same auth as the API (registered below)
+    app = FastAPI(
+        title="QueueLens",
+        version="0.10.0",
+        lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     app.state.settings = settings or get_settings()
     database = Database(app.state.settings.database_url)
     app.state.database = database
@@ -164,6 +172,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             (request.client.host if request.client else None, request.headers.get("user-agent"))
         )
         return await call_next(request)
+
+    from fastapi import Depends
+    from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+
+    from app.auth.basic import get_current_username
+
+    @app.get("/openapi.json", include_in_schema=False)
+    async def _openapi(_user: str = Depends(get_current_username)) -> JSONResponse:
+        return JSONResponse(app.openapi())
+
+    @app.get("/docs", include_in_schema=False)
+    async def _docs(_user: str = Depends(get_current_username)) -> Response:
+        return get_swagger_ui_html(openapi_url="/openapi.json", title="QueueLens API")
+
+    @app.get("/redoc", include_in_schema=False)
+    async def _redoc(_user: str = Depends(get_current_username)) -> Response:
+        return get_redoc_html(openapi_url="/openapi.json", title="QueueLens API")
 
     app.include_router(health.router)
     app.include_router(metrics.router)
