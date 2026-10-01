@@ -48,6 +48,8 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.per-file-ignores]
 "app/auth/basic.py" = ["B008"]
+# scenario script: long check names/evidence strings read better on one line
+"tests/acceptance/*" = ["E501"]
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path"]

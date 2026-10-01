@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- PagerDuty `dedup_key` is per incident (`queuelens-rule-<id>-<fired at>`). Alert-rule ids
+  are reused after a delete, so a new rule could merge into — or resolve — a deleted rule's
+  still-open incident.
+
+### Added
+- `tests/acceptance/run.py`: the black-box acceptance run (real broker, real QueueLens
+  process, ~200 checks across every feature group), run in CI on RabbitMQ 3.13 and 4.1.
+
 ## v0.10.1 — 2026-10-01
 
 ### Security / data safety

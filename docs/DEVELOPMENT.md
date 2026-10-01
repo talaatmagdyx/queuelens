@@ -32,15 +32,27 @@ Or the whole stack: `docker compose up --build`.
 
 ## Test strategy
 
-Two layers, both required:
+Four layers:
 
 1. **Unit/route tests** (`tests/test_*.py`) — fast, no broker. Services are swapped on
    `app.state` (`app.state.message_service = FakeMessageService()`); AMQP channels are
    replaced with in-memory fakes (see `tests/test_actions.py`).
 2. **Real-broker integration test** (`tests/test_integration_rabbitmq.py`) — the full
    browse → failed-replay → park → replay-move → delete → audit journey against live
-   RabbitMQ. Auto-skips when no broker is reachable; override the target with
+   RabbitMQ, plus the quorum delivery-limit guard on whatever broker version it runs
+   against. Auto-skips when no broker is reachable; override the target with
    `QUEUELENS_IT_AMQP_URL` / `QUEUELENS_IT_MANAGEMENT_URL`.
+3. **Browser smoke** (`tests/e2e/`, `E2E=1`) — Playwright against a running instance.
+4. **Black-box acceptance run** (`tests/acceptance/run.py`, `ACCEPTANCE=1`) — boots
+   QueueLens itself (auth on), seeds a real broker, and runs ~200 checks across every
+   feature group through the HTTP API: dead-lettering with real `x-death`, replay/park/
+   delete/bulk failure modes, RBAC, audit-store outages, alert delivery (incl. retries,
+   quiet hours, STARTTLS against an untrusted certificate), environment switching,
+   restarts. It is a script, not a pytest module (it owns the server lifecycle); it exits
+   non-zero on any FAIL. It needs a **disposable** broker and two Mailpits — the commands
+   are in its module docstring. This is the layer that found the quorum message-loss and
+   unaudited-bulk bugs; extend it when you add a feature, especially one with a failure
+   mode.
 
 **Rule of thumb:** any change to publish/ack ordering, target verification, fingerprinting,
 or requeue behavior needs an integration-test assertion, not just a fake-based unit test.
@@ -53,9 +65,14 @@ per test with explicit `Settings`, `tmp_path` SQLite URLs for anything touching 
 
 `.github/workflows/ci.yml`, on every push/PR:
 
-- **test** job — ruff, mypy, pytest with a `rabbitmq:3.13-management` service container
-  (credentials match the integration test defaults, so nothing to configure).
+- **test** job — ruff, mypy, pytest against `rabbitmq:3.13-management` **and**
+  `rabbitmq:4.1-management` (matrix; credentials match the integration test defaults).
+- **e2e** job — the browser smoke against a booted instance.
+- **acceptance** job — the black-box run on both broker versions; results and the server
+  log are uploaded as the `acceptance-<version>` artifact.
 - **docker** job — image build.
+- **publish** (tags only) — multi-arch images to GHCR, only after test, docker and
+  acceptance pass.
 
 ## Code conventions
 
