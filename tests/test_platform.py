@@ -777,15 +777,20 @@ async def test_pagerduty_resolves_on_recovery_even_in_quiet_hours(tmp_path, monk
     before = ALERT_DELIVERIES.labels(channel="pagerduty", result="ok")._value.get()
     rule = {"id": 7, "severity": "Alert", "channels": ["pagerduty"]}
     engine = app.state.alert_engine
-    await engine._fire(rule, level="Alert", title="Rule fired: x", message="m")
-    await engine._fire(rule, level="Success", title="Recovered: x", message="m", resolve=True)
+    from datetime import UTC, datetime
+
+    fired_at = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    await engine._fire(rule, level="Alert", title="Rule fired: x", message="m", fired_at=fired_at)
+    # recovery reads last_fired_at back from SQLite — naive, ISO-formatted
+    await engine._fire(rule, level="Success", title="Recovered: x", message="m", resolve=True,
+                       fired_at="2026-10-01T12:00:00")
     after = ALERT_DELIVERIES.labels(channel="pagerduty", result="ok")._value.get()
     await app.state.database.close()
 
     trigger, resolve = sent
-    assert trigger["event_action"] == "trigger" and trigger["dedup_key"] == "queuelens-rule-7"
-    assert resolve == {"routing_key": routing_key, "event_action": "resolve",
-                       "dedup_key": "queuelens-rule-7"}
+    key = f"queuelens-rule-7-{int(fired_at.timestamp())}"  # per incident: rule ids get reused
+    assert trigger["event_action"] == "trigger" and trigger["dedup_key"] == key
+    assert resolve == {"routing_key": routing_key, "event_action": "resolve", "dedup_key": key}
     assert after - before == 2
 
 

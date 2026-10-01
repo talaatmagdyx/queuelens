@@ -22,6 +22,19 @@ METRICS = ("messages_ready", "messages", "consumers", "publish_rate")
 WEBHOOK_RETRY_DELAYS = (0.5, 2.0, 8.0)
 
 
+def incident_key(rule_id: int, fired_at: datetime | str | None) -> str:
+    """PagerDuty dedup_key: one per firing, shared by its trigger and its resolve.
+    Rule ids alone are reused after a delete (SQLite rowids), which would merge a new
+    rule's incident into — or resolve — a deleted rule's open one."""
+    if isinstance(fired_at, str):
+        fired_at = datetime.fromisoformat(fired_at)
+    if fired_at is None:
+        return f"queuelens-rule-{rule_id}"
+    if fired_at.tzinfo is None:  # SQLite hands back naive UTC
+        fired_at = fired_at.replace(tzinfo=UTC)
+    return f"queuelens-rule-{rule_id}-{int(fired_at.timestamp())}"
+
+
 def condition_holds(value: float, operator: str, threshold: float) -> bool:
     if operator == ">":
         return value > threshold
@@ -131,6 +144,7 @@ class AlertEngine:
                             f"{rule['pattern']} · {rule['metric']} {rule['operator']} "
                             f"{rule['threshold']} — {detail}"
                         ),
+                        fired_at=now,
                     )
                     created.append(notification)
             else:
@@ -143,12 +157,20 @@ class AlertEngine:
                         title=f"Recovered: {rule['name']}",
                         message=f"{rule['pattern']} · condition no longer holds",
                         resolve=True,
+                        fired_at=rule["last_fired_at"],  # the incident this recovery closes
                     )
                     created.append(notification)
         return created
 
     async def _fire(
-        self, rule: dict[str, Any], *, level: str, title: str, message: str, resolve: bool = False
+        self,
+        rule: dict[str, Any],
+        *,
+        level: str,
+        title: str,
+        message: str,
+        resolve: bool = False,
+        fired_at: datetime | str | None = None,
     ) -> dict[str, Any]:
         # the rule's severity drives quiet hours + PagerDuty for both edges, so a
         # recovery is never muted while the incident it closes was paged
@@ -157,7 +179,7 @@ class AlertEngine:
             title,
             message,
             severity=rule["severity"],
-            dedup_key=f"queuelens-rule-{rule['id']}",
+            dedup_key=incident_key(rule["id"], fired_at),
             resolve=resolve,
         )
         return await self._notifications.add(
