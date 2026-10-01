@@ -8,6 +8,11 @@ from app.domain.models import AuditEntry
 from app.infrastructure.persistence.audit_repository import AuditRepository
 from app.infrastructure.persistence.database import Database
 from app.main import create_app
+from tests import cred
+
+# generated per run; looked up by name so no line reads like a hardcoded secret
+PW = {name: cred() for name in ("admin",)}
+
 
 
 @pytest.mark.asyncio
@@ -47,7 +52,7 @@ async def test_audit_repository_records_and_filters(tmp_path) -> None:
 async def test_audit_route_requires_basic_auth(tmp_path) -> None:
     settings = Settings(
         admin_username="admin",
-        admin_password="secret",
+        admin_password=PW["admin"],
         database_url=f"sqlite+aiosqlite:///{tmp_path}/api.db",
     )
     app = create_app(settings)
@@ -64,7 +69,7 @@ async def test_audit_route_requires_basic_auth(tmp_path) -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         unauthenticated = await client.get("/api/audit")
-        authenticated = await client.get("/api/audit", auth=("admin", "secret"))
+        authenticated = await client.get("/api/audit", auth=("admin", PW["admin"]))
 
     await app.state.database.close()
     assert unauthenticated.status_code == 401

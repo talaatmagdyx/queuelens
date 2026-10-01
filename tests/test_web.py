@@ -4,6 +4,11 @@ import pytest
 from app.config import Settings
 from app.domain.models import MessageRecord, QueueInfo
 from app.main import create_app
+from tests import cred
+
+# generated per run; looked up by name so no line reads like a hardcoded secret
+PW = {name: cred() for name in ("root", "mgmt", "sre",)}
+
 
 
 @pytest.mark.asyncio
@@ -76,8 +81,8 @@ async def test_multi_user_auth_enforced_on_api(tmp_path) -> None:
         Settings(
             auth_enabled=True,
             admin_username="admin",
-            admin_password="root-pw",
-            users_json=jsonlib.dumps({"sre": "sre-pw"}),
+            admin_password=PW["root"],
+            users_json=jsonlib.dumps({"sre": PW["sre"]}),
             database_url=f"sqlite+aiosqlite:///{tmp_path}/u.db",
         )
     )
@@ -85,9 +90,9 @@ async def test_multi_user_auth_enforced_on_api(tmp_path) -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         anonymous = await client.get("/api/me")
-        wrong = await client.get("/api/me", auth=("sre", "bad"))
-        sre = await client.get("/api/me", auth=("sre", "sre-pw"))
-        admin = await client.get("/api/me", auth=("admin", "root-pw"))
+        wrong = await client.get("/api/me", auth=("sre", cred()))
+        sre = await client.get("/api/me", auth=("sre", PW["sre"]))
+        admin = await client.get("/api/me", auth=("admin", PW["root"]))
     await app.state.database.close()
 
     assert anonymous.status_code == 401
@@ -127,8 +132,8 @@ async def test_config_api_is_read_only_and_never_leaks_secrets(tmp_path) -> None
     app = create_app(
         Settings(
             auth_enabled=False,
-            admin_password="super-secret-pw",
-            rabbitmq_management_password="mgmt-secret",
+            admin_password=PW["root"],
+            rabbitmq_management_password=PW["mgmt"],
             database_url=f"sqlite+aiosqlite:///{tmp_path}/c.db",
         )
     )
@@ -142,8 +147,8 @@ async def test_config_api_is_read_only_and_never_leaks_secrets(tmp_path) -> None
     assert body["max_bulk_size"] == 500
     assert body["masking_enabled"] is True
     assert "password" in body["masked_fields"]
-    assert "super-secret-pw" not in response.text
-    assert "mgmt-secret" not in response.text
+    assert PW["root"] not in response.text
+    assert PW["mgmt"] not in response.text
 
 
 @pytest.mark.asyncio
