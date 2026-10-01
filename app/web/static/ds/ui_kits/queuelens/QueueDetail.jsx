@@ -52,6 +52,7 @@
             after={<span style={{ display: 'inline-flex', gap: 6 }}>
               {isDlq && <Badge tone="danger">DLQ</Badge>}
               {row.qtype && row.qtype !== 'classic' && <Badge tone={row.qtype === 'quorum' ? 'park' : 'info'} uppercase={false}>{row.qtype}</Badge>}
+              {row.deliveryLimit != null && <span title={'Quorum queue with a delivery limit of ' + row.deliveryLimit + ': every preview counts as a delivery, so QueueLens will not browse it. Set the limit to -1 on RabbitMQ 4 (remove it on 3.x) to browse.'}><Badge tone="danger" uppercase={false}>not browsable</Badge></span>}
               <StatusPill tone={row.status === 'attention' ? 'danger' : row.status === 'active' ? 'success' : 'info'} dot>
                 {row.status === 'attention' ? 'Needs Attention' : row.status === 'active' ? 'Active' : 'Idle'}
               </StatusPill>

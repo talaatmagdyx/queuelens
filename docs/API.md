@@ -53,11 +53,18 @@ List queues in the configured vhost.
       "consumers": 0,
       "durable": true,
       "arguments": {},
-      "is_dlq": true
+      "is_dlq": true,
+      "delivery_limit": null,
+      "browsable": true
     }
   ]
 }
 ```
+
+`delivery_limit` is a quorum queue's effective delivery limit (`null` when it has none) and
+`browsable` is `false` when it has one — exactly the rule that makes previews and actions on
+that queue answer `409` (see [SAFETY.md](SAFETY.md#1-browsing-never-consumes-messages)), so
+a client can say so before anyone clicks.
 
 `queue_type` is the RabbitMQ queue type (`classic`, `quorum`, or `stream`), read from the
 Management API `type` field with an `x-queue-type` argument fallback.

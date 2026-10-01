@@ -18,6 +18,7 @@ class QueueInfo:
     queue_type: str = "classic"  # classic | quorum | stream
     publish_rate: float | None = None
     idle_since: str | None = None
+    delivery_limit: int | None = None  # quorum only; set → previews would drop messages
 
 
 @dataclass(frozen=True, slots=True)

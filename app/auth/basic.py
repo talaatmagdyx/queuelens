@@ -24,6 +24,7 @@ _failures: dict[str, deque[float]] = defaultdict(deque)
 class CurrentUser:
     username: str
     role: str  # Admin | Operator | Viewer
+    must_change_password: bool = False
 
     @property
     def is_admin(self) -> bool:
@@ -32,6 +33,10 @@ class CurrentUser:
     @property
     def can_operate(self) -> bool:
         return self.role in ("Admin", "Operator")
+
+
+# What an invited account may reach before it has replaced its one-time password.
+FIRST_LOGIN_PATHS = {"/api/me", "/api/users/me/password", "/app", "/"}
 
 
 def _client_ip(request: Request) -> str:
@@ -84,9 +89,18 @@ async def get_current_user(
         return CurrentUser(username=credentials.username, role=role)
     users = getattr(request.app.state, "users", None)
     if users is not None and await users.verify(credentials.username, credentials.password):
-        stored = {u["username"]: u for u in await users.list()}
-        role = stored.get(credentials.username, {}).get("role", "Operator")
-        return CurrentUser(username=credentials.username, role=role)
+        account = {u["username"]: u for u in await users.list()}.get(credentials.username, {})
+        must_change = bool(account.get("must_change_password"))
+        if must_change and request.url.path not in FIRST_LOGIN_PATHS:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Change your one-time password first (POST /api/users/me/password)",
+            )
+        return CurrentUser(
+            username=credentials.username,
+            role=account.get("role", "Operator"),
+            must_change_password=must_change,
+        )
     _record_failure(ip, credentials.username)
     raise _unauthorized()
 

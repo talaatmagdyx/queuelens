@@ -62,6 +62,7 @@
                 <span style={{ display: 'inline-flex', gap: 6 }}>
                   <Badge tone={TYPE_TONE[r.type]}>{r.type}</Badge>
                   {r.retry && <Badge tone="warning" uppercase={false}>retry</Badge>}
+                  {r.deliveryLimit != null && <span title={'Quorum queue with a delivery limit of ' + r.deliveryLimit + ': every preview counts as a delivery, so QueueLens will not browse it. Set the limit to -1 on RabbitMQ 4 (remove it on 3.x) to browse.'}><Badge tone="danger" uppercase={false}>not browsable</Badge></span>}
                 </span>) },
               { key: 'messages', label: 'Messages', render: (r) => <span style={{ fontWeight: 600, color: r.status === 'attention' ? 'var(--red-600)' : 'var(--slate-700)' }}>{r.messages}</span> },
               { key: 'ready', label: 'Ready' },

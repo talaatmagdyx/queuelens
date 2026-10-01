@@ -400,6 +400,22 @@ async def g12():
         check(12, f"Admin invites {role} '{name}' (one-time password returned)", ok, r.status_code)
         if ok:
             USERS[name] = (name, r.json()["password"])
+    # one-time passwords: nothing but /api/me and the password change answers until replaced
+    one_time = USERS["oper1"]
+    blocked = await api("GET", "/api/queues", auth=one_time)
+    me = (await api("GET", "/api/me", auth=one_time)).json()
+    check(12, "Invited account must replace its one-time password first (403 elsewhere)",
+          blocked.status_code == 403 and me.get("must_change_password") is True,
+          (blocked.status_code, me))
+    for name, (_, first) in list(USERS.items()):
+        pw = {"old": first, "new": token_urlsafe(12)}
+        r = await api("POST", "/api/users/me/password", auth=(name, pw["old"]),
+                      json={"current_password": pw["old"], "new_password": pw["new"]})
+        if r.status_code == 200:
+            USERS[name] = (name, pw["new"])
+    check(12, "After the change the account works, the one-time password doesn't",
+          (await api("GET", "/api/queues", auth=USERS["oper1"])).status_code == 200
+          and (await api("GET", "/api/me", auth=one_time)).status_code == 401)
     r = await api("POST", "/api/users/invite", json={"username": "viewer1", "role": "Viewer"})
     check(12, "Duplicate invite → 409", r.status_code == 409, r.status_code)
     r = await api("POST", "/api/users/invite", json={"username": "bad name!", "role": "Viewer"})
@@ -614,6 +630,10 @@ async def g2():
     await asyncio.sleep(1.5)
     control = await count("t2.quorum.control")
     detail = (await preview("t2.quorum.dlq")).json().get("detail", "")
+    row = (await api("GET", "/api/queues/t2.quorum.dlq")).json()["queue"]
+    check(2, "Queue list flags the quorum DLQ as not browsable (delivery limit 2)",
+          row.get("browsable") is False and row.get("delivery_limit") == 2,
+          {k: row.get(k) for k in ("queue_type", "delivery_limit", "browsable")})
     check(2, "Browsing never consumes — quorum DLQ with x-delivery-limit=2, previewed 5x",
           left == 1 and set(codes) == {409} and "delivery limit of 2" in detail,
           f"preview codes {codes}; messages left {left} (control queue, never previewed: {control})")
@@ -1475,8 +1495,8 @@ async def final():
 
     env_ok = await timed(ADMIN)
     db_ok = await timed(USERS["viewer1"])
-    rec(12, "Per-request cost of DB-user auth (PBKDF2 200k on every request)", "NOTE",
-        f"env user {env_ok * 1000:.0f} ms vs DB user {db_ok * 1000:.0f} ms per request (Basic auth, no session)")
+    check(12, "DB-user requests don't re-run PBKDF2 each time (verified-login cache)", db_ok < 0.015,
+          f"env user {env_ok * 1000:.0f} ms vs DB user {db_ok * 1000:.0f} ms per request (median of 3; PBKDF2 alone is ~30 ms)")
     missing = await timed(("no-such-user", token_urlsafe(6)), 3)
     wrongpw = await timed(("oper1", token_urlsafe(6)), 3)
     check(12, "Failed logins take the same time for unknown vs known usernames",

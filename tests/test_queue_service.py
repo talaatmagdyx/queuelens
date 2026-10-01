@@ -42,7 +42,9 @@ async def test_management_client_lists_queues_with_encoded_vhost() -> None:
     queues = await QueueService(management).list_queues(dlq_only=True)
     await client.aclose()
 
-    assert requested_paths == ["http://management.test/api/queues/%2F"]
+    # the queue list, plus the broker version (for delivery limits) — fetched once
+    assert requested_paths[0] == "http://management.test/api/queues/%2F"
+    assert set(requested_paths[1:]) <= {"http://management.test/api/overview"}
     assert len(queues) == 1
     assert queues[0].name == "orders.dlq"
     assert queues[0].is_dlq is True
@@ -179,3 +181,30 @@ async def test_assert_browsable_refuses_quorum_queues_with_a_delivery_limit() ->
     with pytest.raises(UnsafeToBrowse, match="statistics aren't available yet"):
         await service.assert_browsable("fresh.dlq")
     await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_queue_list_says_which_queues_cannot_be_browsed() -> None:
+    raw = [
+        {"name": "classic.dlq", "type": "classic", "arguments": {}, "messages": 1},
+        {"name": "quorum.dlq", "type": "quorum", "arguments": {"x-queue-type": "quorum"},
+         "messages": 1},
+        {"name": "unlimited.dlq", "type": "quorum", "messages": 1,
+         "arguments": {"x-queue-type": "quorum", "x-delivery-limit": -1}},
+    ]
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/overview":
+            return httpx.Response(200, json={"rabbitmq_version": "4.1.8"})
+        return httpx.Response(200, json=raw)
+
+    from app.application.queue_service import queues_to_dicts
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://management.test")
+    service = QueueService(RabbitMQManagementClient(settings(), client=client))
+    rows = queues_to_dicts(await service.list_queues())
+    await client.aclose()
+
+    by_name = {r["name"]: (r["delivery_limit"], r["browsable"]) for r in rows}
+    assert by_name == {"classic.dlq": (None, True), "quorum.dlq": (20, False),  # 4.x default
+                       "unlimited.dlq": (None, True)}
