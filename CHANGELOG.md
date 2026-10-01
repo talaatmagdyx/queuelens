@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.10.0 — 2026-10-01
 
 ### Security / data safety
 - **Quorum DLQs with a delivery limit are no longer browsed.** A preview is basic.get +
