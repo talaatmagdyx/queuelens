@@ -8,10 +8,17 @@
 - **RabbitMQ 4.x: a `-1` from the policy (or argument) no longer cancels a real limit from
   the other source** — the lowest non-negative value wins, as the broker does.
 - Quorum queues are refused until their first statistics (and applied policy) are visible.
+- Invite emails no longer contain the initial password — the inviting admin sees it once
+  and hands it over directly.
+- `/docs`, `/redoc` and `/openapi.json` require the same authentication as the API.
 
 ### Added
 - CI runs the integration suite against RabbitMQ 3.13 **and 4.1**, including a real-broker
   check that previews never cost a quorum queue a message.
+- Quiet hours follow a configurable time zone (`ui.quiet_tz`, IANA name, validated on save;
+  default UTC) — picker in Alerts → Quiet Hours.
+- PagerDuty Events API v2 routing key can be set in the UI (write-only, like the URLs), and
+  PagerDuty can be selected as a rule channel when creating alert rules.
 
 ## v0.10.0 — 2026-10-01
 

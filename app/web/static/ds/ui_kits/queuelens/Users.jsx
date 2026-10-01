@@ -103,7 +103,7 @@
           )}
           {result && (
             <Alert tone="success" title={`Invited ${result.username} as ${result.role}`} style={{ marginBottom: 18 }}>
-              One-time password (copy it now — it is not stored in plain text):
+              One-time password — copy it now and hand it over yourself (it is not stored in plain text, and the invite email never contains it):
               <div style={{ marginTop: 8 }}><CodeBlock code={result.password} copy /></div>
               {result.email_delivery && (
                 <div style={{ marginTop: 8, fontSize: 12.5 }}>

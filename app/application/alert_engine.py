@@ -169,8 +169,19 @@ class AlertEngine:
         )
 
     @staticmethod
+    def _local_hhmm(ui: dict[str, Any]) -> str:
+        """Current HH:MM in the quiet-hours time zone (IANA name, default UTC)."""
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            zone = ZoneInfo(str(ui.get("quiet_tz") or "UTC"))
+        except (ZoneInfoNotFoundError, ValueError):
+            zone = ZoneInfo("UTC")  # validated on save; stay safe on legacy rows
+        return datetime.now(zone).strftime("%H:%M")
+
+    @staticmethod
     def _in_quiet_hours(ui: dict[str, Any], now_hhmm: str) -> bool:
-        """True when quiet hours are on and `now` falls inside the window (UTC)."""
+        """True when quiet hours are on and `now` (local HH:MM) falls inside the window."""
         if not ui.get("quiet_hours"):
             return False
         start = str(ui.get("quiet_from") or "22:00")
@@ -209,8 +220,7 @@ class AlertEngine:
     ) -> dict[str, Any]:
         config = await self._settings_store.get("channels", {}) or {}
         ui = await self._settings_store.get("ui", {}) or {}
-        now_hhmm = datetime.now(UTC).strftime("%H:%M")
-        if severity != "Alert" and self._in_quiet_hours(ui, now_hhmm):
+        if severity != "Alert" and self._in_quiet_hours(ui, self._local_hhmm(ui)):
             return {
                 channel: {"ok": False, "skipped": "quiet_hours", "errors": []}
                 for channel in channels

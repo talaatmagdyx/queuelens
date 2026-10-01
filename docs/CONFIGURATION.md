@@ -39,7 +39,8 @@ Practical consequences:
 - SMTP TLS (STARTTLS, or implicit TLS on 465) verifies the server certificate and
   hostname against the system trust store — an untrusted or mismatched certificate fails
   the delivery instead of sending in the clear to whoever answered.
-- Quiet hours (`quiet_from` / `quiet_until`) are evaluated in **UTC**. They mute Info and
+- Quiet hours (`quiet_from` / `quiet_until`) are evaluated in the time zone chosen next to
+  them (`quiet_tz`, any IANA name such as `Europe/Berlin`; default **UTC**). They mute Info and
   Warning deliveries; Alert severity always sends, and a recovery follows its rule's
   severity so a paged incident always gets its resolve.
 - Failed logins are throttled per (client IP, username) — 10 per minute — plus 50 per

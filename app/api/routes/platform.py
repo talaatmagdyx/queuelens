@@ -96,6 +96,16 @@ async def put_settings_api(
     if unknown:
         raise HTTPException(status_code=400, detail=f"Unknown settings keys: {sorted(unknown)}")
     values = body.values
+    quiet_tz = (values.get("ui") or {}).get("quiet_tz") if "ui" in values else None
+    if quiet_tz:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(str(quiet_tz))
+        except (ZoneInfoNotFoundError, ValueError) as error:
+            raise HTTPException(
+                status_code=400, detail=f"Unknown time zone: {quiet_tz}"
+            ) from error
     if "ui" in values:
         request.app.state.audit_repository.stream_to_log = bool(
             (values.get("ui") or {}).get("syslog")
@@ -263,10 +273,13 @@ async def invite_user(
             email_result = await send_email(
                 email_config,
                 "[QueueLens] You have been invited",
+                # never the password: mail is stored and forwarded in clear — the admin
+                # sees it once in the API response and hands it over out-of-band
                 (
                     f"{username} invited you to QueueLens as {body.role}.\n\n"
-                    f"Username: {body.username}\nPassword: {password}\n\n"
-                    "Sign in with HTTP Basic auth and change your password with an admin."
+                    f"Username: {body.username}\n\n"
+                    f"{username} will give you your initial password directly — it is never "
+                    "sent by email. After signing in, change it under Users → My Password."
                 ),
             )
     return {
