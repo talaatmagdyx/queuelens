@@ -311,25 +311,42 @@ async def test_quorum_delivery_limits_against_real_broker(tmp_path) -> None:
                         break
                     await asyncio.sleep(0.5)
 
+        async def settled_count(name: str, timeout: float = 15.0) -> list[tuple[float, int]]:
+            """Quorum enqueues and requeues apply asynchronously (Raft), slower on a cold
+            node: poll until the count is 1 or the time is up; a lost message stays at 0."""
+            started, seen = asyncio.get_running_loop().time(), []
+            while True:
+                elapsed = asyncio.get_running_loop().time() - started
+                n = (await channel.declare_queue(name, passive=True)).declaration_result
+                seen.append((round(elapsed, 1), n.message_count))
+                if n.message_count == 1 or elapsed > timeout:
+                    return seen
+                await asyncio.sleep(0.25)
+
+        # the message must have landed before anything is previewed — otherwise an empty
+        # queue later would look like a loss caused by the previews
+        for name in queues:
+            landed = await settled_count(name)
+            assert landed[-1][1] == 1, f"{name}: the published message never landed: {landed}"
+
         app = create_app(_settings(tmp_path))
         async with app.router.lifespan_context(app):
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 for name, (_arguments, refused) in queues.items():
+                    seen_sizes = []
                     for _ in range(25):  # past the 4.x default of 20
                         response = await client.get(f"/api/queues/{name}/messages")
                         expected = 409 if refused else 200
                         assert response.status_code == expected, (name, response.text)
+                        if not refused:
+                            seen_sizes.append(len(response.json()["messages"]))
                     if refused:
                         assert "delivery limit" in response.json()["detail"]
-                    # quorum requeues apply asynchronously (Raft): let the count settle —
-                    # a dropped message stays at 0
-                    for _ in range(25):
-                        left = await channel.declare_queue(name, passive=True)
-                        if left.declaration_result.message_count == 1:
-                            break
-                        await asyncio.sleep(0.2)
-                    assert left.declaration_result.message_count == 1, f"{name} lost its message"
+                    else:  # every preview of a browsable queue saw the one message
+                        assert set(seen_sizes) == {1}, (name, seen_sizes)
+                    timeline = await settled_count(name)
+                    assert timeline[-1][1] == 1, f"{name} lost its message: {timeline}"
     finally:
         cleanup = await connection.channel()
         for name in queues:
