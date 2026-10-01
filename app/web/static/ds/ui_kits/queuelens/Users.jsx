@@ -41,7 +41,7 @@
     });
   }
 
-  function PasswordCard() {
+  function PasswordCard({ firstLogin = false }) {
     const { Input, Button, Alert } = window.__NS;
     const [draft, setDraft] = React.useState({ current: '', next: '' });
     const [status, setStatus] = React.useState(null);
@@ -51,8 +51,12 @@
         await window.QL.postJson('/api/users/me/password', {
           current_password: draft.current, new_password: draft.next,
         });
-        setStatus({ ok: true, text: 'Password changed. Use it on your next request.' });
+        setStatus({ ok: true, text: firstLogin
+          ? 'Password changed — sign in again with your new password.'
+          : 'Password changed. Use it on your next request.' });
         setDraft({ current: '', next: '' });
+        // Basic auth: the browser still holds the old password, so the reload re-prompts
+        if (firstLogin) setTimeout(() => location.reload(), 1500);
       } catch (e) { setStatus({ ok: false, text: e.message }); }
     };
     return (
@@ -172,4 +176,5 @@
   }
 
   window.QL.screens.Users = Users;
+  window.QL.PasswordCard = PasswordCard;
 })();

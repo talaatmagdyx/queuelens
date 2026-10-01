@@ -59,9 +59,7 @@ class QueueService:
             if error.status_code == 404:
                 return  # the AMQP path reports the missing queue as usual
             raise
-        if self._rabbitmq_version is None:
-            overview = await self._management.overview()
-            self._rabbitmq_version = str(overview.get("rabbitmq_version"))
+        version = await self._version(strict=True)  # unknown version → can't judge → refuse
         quorum = (raw.get("type") or (raw.get("arguments") or {}).get("x-queue-type")) == "quorum"
         if quorum and "messages" not in raw:
             # the first stats emission (seconds after declaration) also carries the
@@ -70,12 +68,12 @@ class QueueService:
                 f"{queue_name} is a quorum queue whose statistics aren't available yet, so its "
                 "delivery limit can't be checked — try again in a few seconds."
             )
-        limit = delivery_limit(raw, self._rabbitmq_version)
+        limit = delivery_limit(raw, version)
         if limit is not None:
             fix = (
                 "set the limit to -1 on dead-letter queues (policy delivery-limit or "
                 "x-delivery-limit)"
-                if _major(self._rabbitmq_version) >= 4
+                if _major(version) >= 4
                 else "remove x-delivery-limit / the delivery-limit policy from dead-letter "
                 "queues (on RabbitMQ 3.x, -1 is not unlimited — it drops on the first return)"
             )
@@ -85,10 +83,22 @@ class QueueService:
                 f"will not browse or act on it. To browse it, {fix}."
             )
 
+    async def _version(self, *, strict: bool) -> str | None:
+        if self._rabbitmq_version is None:
+            try:
+                overview = await self._management.overview()
+                self._rabbitmq_version = str(overview.get("rabbitmq_version"))
+            except Exception:
+                if strict:
+                    raise
+                return None  # listing is display-only: show the queues, skip the limit
+        return self._rabbitmq_version
+
     async def list_queues(self, dlq_only: bool = False) -> list[QueueInfo]:
         raw_queues = await self._management.list_queues()
         dead_letter_targets = self._dead_letter_targets(raw_queues)
-        queues = [self._to_queue_info(item, dead_letter_targets) for item in raw_queues]
+        version = await self._version(strict=False)
+        queues = [self._to_queue_info(item, dead_letter_targets, version) for item in raw_queues]
         if dlq_only:
             queues = [queue for queue in queues if queue.is_dlq]
         # riskiest first: the biggest backlog is where an operator starts
@@ -96,7 +106,8 @@ class QueueService:
         return queues
 
     async def get_queue(self, queue_name: str) -> QueueInfo:
-        return self._to_queue_info(await self._management.get_queue(queue_name), set())
+        raw = await self._management.get_queue(queue_name)
+        return self._to_queue_info(raw, set(), await self._version(strict=False))
 
     @staticmethod
     def _dead_letter_targets(raw_queues: list[dict[str, Any]]) -> set[str]:
@@ -110,7 +121,9 @@ class QueueService:
         return targets
 
     @staticmethod
-    def _to_queue_info(raw: dict[str, Any], dead_letter_targets: set[str]) -> QueueInfo:
+    def _to_queue_info(
+        raw: dict[str, Any], dead_letter_targets: set[str], version: str | None = None
+    ) -> QueueInfo:
         arguments = raw.get("arguments") or {}
         name = str(raw.get("name", ""))
         is_dlq = QueueService._looks_like_dlq(name, dead_letter_targets)
@@ -132,6 +145,7 @@ class QueueService:
             .get("publish_details", {})
             .get("rate"),
             idle_since=raw.get("idle_since"),
+            delivery_limit=delivery_limit(raw, version),
         )
 
     @staticmethod
@@ -194,6 +208,9 @@ def queues_to_dicts(queues: Sequence[QueueInfo]) -> list[dict[str, Any]]:
             "status": _status(queue),
             "publish_rate": queue.publish_rate,
             "idle_since": queue.idle_since,
+            # the same rule the browse guard applies — so the UI can say so before a click
+            "delivery_limit": queue.delivery_limit,
+            "browsable": queue.delivery_limit is None,
         }
         for queue in queues
     ]

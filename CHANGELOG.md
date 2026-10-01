@@ -7,9 +7,22 @@
   are reused after a delete, so a new rule could merge into — or resolve — a deleted rule's
   still-open incident.
 
+### Security
+- Invited accounts must replace their one-time password before anything else: every
+  endpoint except `/api/me` and `POST /api/users/me/password` answers `403` until then,
+  and the console shows only the password form.
+
 ### Added
+- The queue list reports each quorum queue's effective `delivery_limit` and whether it is
+  `browsable`; the console badges "not browsable" queues (with the fix) on the Dashboard,
+  Queues and queue-detail screens — no more discovering the refusal by clicking.
 - `tests/acceptance/run.py`: the black-box acceptance run (real broker, real QueueLens
   process, ~200 checks across every feature group), run in CI on RabbitMQ 3.13 and 4.1.
+
+### Performance
+- Successful Basic-auth checks for database users are remembered for 60 s (keyed hash, never
+  the password; cleared on password change) — PBKDF2 no longer runs on every request
+  (~34 ms → ~2 ms per request).
 
 ## v0.10.1 — 2026-10-01
 

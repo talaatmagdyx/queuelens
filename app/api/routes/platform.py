@@ -21,7 +21,11 @@ router = APIRouter(prefix="/api", tags=["platform"])
 
 @router.get("/me")
 async def whoami(user: CurrentUser = Depends(get_current_user_dep)) -> dict[str, Any]:
-    return {"username": user.username, "role": user.role}
+    return {
+        "username": user.username,
+        "role": user.role,
+        "must_change_password": user.must_change_password,
+    }
 
 # ---------------------------------------------------------------- settings
 

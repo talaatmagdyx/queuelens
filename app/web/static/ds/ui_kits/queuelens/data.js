@@ -75,6 +75,7 @@ window.QL.screens = window.QL.screens || {};
       unacked: q.messages_unacked, consumers: q.consumers,
       status: STATUS_ALIAS[q.status] || q.status,
       qtype: q.queue_type,
+      deliveryLimit: q.delivery_limit, // set → QueueLens refuses to browse (previews would drop messages)
       rate: q.publish_rate != null ? q.publish_rate : null,
       last: q.idle_since ? rel(q.idle_since.replace(' ', 'T')) : '—',
     };
@@ -272,7 +273,7 @@ window.QL.screens = window.QL.screens || {};
   }).length;
 
   var me = getJson('/api/me') || {};
-  window.QL.me = { username: me.username || 'local', role: me.role || 'Admin' };
+  window.QL.me = { username: me.username || 'local', role: me.role || 'Admin', mustChangePassword: !!me.must_change_password };
 
   var accounts = (getJson('/api/users') || {}).accounts || [];
   var users = accounts.map(function (a) {

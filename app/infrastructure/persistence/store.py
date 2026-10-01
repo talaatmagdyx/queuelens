@@ -2,6 +2,7 @@
 
 import hashlib
 import secrets
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -247,9 +248,21 @@ def verify_password(password: str, stored: str) -> bool:
 _TIMING_DECOY = hash_password(secrets.token_hex(16))
 
 
+# A successful Basic-auth check is remembered briefly: every request carries the
+# password, and PBKDF2 (~30 ms) on each one adds up. Only successes are cached, keyed
+# by a per-process keyed hash (never the password), and dropped on password change.
+# ponytail: in-process cache — per replica, fine for the documented single instance.
+VERIFIED_FOR_SECONDS = 60.0
+
+
 class UserRepository:
     def __init__(self, database: Database) -> None:
         self._database = database
+        self._verified: dict[tuple[str, bytes], float] = {}
+        self._pepper = secrets.token_bytes(16)
+
+    def _key(self, username: str, password: str) -> tuple[str, bytes]:
+        return username, hashlib.sha256(self._pepper + password.encode()).digest()
 
     async def seed_env_users(self, users: dict[str, str], admin_username: str) -> None:
         """Ensure env-configured accounts exist in the DB (idempotent)."""
@@ -281,6 +294,7 @@ class UserRepository:
                     "invited_by": row.invited_by,
                     "created_at": row.created_at.isoformat() if row.created_at else None,
                     "active": row.active,
+                    "must_change_password": bool(row.must_change_password),
                 }
                 for row in rows
             ]
@@ -293,6 +307,7 @@ class UserRepository:
         role: str,
         email: str | None,
         invited_by: str,
+        must_change_password: bool = True,
     ) -> bool:
         async with self._database.session() as session:
             if await session.get(UserModel, username) is not None:
@@ -304,6 +319,7 @@ class UserRepository:
                     role=role,
                     email=email,
                     invited_by=invited_by,
+                    must_change_password=must_change_password,
                 )
             )
             await session.commit()
@@ -315,16 +331,25 @@ class UserRepository:
             if row is None or not verify_password(current, row.password_hash):
                 return False
             row.password_hash = hash_password(new)
+            row.must_change_password = False
             await session.commit()
-            return True
+        for key in [k for k in self._verified if k[0] == username]:
+            del self._verified[key]  # the old password stops working now, not in 60s
+        return True
 
     async def verify(self, username: str, password: str) -> bool:
+        key = self._key(username, password)
+        if self._verified.get(key, 0.0) > time.monotonic():
+            return True
         async with self._database.session() as session:
             row = await session.get(UserModel, username)
             if row is None or not row.active:
                 verify_password(password, _TIMING_DECOY)
                 return False
-            return verify_password(password, row.password_hash)
+            ok = verify_password(password, row.password_hash)
+        if ok:
+            self._verified[key] = time.monotonic() + VERIFIED_FOR_SECONDS
+        return ok
 
 
 def _as_utc(value: datetime) -> datetime:

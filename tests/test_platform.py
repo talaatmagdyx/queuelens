@@ -367,11 +367,24 @@ async def test_roles_enforced_viewer_operator_admin(tmp_path) -> None:
             json={"username": "view.user", "role": "Viewer"},
             auth=("admin", PW["root"]),
         )
-        op_auth = ("op.user", op.json()["password"])
-        vw_auth = ("view.user", vw.json()["password"])
-
-        me = await client.get("/api/me", auth=vw_auth)
-        assert me.json() == {"username": "view.user", "role": "Viewer"}
+        # invited accounts must replace their one-time password before anything else
+        first = ("view.user", vw.json()["password"])
+        assert (await client.get("/api/alerts", auth=first)).status_code == 403
+        me = await client.get("/api/me", auth=first)
+        assert me.json() == {"username": "view.user", "role": "Viewer",
+                             "must_change_password": True}
+        op_auth = ("op.user", cred())
+        vw_auth = ("view.user", cred())
+        for account, pw in (
+            ("op.user", {"old": op.json()["password"], "new": op_auth[1]}),
+            ("view.user", {"old": vw.json()["password"], "new": vw_auth[1]}),
+        ):
+            changed = await client.post(
+                "/api/users/me/password", auth=(account, pw["old"]),
+                json={"current_password": pw["old"], "new_password": pw["new"]},
+            )
+            assert changed.status_code == 200
+        assert (await client.get("/api/me", auth=vw_auth)).json()["must_change_password"] is False
 
         # Viewer: reads are auth-only (no broker in tests) — mutations are forbidden
         assert (await client.get("/api/alerts", auth=vw_auth)).status_code == 200
@@ -875,3 +888,27 @@ async def test_invite_email_never_contains_the_password(tmp_path, monkeypatch) -
     password = invited.json()["password"]
     assert password and sent and "new.person" in sent[0]
     assert password not in sent[0]
+
+
+@pytest.mark.asyncio
+async def test_login_cache_until_password_changes(tmp_path, monkeypatch) -> None:
+    from app.infrastructure.persistence import store
+
+    app = _app(tmp_path)
+    await app.state.database.start()
+    old, new = cred(), cred()
+    await app.state.users.create(username="cached", password=old, role="Viewer",
+                                 email=None, invited_by="admin")
+    calls: list[str] = []
+    real = store.verify_password
+    monkeypatch.setattr(store, "verify_password", lambda pw, h: calls.append(h) or real(pw, h))
+    assert await app.state.users.verify("cached", old) is True
+    assert await app.state.users.verify("cached", old) is True
+    hashes_for_two_logins = len(calls)
+    assert await app.state.users.change_password("cached", old, new) is True
+    stale = await app.state.users.verify("cached", old)
+    fresh = await app.state.users.verify("cached", new)
+    await app.state.database.close()
+
+    assert hashes_for_two_logins == 1  # the second request skipped PBKDF2
+    assert (stale, fresh) == (False, True)  # the old password died with the change

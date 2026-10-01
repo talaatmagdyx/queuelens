@@ -80,6 +80,9 @@ class UserModel(Base):
     invited_by: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     active: Mapped[bool] = mapped_column(default=True)
+    # invited accounts get a one-time password: until it's replaced, only the
+    # password-change endpoint (and /api/me) answer
+    must_change_password: Mapped[bool] = mapped_column(default=False)
 
 
 class BulkBatchModel(Base):

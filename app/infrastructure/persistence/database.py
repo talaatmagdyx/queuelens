@@ -20,6 +20,7 @@ class Database:
     # create_all only creates missing tables — it never alters existing ones.
     MIGRATIONS = (
         "ALTER TABLE alert_rules ADD COLUMN fired BOOLEAN NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT 0",
     )
 
     async def start(self) -> None:
