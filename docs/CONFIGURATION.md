@@ -20,7 +20,7 @@ managed at runtime from the UI. It is not a fourth layer of the same knobs — i
 | Area | Env vars / `.env` provide | UI / settings store provides | On conflict |
 |---|---|---|---|
 | **Environments** | Full profiles via `QUEUELENS_ENVIRONMENTS_JSON` (own broker + credentials) | Runtime-added profiles and extra vhosts (`POST /api/environments`) | Merged by name at startup: a stored entry with the same name **adds vhosts and overrides broker fields** on top of the env-var profile. The default environment itself always comes from env vars |
-| **Preview / bulk limits** | `QUEUELENS_MAX_PREVIEW_MESSAGES`, `QUEUELENS_MAX_BULK_SIZE`, … as defaults | Configuration → Limits saves overrides | **Stored overrides win** at request time; "Reset to Defaults" returns to the env-var values |
+| **Preview / bulk limits** | `QUEUELENS_MAX_PREVIEW_MESSAGES`, `QUEUELENS_MAX_BULK_SIZE`, … as defaults | Configuration → Limits saves overrides | **Stored overrides win** at request time (never above 1000); a request's own `limit` can only lower the cap; a bulk batch executes with the window its dry run used; "Reset to Defaults" returns to the env-var values |
 | **Email channel** | `QUEUELENS_SMTP_HOST/_PORT` **seed** the channel on first boot only | Alerts → Delivery Channels edits (incl. SMTP auth + TLS) | After first boot the **stored channel config wins**; the env vars are never re-applied unless the channel is missing entirely |
 | **Users** | `QUEUELENS_ADMIN_*` + `QUEUELENS_USERS_JSON` are seeded into the users table at startup (idempotent — existing rows are not overwritten) and always authenticate | UI invites add more accounts | No conflict possible: env accounts always work; DB accounts add to them |
 | **Custom headers, retention, alert rules, UI toggles** | — (no env vars) | Settings store only | n/a |
@@ -33,8 +33,17 @@ Practical consequences:
   environments update immediately via the API.
 - Wiping the database (`data/queuelens.db`) resets every UI-managed setting to the
   env-var/seeded state on next boot — audit history included, so treat it as data.
-- Secrets stored via the UI (SMTP password, environment credentials) are write-only:
-  no API response ever includes them.
+- Secrets stored via the UI (SMTP password, Slack/webhook/PagerDuty URLs, the PagerDuty
+  routing key, environment credentials) are write-only: API responses show `__secret__`,
+  and saving `__secret__` back keeps the stored value.
+- SMTP TLS (STARTTLS, or implicit TLS on 465) verifies the server certificate and
+  hostname against the system trust store — an untrusted or mismatched certificate fails
+  the delivery instead of sending in the clear to whoever answered.
+- Quiet hours (`quiet_from` / `quiet_until`) are evaluated in **UTC**. They mute Info and
+  Warning deliveries; Alert severity always sends, and a recovery follows its rule's
+  severity so a paged incident always gets its resolve.
+- Failed logins are throttled per (client IP, username) — 10 per minute — plus 50 per
+  minute per IP across usernames, so one client behind a shared proxy can't lock out others.
 
 ## Authentication
 
@@ -80,7 +89,7 @@ The AMQP user needs read/write/configure on the inspected queues: browsing reque
 | Variable | Default | Meaning |
 |---|---|---|
 | `QUEUELENS_MASKING_ENABLED` | `true` | Display-only masking of sensitive values in payloads, headers, and properties |
-| `QUEUELENS_MASKED_FIELDS` | `password,token,access_token,refresh_token,authorization,api_key,secret,email,phone` | Comma-separated key names whose values render as `***` |
+| `QUEUELENS_MASKED_FIELDS` | `password,token,access_token,refresh_token,authorization,api_key,x_api_key,secret,email,phone` | Comma-separated key names whose values render as `***` |
 
 Key matching ignores case and `-`/`_` separators, so `api_key` also masks `API-Key` and
 `apiKey`. Masking is **display-only**: it applies where messages are rendered (UI and read

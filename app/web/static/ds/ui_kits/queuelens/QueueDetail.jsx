@@ -11,6 +11,7 @@
   function QueueDetail({ nav, queue }) {
     const info = React.useMemo(() => window.QL.fetchQueueInfo(queue), [queue]);
     const messages = React.useMemo(() => window.QL.fetchMessages(queue), [queue]);
+    const loadError = React.useMemo(() => window.QL.messagesError, [messages]);
     const topo = React.useMemo(() => window.QL.fetchTopology(), []);
 
     if (!info) {
@@ -57,6 +58,7 @@
             </span>}
             subtitle="Real-time view of this queue from the Management API."
             actions={<Button variant="secondary" onClick={() => nav('messages', { queue })} style={{ color: 'var(--text-link)' }}>Browse Messages</Button>} />
+          {loadError && <Alert tone="danger" title="Messages not previewed" style={{ marginBottom: 18 }}>{loadError}</Alert>}
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 14, marginBottom: 18 }}>
             {[['Messages', info.messages], ['Ready', info.messages_ready], ['Unacked', info.messages_unacked], ['Consumers', info.consumers]].map(([label, value]) => (

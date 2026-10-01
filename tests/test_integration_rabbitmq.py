@@ -260,12 +260,11 @@ async def test_bulk_dry_run_and_execute_against_real_broker(tmp_path) -> None:
                 )
                 assert again.status_code == 404
 
-                # audit: envelope + one event per fingerprint
+                # audit: attempt envelope, one event per fingerprint, closing envelope
                 events = (await client.get(f"/api/audit?source_queue={dlq}")).json()["events"]
                 envelope = [e for e in events if e["action"] == "bulk_park"]
                 per_message = [e for e in events if e["action"] == "park"]
-                assert len(envelope) == 1
-                assert envelope[0]["result"] == "success"
+                assert [e["result"] for e in envelope] == ["success", "started"]  # newest first
                 assert envelope[0]["metadata"]["succeeded"] == 3
                 assert len(per_message) == 4  # 3 success + 1 skipped_duplicate
     finally:

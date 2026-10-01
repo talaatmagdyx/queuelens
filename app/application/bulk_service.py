@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from app.application.action_service import configured_target
+from app.application.message_service import BrowseGuard, _no_guard
 from app.config import Settings
 from app.domain.models import ReplayTarget
 from app.infrastructure.rabbitmq.message_browser import MessageBrowser
@@ -26,6 +27,7 @@ class BulkBatch:
     duplicate_fingerprints: int
     sample_fingerprints: list[str] = field(default_factory=list)
     expires_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    scan_limit: int = 0  # the window the dry run scanned; execute scans the same
 
 
 def _batch_to_payload(batch: BulkBatch) -> dict[str, object]:
@@ -49,6 +51,7 @@ def _batch_to_payload(batch: BulkBatch) -> dict[str, object]:
         "duplicate_fingerprints": batch.duplicate_fingerprints,
         "sample_fingerprints": batch.sample_fingerprints,
         "expires_at": batch.expires_at.isoformat(),
+        "scan_limit": batch.scan_limit,
     }
 
 
@@ -68,6 +71,7 @@ def _batch_from_payload(raw: dict[str, object]) -> BulkBatch:
         duplicate_fingerprints=int(payload.get("duplicate_fingerprints", 0)),
         sample_fingerprints=[str(f) for f in payload.get("sample_fingerprints", [])],
         expires_at=datetime.fromisoformat(str(payload["expires_at"])),
+        scan_limit=int(payload.get("scan_limit", 0)),
     )
 
 
@@ -83,8 +87,10 @@ class BulkActionService:
         browser: MessageBrowser,
         operator: MessageOperator,
         batch_store: object | None = None,  # BulkBatchRepository
+        guard: BrowseGuard = _no_guard,
     ) -> None:
         self._settings = settings
+        self._guard = guard
         self._browser = browser
         self._operator = operator
         self._batch_store = batch_store
@@ -137,9 +143,9 @@ class BulkActionService:
         else:
             raise ValueError(f"Unsupported bulk action: {action}")
 
-        records = await self._browser.list_messages(
-            source_queue, max_bulk or self._settings.max_bulk_size
-        )
+        scan_limit = max_bulk or self._settings.max_bulk_size
+        await self._guard(source_queue)
+        records = await self._browser.list_messages(source_queue, scan_limit)
         if payload_contains:
             needle = payload_contains.encode("utf-8")
             records = [record for record in records if needle in record.body]
@@ -165,6 +171,7 @@ class BulkActionService:
             sample_fingerprints=sorted(unique)[:10],
             expires_at=datetime.now(UTC)
             + timedelta(seconds=self._settings.bulk_dry_run_ttl_seconds),
+            scan_limit=scan_limit,
         )
         await self._store_batch(batch)
         return {
@@ -179,7 +186,7 @@ class BulkActionService:
             "selected_not_seen": not_seen,
             "sample_fingerprints": batch.sample_fingerprints,
             "expires_at": batch.expires_at.isoformat(),
-            "scan_limit": self._settings.max_bulk_size,
+            "scan_limit": scan_limit,
         }
 
     async def execute(
@@ -191,13 +198,14 @@ class BulkActionService:
                 raise UnknownBulkBatch(
                     "Unknown or expired dry-run batch; run the dry-run again"
                 )
+            await self._guard(batch.source_queue)
             results = await self._operator.operate_bulk(
                 source_queue=batch.source_queue,
                 fingerprints=batch.fingerprints,
                 action=batch.operator_action,
                 target=batch.target,
                 replay_headers=dict(replay_headers or {}),
-                max_scan=self._settings.max_bulk_size,
+                max_scan=batch.scan_limit or self._settings.max_bulk_size,
             )
         statuses = [str(result["status"]) for result in results]
         summary = {

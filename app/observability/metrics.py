@@ -31,3 +31,9 @@ OPERATION_SECONDS = Histogram(
     ["action"],
     buckets=(0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10),
 )
+
+ALERT_DELIVERIES = Counter(
+    "queuelens_alert_deliveries_total",
+    "Alert notification deliveries by channel and result (ok | failed | skipped)",
+    ["channel", "result"],
+)

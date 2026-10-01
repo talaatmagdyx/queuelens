@@ -46,7 +46,7 @@
     const [draft, setDraft] = React.useState(current);
     const detail = id === 'email'
       ? (connected ? `${current.smtp_host}:${current.smtp_port || 1025} · ${current.to || '—'}` : 'SMTP delivery (e.g. Mailpit)')
-      : (connected ? current.url : 'POST JSON to your endpoint');
+      : (connected ? (current.url === '__secret__' ? 'URL saved (hidden — it is a credential)' : current.url) : 'POST JSON to your endpoint');
     return (
       <div style={{ padding: '11px 0', borderTop: '1px solid var(--slate-100)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -83,7 +83,7 @@
                 </div>
               </div>
             ) : (
-              <Input label={meta.name + ' URL'} value={draft.url || ''} onChange={(v) => setDraft({ ...draft, url: v })} placeholder="https://…" />
+              <Input label={meta.name + ' URL'} type={draft.url === '__secret__' ? 'password' : 'text'} value={draft.url || ''} onChange={(v) => setDraft({ ...draft, url: v })} placeholder="https://…" />
             )}
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               {connected && (

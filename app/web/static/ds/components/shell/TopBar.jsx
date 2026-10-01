@@ -106,8 +106,8 @@ export function TopBar({
     React.createElement('div', { style: { flex: 1 } }),
     React.createElement('span', { style: { fontSize: 13, color: 'var(--slate-500)', whiteSpace: 'nowrap' } }, 'Last refreshed: ', lastRefreshed),
     React.createElement(Button, { variant: 'secondary', size: 'sm', icon: 'refresh-cw', onClick: onRefresh }, 'Refresh'),
-    React.createElement(IconButton, { icon: theme === 'dark' ? 'sun' : 'moon', bordered: false, size: 34, onClick: onThemeToggle }),
-    React.createElement(IconButton, { icon: 'bell', bordered: false, size: 34, badge: notifications, onClick: onBell }),
+    React.createElement(IconButton, { icon: theme === 'dark' ? 'sun' : 'moon', title: theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode', bordered: false, size: 34, onClick: onThemeToggle }),
+    React.createElement(IconButton, { icon: 'bell', title: 'Notifications', bordered: false, size: 34, badge: notifications, onClick: onBell }),
     userName && React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 13.5, fontWeight: 600, color: 'var(--slate-700)', whiteSpace: 'nowrap' } },
       userName, React.createElement(Icon, { name: 'chevron-down', size: 14, color: 'var(--slate-400)' }))
   );

@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+### Security / data safety
+- **Quorum DLQs with a delivery limit are no longer browsed.** A preview is basic.get +
+  requeue, which quorum queues count as a delivery — previewing could drop messages, and
+  the console previewed the largest DLQ on every page load and 30s auto-refresh. Previews,
+  detail lookups, single actions and bulk scans now refuse such queues with `409`, and the
+  console fetches message bodies only when a screen asks for them.
+- Bulk execute and composer publish now write their `started` audit event before touching
+  the broker (no audit → no action), like single actions always did.
+- Slack/webhook/PagerDuty URLs and the PagerDuty routing key are write-only in
+  `GET /api/settings` (they were readable by every role).
+- SMTP TLS now verifies the server certificate and hostname.
+- Activating an environment only accepts its listed vhosts — an Operator could create
+  arbitrary vhosts (and grant permissions) on the broker by switching.
+- The raw `payload_encoded` view is withheld when masking hid a value or the payload was
+  truncated.
+- Failed logins take the same time for unknown and known usernames; throttling is per
+  (IP, username) plus an IP-wide ceiling.
+- Audit CSV export neutralises spreadsheet formulas.
+
+### Fixed
+- Dashboard summary cards show live numbers (they were hard-coded sample values).
+- `?limit` on previews can only lower the configured cap; bulk execution scans the same
+  window its dry run approved; single actions use the same re-fetch window as detail lookup.
+- Topology cache is cleared on environment switch.
+- `add_environment` audit events name the acting admin (not the AMQP username).
+- PagerDuty: one incident per rule (`dedup_key`), resolved on recovery; recoveries follow the
+  rule's severity for quiet hours.
+- Bulk replay/park stamp the same provenance (and custom) headers as single actions.
+- Audit events record the request's IP and user agent.
+- Concurrent previews of one queue no longer see partial results (per-queue scan lock).
+- Startup failures report their real cause (no masking `UnboundLocalError`).
+- Users screen shows Viewers as Viewers.
+
+### Added
+- Composer: per-message headers and properties (`message_id`, `correlation_id`, …).
+- `queuelens_alert_deliveries_total{channel,result}` metric.
+- `deploy/prometheus/prometheus.yml` example scrape config.
+- UI: delete is type-to-confirm; bulk flows show the server's dry-run result before executing;
+  icon-only buttons have accessible names.
+
 ### Removed
 - **The legacy server-rendered console.** Every old page (`/config`, `/queues`,
   `/audit`, `/classic`, …) now 301-redirects to the SPA at `/app`, which has

@@ -29,15 +29,31 @@ ALLOWED_SETTING_KEYS = {"custom_headers", "channels", "limits", "retention", "ui
 
 
 SECRET_SENTINEL = "__secret__"
+# Write-only channel fields: a Slack/webhook URL or a PagerDuty routing key is a
+# credential in itself (whoever holds it can post as you).
+CHANNEL_SECRETS = {
+    "email": ("password",),
+    "slack": ("url",),
+    "webhook": ("url",),
+    "pagerduty": ("url", "routing_key"),
+}
 
 
 def _redact_channels(settings: dict[str, Any]) -> dict[str, Any]:
     channels = settings.get("channels")
     if isinstance(channels, dict):
-        email = channels.get("email")
-        if isinstance(email, dict) and email.get("password"):
-            redacted = {**email, "password": SECRET_SENTINEL}
-            settings = {**settings, "channels": {**channels, "email": redacted}}
+        settings = {
+            **settings,
+            "channels": {
+                name: {
+                    **config,
+                    **{f: SECRET_SENTINEL for f in CHANNEL_SECRETS.get(name, ()) if config.get(f)},
+                }
+                if isinstance(config, dict)
+                else config
+                for name, config in channels.items()
+            },
+        }
     stored_envs = settings.get("custom_environments")
     if isinstance(stored_envs, dict):
         cleaned = {
@@ -84,10 +100,16 @@ async def put_settings_api(
         request.app.state.audit_repository.stream_to_log = bool(
             (values.get("ui") or {}).get("syslog")
         )
-    email = ((values.get("channels") or {}).get("email")) if "channels" in values else None
-    if isinstance(email, dict) and email.get("password") == SECRET_SENTINEL:
+    channels = values.get("channels") if "channels" in values else None
+    if isinstance(channels, dict):
         stored = await request.app.state.settings_store.get("channels", {}) or {}
-        email["password"] = (stored.get("email") or {}).get("password", "")
+        for name, fields in CHANNEL_SECRETS.items():
+            config = channels.get(name)
+            if not isinstance(config, dict):
+                continue
+            for field in fields:
+                if config.get(field) == SECRET_SENTINEL:  # unchanged → keep the stored secret
+                    config[field] = (stored.get(name) or {}).get(field, "")
     return _redact_channels(
         cast(dict[str, Any], await request.app.state.settings_store.put(values))
     )
@@ -313,10 +335,10 @@ async def create_environment(
     body: EnvironmentBody,
     user: CurrentUser = Depends(require_admin),
 ) -> dict[str, Any]:
+    """Create an environment or add vhosts to an existing one. Broker fields left
+    blank inherit the default environment; credentials are stored encrypted when
+    QUEUELENS_SECRET_KEY is set and are never echoed back."""
     username = user.username
-    """Create a same-broker environment or add vhosts to an existing one.
-    Environments with their own broker/credentials belong in
-    QUEUELENS_ENVIRONMENTS_JSON — credentials never pass through this API."""
     from datetime import UTC, datetime
 
     from app.domain.models import AuditEntry
@@ -330,9 +352,9 @@ async def create_environment(
     merged = sorted(set(previous.get("vhosts", [])) | set(vhosts))
     profile: dict[str, Any] = {**previous, "vhosts": merged}
     if body.host:
-        username = body.username or ""
-        password = body.password or ""
-        credentials = f"{username}:{password}@" if username else ""
+        amqp_user = body.username or ""
+        amqp_password = body.password or ""
+        credentials = f"{amqp_user}:{amqp_password}@" if amqp_user else ""
         profile["rabbitmq_url"] = f"amqp://{credentials}{body.host.strip()}/"
     if body.management_url:
         profile["management_url"] = body.management_url.strip()

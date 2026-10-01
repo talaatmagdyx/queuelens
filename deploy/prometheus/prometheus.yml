@@ -1,0 +1,16 @@
+# Minimal Prometheus config for QueueLens (/metrics requires the same Basic Auth as the app).
+# Use a dedicated Viewer account — it can read metrics and nothing it can break.
+global:
+  scrape_interval: 30s
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  - job_name: queuelens
+    metrics_path: /metrics
+    basic_auth:
+      username: metrics-viewer
+      password_file: /etc/prometheus/queuelens-password
+    static_configs:
+      - targets: ["queuelens:8000"]

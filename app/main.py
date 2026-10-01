@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -11,8 +11,9 @@ from fastapi.staticfiles import StaticFiles
 from app.api.routes import actions, audit, bulk, health, messages, metrics, platform, queues
 from app.application.alert_engine import AlertEngine
 from app.application.environments import EnvironmentManager
+from app.application.queue_service import UnsafeToBrowse
 from app.config import Settings, get_settings
-from app.infrastructure.persistence.audit_repository import AuditRepository
+from app.infrastructure.persistence.audit_repository import REQUEST_CONTEXT, AuditRepository
 from app.infrastructure.persistence.database import Database
 from app.infrastructure.persistence.store import (
     AlertRuleRepository,
@@ -63,6 +64,10 @@ def _register_error_handlers(app: FastAPI) -> None:
     async def _amqp_unavailable(request: Request, error: Exception) -> Response:
         return _error_response(request, 503, "RabbitMQ connection is not available")
 
+    @app.exception_handler(UnsafeToBrowse)
+    async def _unsafe_to_browse(request: Request, error: Exception) -> Response:
+        return _error_response(request, 409, str(error))
+
 
 async def _retention_loop(app: FastAPI) -> None:
     import asyncio
@@ -101,6 +106,7 @@ async def _seed_defaults(app: FastAPI) -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     import asyncio
 
+    retention_task: asyncio.Task[None] | None = None  # so a failed startup reports its real cause
     try:
         await app.state.database.start()
         await _seed_defaults(app)
@@ -116,7 +122,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         app.state.ready = False
-        retention_task.cancel()
+        if retention_task is not None:
+            retention_task.cancel()
         await app.state.alert_engine.stop()
         await app.state.environment_manager.stop_all()
         await app.state.database.close()
@@ -148,6 +155,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     web.templates.env.globals["admin_username"] = app.state.settings.admin_username
     web.templates.env.globals["app_version"] = app.version
     _register_error_handlers(app)
+
+    @app.middleware("http")
+    async def _audit_request_context(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        REQUEST_CONTEXT.set(
+            (request.client.host if request.client else None, request.headers.get("user-agent"))
+        )
+        return await call_next(request)
+
     app.include_router(health.router)
     app.include_router(metrics.router)
     app.include_router(queues.router)

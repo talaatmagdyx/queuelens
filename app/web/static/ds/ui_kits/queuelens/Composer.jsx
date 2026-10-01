@@ -11,11 +11,15 @@
     const [routingKey, setRoutingKey] = React.useState('');
     const [payload, setPayload] = React.useState(SAMPLE);
     const [markTest, setMarkTest] = React.useState(true);
+    const [headersText, setHeadersText] = React.useState('');
+    const [messageId, setMessageId] = React.useState('');
+    const [correlationId, setCorrelationId] = React.useState('');
+    const headers = (() => { try { const h = headersText.trim() ? JSON.parse(headersText) : {}; return h && typeof h === 'object' && !Array.isArray(h) ? h : null; } catch (e) { return null; } })();
     const [busy, setBusy] = React.useState(false);
     const [result, setResult] = React.useState(null); // { ok, text }
     const validJson = (() => { try { JSON.parse(payload); return true; } catch (e) { return false; } })();
     const exchangeType = (exchanges.find((e) => e.name === exchange) || { type: 'direct' }).type;
-    const canSend = routingKey.trim().length > 0 && payload.length > 0 && !busy;
+    const canSend = routingKey.trim().length > 0 && payload.length > 0 && headers !== null && !busy;
     const destination = (exchange || '(default exchange)') + ' / ' + (routingKey || '—');
 
     const send = async () => {
@@ -24,7 +28,8 @@
       try {
         const outcome = await window.QL.postJson('/api/messages/publish', {
           exchange: exchange, routing_key: routingKey.trim(),
-          payload: payload, mark_test: markTest, confirm: true,
+          payload: payload, mark_test: markTest, confirm: true, headers: headers,
+          properties: { message_id: messageId.trim() || undefined, correlation_id: correlationId.trim() || undefined },
         });
         setResult({ ok: true, text: `Published to ${destination} as ${outcome.content_type} in ${(outcome.duration_ms / 1000).toFixed(2)}s. The publish was broker-confirmed and audited.` });
       } catch (error) {
@@ -50,6 +55,13 @@
             <span style={{ position: 'absolute', top: 10, right: 12 }}>
               <Badge tone={validJson ? 'success' : 'warning'}>{validJson ? 'VALID JSON' : 'PLAIN TEXT'}</Badge>
             </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginTop: 14 }}>
+            <Input label="Message ID (optional)" value={messageId} onChange={setMessageId} placeholder="e.g. ord_8231" />
+            <Input label="Correlation ID (optional)" value={correlationId} onChange={setCorrelationId} />
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <Input label="Headers (JSON object, optional)" value={headersText} onChange={setHeadersText} placeholder='{"x-tenant": "acme", "x-retry": 3}' valid={headersText.trim() ? headers !== null : undefined} />
           </div>
           <div style={{ marginTop: 14 }}>
             <Switch checked={markTest} onChange={setMarkTest} label="Mark as test message" description="Adds x-queuelens-test: true so consumers can ignore it." />

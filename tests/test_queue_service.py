@@ -118,3 +118,53 @@ async def test_queue_type_extracted_from_type_field_or_arguments() -> None:
     assert by_name["orders.dlq"] == "quorum"
     assert by_name["audit.stream.dlq"] == "stream"
     assert by_name["legacy.dlq"] == "classic"
+
+
+@pytest.mark.parametrize(
+    ("raw", "version", "expected"),
+    [
+        ({"type": "classic", "arguments": {"x-delivery-limit": 2}}, "4.1.0", None),
+        ({"type": "quorum", "arguments": {}}, "3.13.7", None),
+        ({"type": "quorum", "arguments": {}}, "4.0.5", 20),  # RabbitMQ 4 default
+        ({"type": "quorum", "arguments": {"x-delivery-limit": 3}}, "3.13.7", 3),
+        ({"type": "quorum", "effective_policy_definition": {"delivery-limit": 5}}, "3.13.7", 5),
+        (
+            {"type": "quorum", "arguments": {"x-delivery-limit": 9},
+             "effective_policy_definition": {"delivery-limit": 4}},
+            "3.13.7",
+            4,
+        ),
+        ({"type": "quorum", "arguments": {"x-delivery-limit": -1}}, "4.0.5", None),
+        ({"arguments": {"x-queue-type": "quorum", "x-delivery-limit": 2},
+          "effective_policy_definition": []}, None, 2),
+    ],
+)
+def test_delivery_limit_detection(raw, version, expected) -> None:
+    from app.application.queue_service import delivery_limit
+
+    assert delivery_limit(raw, version) == expected
+
+
+@pytest.mark.asyncio
+async def test_assert_browsable_refuses_quorum_queues_with_a_delivery_limit() -> None:
+    from app.application.queue_service import UnsafeToBrowse
+
+    queues = {
+        "safe.dlq": {"name": "safe.dlq", "type": "classic", "arguments": {}},
+        "quorum.dlq": {"name": "quorum.dlq", "type": "quorum",
+                       "arguments": {"x-delivery-limit": 2}},
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/overview":
+            return httpx.Response(200, json={"rabbitmq_version": "3.13.7"})
+        name = request.url.path.rsplit("/", 1)[-1]
+        return httpx.Response(200, json=queues[name]) if name in queues else httpx.Response(404)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://management.test")
+    service = QueueService(RabbitMQManagementClient(settings(), client=client))
+    await service.assert_browsable("safe.dlq")
+    await service.assert_browsable("missing.dlq")  # 404 → the AMQP path reports it as usual
+    with pytest.raises(UnsafeToBrowse, match="delivery limit of 2"):
+        await service.assert_browsable("quorum.dlq")
+    await client.aclose()

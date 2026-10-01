@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import smtplib
+import ssl
 from email.message import EmailMessage
 from typing import Any
 
@@ -26,10 +27,16 @@ def _send_sync(config: dict[str, Any], subject: str, body: str) -> None:
     use_tls = config.get("use_tls")
     if use_tls is None:
         use_tls = bool(username) and not use_ssl
-    smtp_class = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
-    with smtp_class(host, port, timeout=10) as smtp:
+    # smtplib verifies nothing without an explicit context — anyone on the path could
+    # read alert mail and the SMTP password. Verify the chain and the hostname.
+    context = ssl.create_default_context()
+    if use_ssl:
+        smtp: smtplib.SMTP = smtplib.SMTP_SSL(host, port, timeout=10, context=context)
+    else:
+        smtp = smtplib.SMTP(host, port, timeout=10)
+    with smtp:
         if use_tls and not use_ssl:
-            smtp.starttls()
+            smtp.starttls(context=context)
         if username:
             smtp.login(username, password)
         smtp.send_message(message)

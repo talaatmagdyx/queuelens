@@ -71,3 +71,32 @@ async def test_audit_route_requires_basic_auth(tmp_path) -> None:
     assert authenticated.status_code == 200
     assert authenticated.json()["events"][0]["action"] == "login"
 
+
+
+@pytest.mark.asyncio
+async def test_audit_records_request_origin_and_csv_cannot_run_formulas(tmp_path) -> None:
+    app = create_app(
+        Settings(auth_enabled=False, database_url=f"sqlite+aiosqlite:///{tmp_path}/o.db")
+    )
+    await app.state.database.start()
+
+    class FailingActions:
+        async def park(self, **_kwargs: object) -> None:
+            raise RuntimeError("boom")
+
+    app.state.action_service = FailingActions()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post(
+            "/api/messages/park", headers={"user-agent": "qa-agent/1.0"},
+            json={"source_queue": '=HYPERLINK("http://x")', "fingerprint": "a" * 64,
+                  "confirm": True},
+        )
+        events = (await client.get("/api/audit")).json()["events"]
+        csv = (await client.get("/api/audit/export?format=csv")).text
+    await app.state.database.close()
+
+    assert events and all(
+        e["request_ip"] == "127.0.0.1" and e["user_agent"] == "qa-agent/1.0" for e in events
+    )
+    assert '"\'=HYPERLINK' in csv and ',"=HYPERLINK' not in csv

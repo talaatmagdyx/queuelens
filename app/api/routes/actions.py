@@ -8,7 +8,9 @@ from aiormq.exceptions import ChannelNotFoundEntity
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from app.api.routes.messages import effective_limit
 from app.application.action_service import ActionService
+from app.application.queue_service import UnsafeToBrowse
 from app.auth.basic import CurrentUser, require_admin, require_operator
 from app.domain.models import AuditEntry, ReplayTarget
 from app.observability.metrics import ACTIONS, OPERATION_SECONDS
@@ -110,6 +112,8 @@ async def _run_action(
                 **target_fields,
             )
         )
+        if isinstance(error, UnsafeToBrowse):
+            raise HTTPException(status_code=409, detail=str(error)) from error
         if isinstance(error, LookupError):
             raise HTTPException(
                 status_code=409,
@@ -160,6 +164,7 @@ async def replay(
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Replay confirmation is required")
     custom_headers = await _custom_headers(request)
+    max_scan = await effective_limit(request, "refetch_window_size")
     return await _run_action(
         request,
         user.username,
@@ -174,6 +179,7 @@ async def replay(
             username=user.username,
             annotate=body.annotate,
             extra_headers=custom_headers,
+            max_scan=max_scan,
         ),
         target=body.target.to_domain() if body.target else None,
         mode=body.mode,
@@ -188,6 +194,8 @@ async def park(
 ) -> dict[str, object]:
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Park confirmation is required")
+    custom_headers = await _custom_headers(request)
+    max_scan = await effective_limit(request, "refetch_window_size")
     return await _run_action(
         request,
         user.username,
@@ -197,6 +205,9 @@ async def park(
         lambda: _service(request).park(
             source_queue=body.source_queue,
             fingerprint=body.fingerprint,
+            username=user.username,
+            extra_headers=custom_headers,
+            max_scan=max_scan,
         ),
         target=ReplayTarget(type="queue", queue=f"{body.source_queue}.parking"),
     )
@@ -210,6 +221,7 @@ async def delete(
 ) -> dict[str, object]:
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Delete confirmation is required")
+    max_scan = await effective_limit(request, "refetch_window_size")
     return await _run_action(
         request,
         user.username,
@@ -219,14 +231,28 @@ async def delete(
         lambda: _service(request).delete(
             source_queue=body.source_queue,
             fingerprint=body.fingerprint,
+            max_scan=max_scan,
         ),
     )
+
+
+class PublishProperties(BaseModel):
+    message_id: str | None = Field(default=None, max_length=255)
+    correlation_id: str | None = Field(default=None, max_length=255)
+    content_type: str | None = Field(default=None, max_length=255)
+    type: str | None = Field(default=None, max_length=255)
+    app_id: str | None = Field(default=None, max_length=255)
+    reply_to: str | None = Field(default=None, max_length=255)
+    priority: int | None = Field(default=None, ge=0, le=255)
+    delivery_mode: Literal[1, 2] | None = None
 
 
 class PublishRequest(BaseModel):
     exchange: str = ""  # "" publishes via the default exchange straight to a queue
     routing_key: str = Field(min_length=1)
     payload: str = Field(max_length=1_048_576)
+    headers: dict[str, str | int | float | bool] = Field(default_factory=dict, max_length=64)
+    properties: PublishProperties = Field(default_factory=PublishProperties)
     mark_test: bool = True
     confirm: bool = False
 
@@ -250,7 +276,10 @@ async def publish(
         content_type = "application/json"
     except ValueError:
         content_type = "text/plain"
+    content_type = body.properties.content_type or content_type
+    # caller headers first, so x-queuelens-* provenance can't be spoofed
     headers: dict[str, Any] = {
+        **body.headers,
         **(await _custom_headers(request)),
         "x-queuelens-published-by": user.username,
         "x-queuelens-published-at": datetime.now(UTC).isoformat(),
@@ -283,6 +312,7 @@ async def publish(
             )
         )
 
+    await _record("started")  # no audit trail → no publish
     started_at = time.perf_counter()
     try:
         connection = request.app.state.rabbitmq_connection
@@ -290,7 +320,7 @@ async def publish(
             message = Message(
                 body=body.payload.encode("utf-8"),
                 headers=headers,
-                content_type=content_type,
+                **{**body.properties.model_dump(exclude_none=True), "content_type": content_type},
             )
             if body.exchange:
                 exchange = await channel.get_exchange(body.exchange, ensure=True)

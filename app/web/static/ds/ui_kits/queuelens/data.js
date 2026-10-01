@@ -11,7 +11,9 @@ window.QL.screens = window.QL.screens || {};
       x.open('GET', url, false);
       x.setRequestHeader('Accept', 'application/json');
       x.send();
-      return x.status >= 200 && x.status < 300 ? JSON.parse(x.responseText) : null;
+      if (x.status >= 200 && x.status < 300) return JSON.parse(x.responseText);
+      try { window.QL.lastError = JSON.parse(x.responseText).detail; } catch (e) { window.QL.lastError = 'HTTP ' + x.status; }
+      return null;
     } catch (e) { return null; }
   }
 
@@ -110,10 +112,15 @@ window.QL.screens = window.QL.screens || {};
     };
   }
 
+  // Previews are real broker reads (basic.get + requeue) — they only ever run when a
+  // screen asks for a queue's messages, never on page load or auto-refresh.
+  // messagesError carries the server's reason when it refuses (e.g. a quorum DLQ).
   window.QL.fetchMessages = function (queue) {
+    window.QL.messagesError = null;
     if (!queue) return [];
-    var raw = (getJson('/api/queues/' + encodeURIComponent(queue) + '/messages') || {}).messages || [];
-    return raw.map(mapMessage);
+    var result = getJson('/api/queues/' + encodeURIComponent(queue) + '/messages');
+    if (!result) window.QL.messagesError = window.QL.lastError || 'Could not load messages';
+    return ((result || {}).messages || []).map(mapMessage);
   };
 
   var exchangeCache = null;
@@ -198,14 +205,14 @@ window.QL.screens = window.QL.screens || {};
     return (getJson('/api/environments') || {}).environments || [];
   };
 
-  var messagesRaw = defaultQueue
-    ? ((getJson('/api/queues/' + encodeURIComponent(defaultQueue) + '/messages') || {}).messages || [])
-    : [];
-  var messages = messagesRaw.map(mapMessage);
-
-  var first = messagesRaw[0];
-  var payload = first ? JSON.stringify(first.payload, null, 2) : '{}';
-  var xdeath = mapXDeath(first && first.x_death);
+  var sample = null; // default queue's messages, fetched on first use only
+  function defaultMessages() {
+    if (!sample) {
+      var list = window.QL.fetchMessages(defaultQueue);
+      sample = { messages: list, payload: list[0] ? list[0].payloadText : '{}', xdeath: list[0] ? list[0].xdeathList : [] };
+    }
+    return sample;
+  }
 
   window.QL.fetchAudit = function () {
     var raw = (getJson('/api/audit?limit=500') || {}).events || [];
@@ -270,8 +277,8 @@ window.QL.screens = window.QL.screens || {};
   var accounts = (getJson('/api/users') || {}).accounts || [];
   var users = accounts.map(function (a) {
     return {
-      name: a.username, email: '—',
-      role: a.role === 'Administrator' ? 'Admin' : 'Operator',
+      name: a.username, email: a.email || '—',
+      role: a.role === 'Administrator' ? 'Admin' : a.role,
       envs: [broker.environment || 'development'], last: '—', status: 'Active',
     };
   });
@@ -288,9 +295,9 @@ window.QL.screens = window.QL.screens || {};
 
   window.QL.data = {
     queues: queues,
-    payload: payload,
-    messages: messages,
-    xdeath: xdeath,
+    get payload() { return defaultMessages().payload; },
+    get messages() { return defaultMessages().messages; },
+    get xdeath() { return defaultMessages().xdeath; },
     audit: audit,
     notifications: notifications,
     recentActions: recentActions,

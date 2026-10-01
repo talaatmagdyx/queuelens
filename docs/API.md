@@ -75,7 +75,14 @@ nothing is consumed (the broker's `redelivered` flag will be set).
 
 | Query param | Type | Default | Meaning |
 |---|---|---|---|
-| `limit` | int 1–100 | `100` | Max messages to preview |
+| `limit` | int 1–1000 | the preview cap | Max messages to preview — can lower the cap, never raise it |
+
+The cap is the stored *Limits* override if set, else `QUEUELENS_MAX_PREVIEW_MESSAGES`.
+
+`409` for a **quorum queue with a delivery limit** (`x-delivery-limit`, a `delivery-limit`
+policy, or the RabbitMQ 4.x default of 20): every requeue counts as a delivery there, so
+browsing would eventually drop messages. The same refusal applies to detail lookups, single
+actions, and bulk dry runs / executions on that queue. See [SAFETY.md](SAFETY.md#1-browsing-never-consumes-messages).
 
 ```json
 {
@@ -118,10 +125,13 @@ nothing is consumed (the broker's `redelivered` flag will be set).
 - Values under configured sensitive keys (`QUEUELENS_MASKED_FIELDS`, matching ignores case
   and `-`/`_`) render as `***` in payloads, headers, and properties. Display-only — replay
   always uses the original message. Disable with `QUEUELENS_MASKING_ENABLED=false`.
+- Compressed (`gzip`/`deflate`) bodies are shown inflated; `payload_encoded` carries the
+  original bytes as base64 — omitted (`null`) when masking hid a value or the payload was
+  truncated, since the raw bytes would reveal both.
 
 ### `GET /api/queues/{queue_name}/messages/{fingerprint}`
-Detail lookup by fingerprint (min length 8) within a bounded re-fetch window
-(`QUEUELENS_REFETCH_WINDOW_SIZE`). `404` when the fingerprint matches zero **or multiple**
+Detail lookup by the full fingerprint within a bounded re-fetch window (the stored
+*Limits* override, else `QUEUELENS_REFETCH_WINDOW_SIZE` — actions scan the same window). `404` when the fingerprint matches zero **or multiple**
 messages — ambiguity is treated as not-found rather than guessing.
 
 ## Actions
@@ -151,15 +161,28 @@ the delivery guarantees.
 | `confirm` | yes | Must be `true` |
 
 Replayed messages keep their body and properties and gain provenance headers:
-`x-queuelens-replayed`, `x-queuelens-replayed-at`, `x-queuelens-replayed-by`,
-`x-queuelens-source-queue`, `x-queuelens-original-fingerprint`.
+`x-queuelens-replayed`, `x-queuelens-action` (`replay_copy`/`replay_move`),
+`x-queuelens-replayed-at`, `x-queuelens-replayed-by`, `x-queuelens-source-queue`,
+`x-queuelens-original-fingerprint` — plus the admin-configured custom headers. Bulk replay
+stamps the same set. A message that had no `message_id` gains a random one on replay (the
+client library needs it to match a broker return to its publish).
 
 ### `POST /api/messages/park`
 Body: `source_queue`, `fingerprint`, `confirm`. Publishes to `{source_queue}.parking`
-(durable, declared on demand), then acks the original.
+(durable, declared on demand), then acks the original. Parked messages carry
+`x-queuelens-action: park`, `x-queuelens-parked-at`, `x-queuelens-parked-by`,
+`x-queuelens-source-queue`, `x-queuelens-original-fingerprint` (bulk park too).
 
 ### `POST /api/messages/delete`
 Body: `source_queue`, `fingerprint`, `confirm`. Acks (removes) the message.
+
+### `POST /api/messages/publish`
+Test message composer. Body: `routing_key` (a queue when `exchange` is `""`), `payload`,
+optional `exchange`, `headers` (object, ≤ 64 entries), `properties` (`message_id`,
+`correlation_id`, `content_type`, `type`, `app_id`, `reply_to`, `priority`,
+`delivery_mode`), `mark_test` (default `true` → `x-queuelens-test`), `confirm`. Mandatory
+publish: unroutable → `400`, missing queue/exchange → `404`. The `started` audit event is
+written before publishing; `x-queuelens-published-by/-at` always win over caller headers.
 
 **Action success response:**
 
@@ -176,8 +199,9 @@ Body: `source_queue`, `fingerprint`, `confirm`. Acks (removes) the message.
 
 Bulk operations are **two-phase**: a dry run captures exactly which messages were seen and
 returns a one-shot token; execution acts only on that approved set. Messages that arrive
-after the dry run are never touched. Scope is the scan window (up to
-`QUEUELENS_MAX_BULK_SIZE` messages from the head of the queue), not the whole queue.
+after the dry run are never touched. Scope is the scan window (the stored *Limits*
+override, else `QUEUELENS_MAX_BULK_SIZE`, at most 1000 messages from the head of the
+queue), not the whole queue — the batch remembers its window and execution scans the same.
 
 ### `POST /api/messages/bulk/dry-run`
 
@@ -218,8 +242,8 @@ Response:
 `duplicate_fingerprints` counts fingerprints with more than one physical message — those are
 **skipped and reported** at execution, never guessed at. `selected_not_seen` counts
 explicitly selected fingerprints that are no longer in the scan window (they are ignored). Tokens expire after
-`QUEUELENS_BULK_DRY_RUN_TTL_SECONDS` and live in process memory (a restart voids them —
-rerun the dry run).
+`QUEUELENS_BULK_DRY_RUN_TTL_SECONDS`; they are stored in the database (`bulk_batches`), so
+they survive a restart until then.
 
 ### `POST /api/messages/bulk/execute`
 
@@ -250,8 +274,9 @@ execution. Response:
 
 Per-message statuses: `success`, `failed` (with `error`; the message was requeued),
 `skipped_duplicate`, `not_found` (no longer in the queue). Each message follows the same
-publish-before-ack spine as single actions and fails independently. Audit gets one event per
-fingerprint plus a `bulk_<action>` envelope whose result is `success` or `partial`.
+publish-before-ack spine as single actions and fails independently. Audit gets a
+`bulk_<action>` `started` event **before** the broker is touched (no audit, no execution),
+one event per fingerprint, and a closing envelope whose result is `success` or `partial`.
 
 Errors: `400` missing confirmation / no replay target, `404` unknown or expired batch token,
 unknown queue or target, `502` channel-level broker failure (the whole batch aborts and the
@@ -272,6 +297,9 @@ broker requeues everything unacked).
 Event fields: `id`, `timestamp`, `username`, `action`, `source_queue`,
 `message_fingerprint`, `payload_hash`, `target_type`, `target_exchange`, `target_queue`,
 `target_routing_key`, `result`, `error_message`, `request_ip`, `user_agent`, `metadata`.
+`request_ip` / `user_agent` are those of the HTTP request that caused the event (the proxy's
+address when QueueLens sits behind one). CSV export prefixes cells starting with `= + - @`
+with `'` so spreadsheets never evaluate them.
 
 ## Errors
 

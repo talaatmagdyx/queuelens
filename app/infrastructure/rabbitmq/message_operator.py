@@ -8,12 +8,13 @@ from aiormq.exceptions import ChannelInvalidStateError
 
 from app.domain.models import MessageRecord, ReplayTarget
 from app.infrastructure.rabbitmq.connection import RabbitMQConnection
-from app.infrastructure.rabbitmq.message_browser import MessageBrowser
+from app.infrastructure.rabbitmq.message_browser import MessageBrowser, QueueLocks
 
 
 class MessageOperator:
-    def __init__(self, connection: RabbitMQConnection) -> None:
+    def __init__(self, connection: RabbitMQConnection, locks: QueueLocks | None = None) -> None:
         self._connection = connection
+        self._locks = locks or QueueLocks()
 
     async def operate(
         self,
@@ -27,7 +28,7 @@ class MessageOperator:
     ) -> dict[str, object]:
         scanned: list[AbstractIncomingMessage] = []
         matches: list[tuple[AbstractIncomingMessage, MessageRecord]] = []
-        async with self._connection.channel() as channel:
+        async with self._locks(source_queue), self._connection.channel() as channel:
             try:
                 queue = await cast(Any, channel).declare_queue(source_queue, passive=True)
                 for _ in range(max_scan):
@@ -91,7 +92,7 @@ class MessageOperator:
         if action not in {"copy", "move", "park", "delete"}:
             raise ValueError(f"Unsupported message action: {action}")
         scanned: list[AbstractIncomingMessage] = []
-        async with self._connection.channel() as channel:
+        async with self._locks(source_queue), self._connection.channel() as channel:
             try:
                 queue = await cast(Any, channel).declare_queue(source_queue, passive=True)
                 groups: dict[str, list[tuple[AbstractIncomingMessage, MessageRecord]]] = {}

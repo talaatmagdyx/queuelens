@@ -11,7 +11,7 @@ from app.application.queue_service import QueueService
 from app.config import Settings
 from app.infrastructure.rabbitmq.connection import RabbitMQConnection
 from app.infrastructure.rabbitmq.management_client import RabbitMQManagementClient
-from app.infrastructure.rabbitmq.message_browser import MessageBrowser
+from app.infrastructure.rabbitmq.message_browser import MessageBrowser, QueueLocks
 from app.infrastructure.rabbitmq.message_operator import MessageOperator
 
 logger = logging.getLogger(__name__)
@@ -31,17 +31,20 @@ class Bundle:
 
 def _build_bundle(settings: Settings, batch_store: Any = None) -> Bundle:
     connection = RabbitMQConnection(settings)
-    browser = MessageBrowser(connection)
-    operator = MessageOperator(connection)
+    locks = QueueLocks()  # previews and actions on one queue never interleave
+    browser = MessageBrowser(connection, locks)
+    operator = MessageOperator(connection, locks)
     management = RabbitMQManagementClient(settings)
+    queue_service = QueueService(management)
+    guard = queue_service.assert_browsable
     return Bundle(
         settings=settings,
         connection=connection,
         management=management,
-        message_service=MessageService(browser),
-        action_service=ActionService(settings, operator),
-        bulk_service=BulkActionService(settings, browser, operator, batch_store),
-        queue_service=QueueService(management),
+        message_service=MessageService(browser, guard),
+        action_service=ActionService(settings, operator, guard),
+        bulk_service=BulkActionService(settings, browser, operator, batch_store, guard),
+        queue_service=queue_service,
     )
 
 
@@ -197,6 +200,7 @@ class EnvironmentManager:
         self._state.action_service = bundle.action_service
         self._state.bulk_service = bundle.bulk_service
         self._state.queue_service = bundle.queue_service
+        self._state.topology_cache = None  # the cached snapshot belongs to the old broker
 
     async def activate(self, env: str, vhost: str | None = None) -> dict[str, Any]:
         if env not in self._profiles:
@@ -204,7 +208,9 @@ class EnvironmentManager:
         profile = self._profiles[env]
         vhost = vhost or str(profile["vhosts"][0])
         if vhost not in profile["vhosts"]:
-            profile["vhosts"].append(vhost)
+            # activating creates the vhost on the broker — only Admins may add one
+            # (POST /api/environments), so an Operator can't mint vhosts by switching
+            raise KeyError(f"Unknown vhost {vhost!r} for environment {env} — add it first")
         bundle = await self._ensure_bundle(env, vhost)
         if not bundle.connection.is_connected:
             raise ConnectionError(
