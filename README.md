@@ -53,12 +53,22 @@ Every design decision follows one rule: **a failed action must never lose a mess
 
 | Guarantee | How it's enforced |
 |---|---|
-| Browsing never consumes | Non-destructive preview with requeue — read 220 messages, all 220 stay put |
+| Browsing never consumes | Non-destructive preview with requeue — read 220 messages, all 220 stay put. **Quorum queues with a delivery limit are the exception:** there every requeue counts as a delivery, so QueueLens refuses to browse them and badges them *not browsable*. RabbitMQ 4 gives every quorum queue a limit of 20 by default — to browse your quorum DLQs, lift it ([details](docs/SAFETY.md#1-browsing-never-consumes-messages)) |
 | Replay can't drop messages | **Publish-before-ack**: the original is removed only *after* the broker confirms the publish. Unroutable publishes bounce back as errors, not silence |
 | Bulk actions can't surprise you | A **mandatory dry-run** counts exactly what will be touched; execute runs on that exact set via a one-shot confirmation token |
 | Deletes are deliberate | Explicit type-to-confirm, Admin role only |
 | Everything is on the record | An *attempt* event is written before every action and an *outcome* event after — if the attempt can't be persisted, the action is refused |
 | Ambiguity fails closed | Message fingerprints that match zero or multiple messages abort the action instead of guessing |
+
+On RabbitMQ 4, lifting the limit on your dead-letter queues is one policy (merge
+`delivery-limit` into your existing DLQ policy if you have one — only one applies per queue):
+
+```bash
+rabbitmqctl set_policy dlq-unlimited '\.dlq$' '{"delivery-limit": -1}' --apply-to quorum_queues
+```
+
+On RabbitMQ 3.x don't use `-1` — there it drops a message on its first return; remove
+`x-delivery-limit` / the policy key instead.
 
 The full safety model — each guarantee, its enforcement point, and the failure matrix —
 is documented in [docs/SAFETY.md](docs/SAFETY.md).
@@ -88,7 +98,7 @@ deliberately lazy toward RabbitMQ:
 
 | Feature | Status |
 |---|---|
-| Safe message preview | ✅ Stable |
+| Safe message preview | ✅ Stable — quorum queues with a delivery limit are refused ([why](docs/SAFETY.md#1-browsing-never-consumes-messages)) |
 | Single-message replay / park / delete | ✅ Stable |
 | Bulk operations (dry-run → execute) | ✅ Stable |
 | Compressed-payload decode (gzip / deflate) | ✅ Stable |

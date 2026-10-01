@@ -182,7 +182,7 @@ section{position:relative;padding:104px 0;overflow:hidden}
 .clause .no{font-family:var(--mono);font-size:14px;color:var(--cyan)}
 .clause h3{font-size:21px;color:var(--white);font-weight:600}
 .clause p{color:var(--fog);font-size:15.5px}
-.clause p code{font-family:var(--mono);font-size:13px;color:var(--cyan);background:rgba(56,225,198,.07);padding:2px 6px;border-radius:5px}
+.clause p code{font-family:var(--mono);font-size:13px;color:var(--cyan);background:rgba(56,225,198,.07);padding:2px 6px;border-radius:5px;white-space:nowrap}
 
 /* ── light on broker + status ────────────────────────── */
 .lite-grid{display:grid;grid-template-columns:1.25fr 1fr;gap:40px;align-items:start}
@@ -388,7 +388,7 @@ footer a{color:var(--fog)}
       <p>Every design decision in QueueLens follows from it. These aren't features — they're guarantees, each with an enforcement point in code.</p>
     </div>
     <div class="contract-list rv">
-      <div class="clause"><span class="no">§ 01</span><h3>Browsing never consumes</h3><p>Non-destructive preview with requeue — read 220 messages, all 220 stay exactly where they were.</p></div>
+      <div class="clause"><span class="no">§ 01</span><h3>Browsing never consumes</h3><p>Non-destructive preview with requeue — read 220 messages, all 220 stay exactly where they were. The exception is quorum queues with a delivery limit: there every requeue counts as a delivery, so QueueLens refuses to browse them — and RabbitMQ 4 gives every quorum queue a limit of 20. Lift it on your DLQs with <code>delivery-limit: -1</code> (4.x; on 3.x remove the limit). <a href="https://github.com/talaatmagdyx/queuelens/blob/main/docs/SAFETY.md#1-browsing-never-consumes-messages">Details</a></p></div>
       <div class="clause"><span class="no">§ 02</span><h3>Publish before ack</h3><p>Replay removes the original only <em>after</em> the broker confirms the publish. Unroutable publishes bounce back as errors, never silence.</p></div>
       <div class="clause"><span class="no">§ 03</span><h3>Dry-run is mandatory</h3><p>Bulk actions first count exactly what will be touched; execute runs on that exact set via a one-shot confirmation token.</p></div>
       <div class="clause"><span class="no">§ 04</span><h3>Deletes are deliberate</h3><p>Type-to-confirm, Admin role only. There is no "oops" path.</p></div>
