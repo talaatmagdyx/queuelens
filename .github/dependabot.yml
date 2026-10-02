@@ -1,0 +1,32 @@
+# Weekly dependency updates, grouped so routine bumps arrive as a few PRs, not dozens.
+# Security updates (Dependabot alerts → fix PRs) are enabled in the repo settings and
+# open immediately, independent of this schedule. Every PR runs the full required CI.
+version: 2
+updates:
+  - package-ecosystem: pip          # pyproject.toml
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker       # Dockerfile base images
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      # the runtime Python/Node line is a deliberate choice (CI tests 3.12) — bump it by hand
+      - dependency-name: python
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: node
+        update-types: [version-update:semver-major]
