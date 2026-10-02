@@ -1,8 +1,11 @@
+from typing import Any
+
 import httpx
 import pytest
 
 from app.config import Settings
-from app.domain.models import MessageRecord, QueueInfo
+from app.domain.models import QueueInfo
+from app.infrastructure.rabbitmq.message_browser import Scan
 from app.main import create_app
 from tests import cred
 
@@ -38,7 +41,7 @@ async def test_ambiguous_message_detail_returns_404() -> None:
     app = create_app(Settings(auth_enabled=False))
 
     class FakeMessageService:
-        async def get_message(self, queue: str, fingerprint: str, _limit: int) -> MessageRecord:
+        async def get_message(self, queue: str, fingerprint: str, *_a: object, **_k: object) -> Any:
             raise MessageNotUniquelyIdentifiable(
                 f"Message {fingerprint} was not found uniquely in {queue}"
             )
@@ -362,9 +365,9 @@ async def test_preview_limit_can_lower_the_cap_but_never_raise_it(tmp_path) -> N
     asked: list[int] = []
 
     class Browser:
-        async def list_messages(self, _queue: str, limit: int) -> list[object]:
+        async def scan(self, _queue: str, limit: int, **_kwargs: object) -> Scan:
             asked.append(limit)
-            return []
+            return Scan([], 0, None)
 
     app.state.message_service = MessageService(Browser())  # type: ignore[arg-type]
     transport = httpx.ASGITransport(app=app)

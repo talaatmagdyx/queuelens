@@ -458,3 +458,107 @@ async def test_refused_replays_and_exact_expiration_against_real_broker(tmp_path
                     await cleanup.queue_delete(queue_name)
             with contextlib.suppress(Exception):
                 await management.delete(f"/api/users/{other[0]}")
+
+
+@pytest.mark.asyncio
+async def test_snapshots_page_deep_queues_and_keep_quorum_order(tmp_path) -> None:
+    """#4 against a real broker: a snapshot pages a queue far past the preview window and
+    an action reaches a message deep in it; a quorum queue (which puts returned messages at
+    the back) is read only whole, so browsing it never reorders it."""
+    import asyncio
+
+    suffix = uuid.uuid4().hex[:8]
+    classic, quorum, target = (f"it.snap.{k}.{suffix}" for k in ("classic", "quorum", "target"))
+    auth = (_amqp.username or "guest", _amqp.password or "guest")
+    connection = await aio_pika.connect_robust(AMQP_URL)
+
+    async def ids(queue: str) -> list[str]:
+        """Drain on a fresh channel (a robust channel can hand back a stale Declare-Ok)."""
+        async with connection.channel() as fresh:
+            q = await fresh.declare_queue(queue, passive=True)
+            out = []
+            while (m := await q.get(no_ack=False, fail=False)) is not None:
+                out.append(m.message_id)
+                await m.ack()
+            return out
+
+    async def ready(queue: str, expected: int) -> int:
+        for _ in range(40):  # quorum requeues apply asynchronously
+            async with connection.channel() as fresh:
+                n = (await fresh.declare_queue(queue, passive=True)).declaration_result
+            if n.message_count == expected:
+                break
+            await asyncio.sleep(0.25)
+        return int(n.message_count)
+
+    try:
+        async with httpx.AsyncClient(base_url=MANAGEMENT_URL, auth=auth, timeout=10) as mgmt:
+            major = int((await mgmt.get("/api/overview")).json()["rabbitmq_version"][0])
+            # browsable quorum: unlimited deliveries (-1 on 4.x; no limit at all on 3.x)
+            q_args = {"x-queue-type": "quorum", **({"x-delivery-limit": -1} if major >= 4 else {})}
+            for name, arguments in ((classic, {}), (quorum, q_args), (target, {})):
+                await mgmt.put(f"/api/queues/%2F/{name}",
+                               json={"durable": True, "arguments": arguments})
+            async with connection.channel() as channel:
+                for i in range(250):
+                    await channel.default_exchange.publish(
+                        aio_pika.Message(f'{{"c": {i}}}'.encode(), message_id=f"c{i}"), classic)
+                for i in range(12):
+                    await channel.default_exchange.publish(
+                        aio_pika.Message(f'{{"q": {i}}}'.encode(), message_id=f"q{i}"), quorum)
+            for _ in range(60):  # the guard fails closed until the quorum queue's stats land
+                if "messages" in (await mgmt.get(f"/api/queues/%2F/{quorum}")).json():
+                    break
+                await asyncio.sleep(0.5)
+        assert await ready(quorum, 12) == 12
+
+        app = create_app(_settings(tmp_path))
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                base = f"/api/queues/{classic}/messages"
+                first = (await client.get(f"{base}?snapshot=new&limit=50")).json()
+                sid = first["snapshot"]["id"]
+                assert (first["snapshot"]["scanned"], first["total"]) == (250, 250)
+                page5 = (await client.get(f"{base}?snapshot={sid}&offset=200&limit=50")).json()
+                assert [m["message_id"] for m in page5["messages"]] == [
+                    f"c{i}" for i in range(200, 250)]
+
+                deep = next(m for m in page5["messages"] if m["message_id"] == "c230")
+                move = {"source_queue": classic, "fingerprint": deep["fingerprint"],
+                        "mode": "move", "target": {"type": "queue", "queue": target},
+                        "confirm": True}
+                window_only = await client.post("/api/messages/replay", json=move)
+                assert window_only.status_code == 409  # 230 is past the 100-message window
+                reached = await client.post("/api/messages/replay", json={**move, "snapshot": sid})
+                assert reached.status_code == 200, reached.text
+                assert (await ready(classic, 249), await ready(target, 1)) == (249, 1)
+
+                qbase = f"/api/queues/{quorum}/messages"
+                looks = [[m["message_id"] for m in (await client.get(f"{qbase}?limit=5")).json()
+                          ["messages"]] for _ in range(2)]
+                assert looks == [[f"q{i}" for i in range(5)]] * 2  # no rotation between looks
+                assert await ready(quorum, 12) == 12
+                snap = (await client.get(f"{qbase}?snapshot=new")).json()
+                q9 = next(m for m in snap["messages"] if m["message_id"] == "q9")
+                acted = await client.post("/api/messages/replay", json={
+                    **move, "source_queue": quorum, "fingerprint": q9["fingerprint"],
+                    "snapshot": snap["snapshot"]["id"]})
+                assert acted.status_code == 200, acted.text
+                assert await ready(quorum, 11) == 11
+
+                limits = {"values": {"limits": {"max_browse_depth": 5}}}
+                await client.put("/api/settings", json=limits)
+                too_deep = await client.get(f"{qbase}?limit=5")
+                assert too_deep.status_code == 409 and "only whole" in too_deep.json()["detail"]
+                shallow = (await client.get(f"{base}?snapshot=new")).json()["snapshot"]
+                assert (shallow["scanned"], shallow["stopped"]) == (5, "depth")
+
+        # every look and the action requeued the rest in order: the queue is as it was
+        assert await ids(quorum) == [f"q{i}" for i in range(12) if i != 9]
+    finally:
+        async with connection.channel() as cleanup:
+            for name in (classic, quorum, target):
+                with contextlib.suppress(Exception):
+                    await cleanup.queue_delete(name)
+        await connection.close()

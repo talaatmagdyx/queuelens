@@ -105,9 +105,32 @@ nothing is consumed (the broker's `redelivered` flag will be set).
 
 | Query param | Type | Default | Meaning |
 |---|---|---|---|
-| `limit` | int 1–1000 | the preview cap | Max messages to preview — can lower the cap, never raise it |
+| `limit` | int 1–1000 | the preview cap | Messages to return (one page) — can lower the cap, never raise it |
+| `snapshot` | `new` or an id | — | `new` scans the queue once, down to the browse depth, and keeps that copy for 5 minutes. An id pages through a copy that already exists |
+| `offset` | int ≥ 0 | 0 | First message of the page, within the snapshot (after filters) |
+| `contains` | string | — | Case-insensitive substring of the raw body, message id, fingerprint, or headers. A compressed body is searched as stored |
+| `payload_format` | `json` / `text` / `base64` | — | Only messages of that format |
+| `min_deaths` | int ≥ 1 | — | Only messages dead-lettered at least this many times (summed over x-death) |
 
 The cap is the stored *Limits* override if set, else `QUEUELENS_MAX_PREVIEW_MESSAGES`.
+
+**Without `snapshot`, offset or filters,** the response is the head of the queue, as before.
+**With them,** QueueLens works from a snapshot:
+- One scan reads the queue down to `QUEUELENS_MAX_BROWSE_DEPTH` (default 5000; the Limits
+  override goes up to 50 000), or until it has read 64 MiB of bodies. The scan requeues
+  everything it read.
+- Pages, search and filters are then served from that copy, with **no further broker
+  reads and no further deliveries**.
+- The response adds `total` (after filters), `offset`, `limit`, and
+  `snapshot: {id, scanned, ready, complete, stopped ("depth" / "memory"), depth,
+  created_at, expires_at}`.
+- An expired or unknown id is a `404`; scan again with `snapshot=new`.
+- A snapshot is only ever served back for the environment, vhost and queue it was taken of.
+
+**Quorum queues are always read whole,** for previews, snapshots, lookups and actions alike.
+A quorum queue puts every returned message at the back, so reading only part of one would
+reorder it. A quorum queue holding more than the browse depth, or more than 64 MiB, is
+refused with `409` and an explanation.
 
 `409` for a **quorum queue with a delivery limit** (`x-delivery-limit`, a `delivery-limit`
 policy, or the RabbitMQ 4.x default of 20): every requeue counts as a delivery there, so
@@ -160,9 +183,10 @@ actions, and bulk dry runs / executions on that queue. See [SAFETY.md](SAFETY.md
   truncated, since the raw bytes would reveal both.
 
 ### `GET /api/queues/{queue_name}/messages/{fingerprint}`
-Detail lookup by the full fingerprint within a bounded re-fetch window (the stored
-*Limits* override, else `QUEUELENS_REFETCH_WINDOW_SIZE` — actions scan the same window). `404` when the fingerprint matches zero **or multiple**
-messages — ambiguity is treated as not-found rather than guessing.
+Detail lookup by the full fingerprint, within a bounded re-fetch window (the stored *Limits*
+override, else `QUEUELENS_REFETCH_WINDOW_SIZE`). With `?snapshot=<id>`, the message comes
+from that snapshot and the broker isn't read. `404` when the fingerprint matches zero **or
+multiple** messages; ambiguity is treated as not-found rather than guessing.
 
 ## Actions
 
@@ -229,9 +253,13 @@ written before publishing; `x-queuelens-published-by/-at` always win over caller
 
 Bulk operations are **two-phase**: a dry run captures exactly which messages were seen and
 returns a one-shot token; execution acts only on that approved set. Messages that arrive
-after the dry run are never touched. Scope is the scan window (the stored *Limits*
-override, else `QUEUELENS_MAX_BULK_SIZE`, at most 1000 messages from the head of the
-queue), not the whole queue — the batch remembers its window and execution scans the same.
+after the dry run are never touched. The scope is the scan window: the stored *Limits*
+override, else `QUEUELENS_MAX_BULK_SIZE`, at most 1000 messages from the head of the queue,
+not the whole queue. The batch remembers its window, and execution scans the same.
+
+**Messages picked from a snapshot** (`fingerprints` plus `snapshot`) may lie deeper than the
+window. The scan then reaches the deepest selected message, up to the browse depth. A
+selection is capped at the bulk limit (`400` above it).
 
 ### `POST /api/messages/bulk/dry-run`
 
@@ -268,6 +296,11 @@ Response:
   "scan_limit": 500
 }
 ```
+
+Single actions (`replay`, `park`, `delete`) take the same optional `snapshot` field. With it,
+the action scans down to where the snapshot saw the message (plus the re-fetch window as
+slack), so anything a snapshot showed can be acted on. Without it, the action scans the
+re-fetch window.
 
 `duplicate_fingerprints` counts fingerprints with more than one physical message — those are
 **skipped and reported** at execution, never guessed at. `selected_not_seen` counts

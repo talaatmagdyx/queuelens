@@ -29,6 +29,7 @@ async def broker_scope(
     try:
         key = manager.scope(env, vhost)
         request.state.broker = await manager.resolve(*key)
+        request.state.scope = key
     except KeyError as error:
         raise HTTPException(status_code=404, detail=str(error.args[0])) from error
     BROKER_SCOPE.set(key)  # every audit row written for this request names it

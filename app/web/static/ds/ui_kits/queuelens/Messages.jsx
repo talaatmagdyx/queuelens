@@ -54,22 +54,51 @@
   function Messages({ nav, queue = 'payments.retry.dlq', role = 'Admin', fingerprint = null }) {
     const canDelete = role === 'Admin';
     const canAct = role !== 'Viewer';
-    const initialRows = React.useMemo(() => window.QL.fetchMessages(queue), [queue]);
-    const loadError = React.useMemo(() => window.QL.messagesError, [initialRows]);
-    const [rows, setRows] = React.useState(initialRows);
-    React.useEffect(() => { setRows(initialRows); setChecked([]); }, [initialRows]);
-    // Deep link (e.g. Audit Log "View Message"): preselect the message by fingerprint.
-    const linked = fingerprint && initialRows.find((r) => r.fingerprint === fingerprint);
-    const [selected, setSelected] = React.useState(linked ? linked.id : initialRows[0] ? initialRows[0].id : null);
+    const PAGE = 50;
+    const [rows, setRows] = React.useState([]);
+    const [snap, setSnap] = React.useState(null); // the scan this view pages through
+    const [total, setTotal] = React.useState(0);
+    const [page, setPage] = React.useState(1);
+    const [loading, setLoading] = React.useState(true);
+    const [loadError, setLoadError] = React.useState(null);
+    const [selected, setSelected] = React.useState(null);
     const [panelOpen, setPanelOpen] = React.useState(true);
     const [tab, setTab] = React.useState('payload');
     const [checked, setChecked] = React.useState([]);
     const [confirmDelete, setConfirmDelete] = React.useState(false);
     const [view, setView] = React.useState(null);
     const [deletedNote, setDeletedNote] = React.useState(0);
-    const [search, setSearch] = React.useState(linked ? linked.fingerprint.slice(0, 16) : '');
+    // Deep link (e.g. Audit Log "View Message"): find the message by fingerprint.
+    const [search, setSearch] = React.useState(fingerprint ? fingerprint.slice(0, 16) : '');
     const [typeFilter, setTypeFilter] = React.useState('All Payload Types');
     const [deleting, setDeleting] = React.useState(false);
+    const VIEWS = { 'x-death ≥ 3': { minDeaths: 3 }, 'BASE64 payloads': { format: 'base64' }, 'JSON only': { format: 'json' } };
+    const filters = {
+      contains: search.trim() || undefined,
+      format: (view && VIEWS[view].format) || (typeFilter !== 'All Payload Types' ? typeFilter.toLowerCase() : undefined),
+      minDeaths: view ? VIEWS[view].minDeaths : undefined,
+    };
+    const filtered = Boolean(filters.contains || filters.format || filters.minDeaths);
+    const load = (snapshotId, pageNo, f) => {
+      setLoading(true); setLoadError(null);
+      return window.QL.fetchSnapshotPage(queue, { snapshot: snapshotId, offset: (pageNo - 1) * PAGE, limit: PAGE, ...f })
+        .then((r) => {
+          setSnap(r.snapshot); setRows(r.rows); setTotal(r.total); setPage(pageNo); setChecked([]);
+          const linked = fingerprint && r.rows.find((x) => x.fingerprint === fingerprint);
+          setSelected((cur) => (linked ? linked.id : r.rows.some((x) => x.id === cur) ? cur : r.rows[0] ? r.rows[0].id : null));
+        })
+        // a snapshot lives a few minutes: an expired one is simply taken again
+        .catch((e) => (snapshotId !== 'new' && /expired/i.test(e.message) ? load('new', 1, f) : (setLoadError(e.message), setRows([]))))
+        .finally(() => setLoading(false));
+    };
+    React.useEffect(() => { load('new', 1, filters); }, [queue]);
+    const filterKey = JSON.stringify(filters);
+    React.useEffect(() => {
+      if (!snap) return undefined;
+      const t = setTimeout(() => load(snap.id, 1, filters), 300); // debounced: typing searches
+      return () => clearTimeout(t);
+    }, [filterKey]);
+    const rescan = () => load('new', 1, filters);
     const queueRow = D.queues.find((q) => q.name === queue) || { messages: rows.length, ready: rows.length, consumers: 0, rate: null, last: '—', type: 'DLQ' };
     const QUEUE_TONE = { DLQ: 'danger', PARKING: 'success', NORMAL: 'info' };
     const msg = rows.find((m) => m.id === selected) || rows[0] || {};
@@ -91,12 +120,13 @@
       setDeleting(true);
       try {
         const preview = await api('/api/messages/bulk/dry-run',
-          { source_queue: queue, action: 'delete', fingerprints });
+          { source_queue: queue, action: 'delete', fingerprints, snapshot: snap && snap.id });
         const skipped = (preview.duplicate_fingerprints || 0) + (preview.selected_not_seen || 0);
         if (!typedConfirm('Dry run: ' + preview.message_count + ' of ' + fingerprints.length + ' selected messages will be deleted from ' + queue
           + (skipped ? ' (' + skipped + ' skipped: duplicates or no longer in the queue)' : '') + '. This cannot be undone.')) return;
         await api('/api/messages/bulk/execute', { batch_id: preview.batch_id, confirm: true });
         setRows((rs) => rs.filter((r) => !checked.includes(r.id)));
+        setTotal((t) => Math.max(0, t - fingerprints.length));
         setDeletedNote(fingerprints.length);
         clearSel();
       } catch (error) {
@@ -110,21 +140,16 @@
         : '';
       if (!typedConfirm('Delete this message from ' + queue + '? This cannot be undone.' + parkHint)) return;
       try {
-        await api('/api/messages/delete', { source_queue: queue, fingerprint: msg.fingerprint, confirm: true });
+        await api('/api/messages/delete', { source_queue: queue, fingerprint: msg.fingerprint, confirm: true, snapshot: msg.snapshot });
         setRows((rs) => rs.filter((r) => r.id !== msg.id));
+        setTotal((t) => Math.max(0, t - 1));
         setDeletedNote(1);
       } catch (error) { window.alert('Delete failed: ' + error.message); }
     };
-    const VIEWS = { 'x-death ≥ 3': (r) => r.xdeath >= 3, 'BASE64 payloads': (r) => r.type === 'BASE64', 'JSON only': (r) => r.type === 'JSON' };
-    const visibleRows = rows.filter((r) => {
-      if (view && !VIEWS[view](r)) return false;
-      if (typeFilter !== 'All Payload Types' && r.type !== typeFilter) return false;
-      if (search) {
-        const haystack = (r.id + ' ' + r.fingerprint + ' ' + r.payloadText + ' ' + r.headersText).toLowerCase();
-        if (!haystack.includes(search.toLowerCase())) return false;
-      }
-      return true;
-    });
+    const visibleRows = rows; // filtered server-side, over the whole snapshot
+    const pageCount = Math.max(1, Math.ceil(total / PAGE));
+    const first = total ? (page - 1) * PAGE + 1 : 0;
+    const takenAt = snap ? new Date(snap.created_at).toLocaleTimeString() : '';
     return (
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -146,19 +171,23 @@
               <Stat label="Consumers" value={String(queueRow.consumers)} />
               <Stat label="Message Rate (in)" value={queueRow.rate != null ? String(queueRow.rate) : '—'} unit={queueRow.rate != null ? '/s' : undefined} />
               <Stat label="Last Message" value={queueRow.last} />
-              <Stat label="Preview Limit" value={String(rows.length)} info />
+              <Stat label="In Snapshot" value={snap ? String(snap.scanned) : '—'} info />
             </div>
           </Card>
 
-          {queueRow.messages > rows.length && ((window.QL.serverSettings || {}).ui || {}).limits !== false && (
-            <Alert tone="info" style={{ marginBottom: 18 }}>Showing the latest {rows.length} messages (preview limit) of {queueRow.messages} in the queue.</Alert>
+          {snap && ((window.QL.serverSettings || {}).ui || {}).limits !== false && (
+            <Alert tone="info" style={{ marginBottom: 18 }}>
+              Snapshot of the {snap.scanned} oldest messages{snap.ready > snap.scanned ? ` (of ${snap.ready} ready)` : ''}
+              {snap.complete ? '' : snap.stopped === 'memory' ? ', stopped at the memory budget' : `, stopped at the browse depth (${snap.depth})`}
+              , taken at {takenAt}. Pages and search use this copy — nothing more is read from the broker until you rescan.
+            </Alert>
           )}
 
           <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
             <div style={{ flex: 1 }}><SearchInput placeholder="Search in payload, headers…" value={search} onChange={setSearch} /></div>
             <div style={{ width: 170 }}><Select options={['All Payload Types', 'JSON', 'TEXT', 'BASE64']} value={typeFilter} onChange={setTypeFilter} /></div>
             <Button variant="ghost" onClick={() => { setSearch(''); setTypeFilter('All Payload Types'); setView(null); }}>Clear Filters</Button>
-            <Button icon="refresh-cw" onClick={() => location.reload()}>Refresh</Button>
+            <Button icon="refresh-cw" onClick={rescan} disabled={loading}>{loading ? 'Scanning…' : 'Rescan'}</Button>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
@@ -224,9 +253,9 @@
               ]}
               rows={visibleRows} />
             <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderTop: '1px solid var(--slate-100)' }}>
-              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{view || search || typeFilter !== 'All Payload Types' ? `Filtered · showing ${visibleRows.length} of ${rows.length} fetched` : `Showing 1 to ${rows.length} of ${queueRow.messages} messages`}</span>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{loading ? 'Loading…' : `Showing ${first}–${first + rows.length - (rows.length ? 1 : 0)} of ${total}${filtered ? ' matching' : ''} in the snapshot`}</span>
               <div style={{ flex: 1 }} />
-              <Pagination page={1} pageCount={1} />
+              <Pagination page={page} pageCount={pageCount} onChange={(p) => snap && load(snap.id, p, filters)} />
             </div>
           </Card>
         </div>

@@ -18,3 +18,6 @@ site/screenshots
 acceptance-results*.json
 /acceptance.db
 /server.log
+
+# IDE settings
+.idea/

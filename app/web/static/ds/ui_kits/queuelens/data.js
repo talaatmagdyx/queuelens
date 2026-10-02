@@ -123,7 +123,8 @@ window.QL.screens = window.QL.screens || {};
       at: m.timestamp ? m.timestamp.slice(0, 19).replace('T', ' ') : '—',
       type: (m.payload_format || 'json').toUpperCase(),
       size: human(m.payload_size),
-      xdeath: (m.x_death || []).length,
+      // deaths, not x-death entries: one entry per queue+reason carries its own count
+      xdeath: (m.x_death || []).reduce(function (n, d) { return n + (Number(d.count) || 1); }, 0),
       preview: JSON.stringify(m.payload).slice(0, 30) + '…',
       payloadText: typeof m.payload === 'string' ? m.payload : JSON.stringify(m.payload, null, 2),
       headersText: Object.keys(m.headers || {}).length ? JSON.stringify(m.headers, null, 2) : '(no headers)',
@@ -145,6 +146,23 @@ window.QL.screens = window.QL.screens || {};
     var result = getJson('/api/queues/' + encodeURIComponent(queue) + '/messages');
     if (!result) window.QL.messagesError = window.QL.lastError || 'Could not load messages';
     return ((result || {}).messages || []).map(mapMessage);
+  };
+
+  // Deep browsing: snapshot "new" scans the queue once (down to the browse depth); later
+  // pages, search and filters come from that copy — no further broker reads.
+  window.QL.fetchSnapshotPage = function (queue, opts) {
+    var q = ['snapshot=' + encodeURIComponent(opts.snapshot || 'new'),
+      'offset=' + (opts.offset || 0), 'limit=' + (opts.limit || 50)];
+    if (opts.contains) q.push('contains=' + encodeURIComponent(opts.contains));
+    if (opts.format) q.push('payload_format=' + opts.format);
+    if (opts.minDeaths) q.push('min_deaths=' + opts.minDeaths);
+    var url = '/api/queues/' + encodeURIComponent(queue) + '/messages?' + q.join('&');
+    return window.QL.requestJson('GET', url).then(function (r) {
+      return {
+        snapshot: r.snapshot, total: r.total,
+        rows: r.messages.map(function (m) { var row = mapMessage(m); row.snapshot = r.snapshot.id; return row; }),
+      };
+    });
   };
 
   var exchangeCache = null;

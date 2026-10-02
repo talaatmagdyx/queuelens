@@ -114,6 +114,7 @@
       max_preview_messages: limitsStored.max_preview_messages || CFG.max_preview_messages || 100,
       refetch_window_size: limitsStored.refetch_window_size || CFG.refetch_window_size || 100,
       max_bulk_size: limitsStored.max_bulk_size || CFG.max_bulk_size || 500,
+      max_browse_depth: limitsStored.max_browse_depth || CFG.max_browse_depth || 5000,
     });
 
     const save = async (values, note) => {
@@ -316,12 +317,13 @@
           ) : tab === 'limits' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
               <Card title="Limits" subtitle="Caps that keep browsing and bulk operations safe on large queues. The preview limit applies server-side immediately.">
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginTop: 8 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 14, marginTop: 8 }}>
                   <Input label="Message Preview Limit" value={String(limitsDraft.max_preview_messages)} onChange={(v) => setLimitsDraft({ ...limitsDraft, max_preview_messages: parseInt(v, 10) || 0 })} suffix="msgs" />
                   <Input label="Refetch Window" value={String(limitsDraft.refetch_window_size)} onChange={(v) => setLimitsDraft({ ...limitsDraft, refetch_window_size: parseInt(v, 10) || 0 })} suffix="msgs" />
                   <Input label="Max Bulk Selection" value={String(limitsDraft.max_bulk_size)} onChange={(v) => setLimitsDraft({ ...limitsDraft, max_bulk_size: parseInt(v, 10) || 0 })} suffix="msgs" />
+                  <Input label="Browse Depth" value={String(limitsDraft.max_browse_depth)} onChange={(v) => setLimitsDraft({ ...limitsDraft, max_browse_depth: parseInt(v, 10) || 0 })} suffix="msgs" />
                 </div>
-                <Alert tone="info" style={{ marginTop: 14 }}>Preview limit caps how many messages are fetched (with requeue) per queue. Larger values increase broker load.</Alert>
+                <Alert tone="info" style={{ marginTop: 14 }}>Preview limit caps one page. Browse depth caps one snapshot scan (up to 50,000): every message it reads is held unacked until the scan requeues it, and a quorum queue deeper than this is refused rather than browsed in part (that would reorder it).</Alert>
               </Card>
               <Card title="Timeouts" subtitle="Set by QUEUELENS_* environment variables (restart to change).">
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginTop: 8 }}>
@@ -331,7 +333,7 @@
                 </div>
               </Card>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                <Button variant="secondary" onClick={() => setLimitsDraft({ max_preview_messages: CFG.max_preview_messages || 100, refetch_window_size: CFG.refetch_window_size || 100, max_bulk_size: CFG.max_bulk_size || 500 })}>Reset to Defaults</Button>
+                <Button variant="secondary" onClick={() => setLimitsDraft({ max_preview_messages: CFG.max_preview_messages || 100, refetch_window_size: CFG.refetch_window_size || 100, max_bulk_size: CFG.max_bulk_size || 500, max_browse_depth: CFG.max_browse_depth || 5000 })}>Reset to Defaults</Button>
                 <Button onClick={() => save({ limits: limitsDraft }, 'Limits saved')}>Save Changes</Button>
               </div>
             </div>

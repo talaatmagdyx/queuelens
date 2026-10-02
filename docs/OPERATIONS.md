@@ -124,8 +124,14 @@ thresholds to your traffic.
 - **Previewed messages show `redelivered=true`** on the broker afterwards — browsing
   requeues, it never consumes. Expect this in the RabbitMQ UI.
 - **Actions scan up to `QUEUELENS_REFETCH_WINDOW_SIZE` messages** from the head of the queue
-  and briefly hold them unacked. On very deep queues, messages beyond the window cannot be
-  acted on until the queue drains or the window is raised.
+  and briefly hold them unacked.
+  - A message picked from a snapshot is reached however deep it is, up to the browse depth
+    (`QUEUELENS_MAX_BROWSE_DEPTH`, default 5000).
+  - A snapshot scan holds up to that many messages unacked, which takes about 2 s per 5000
+    on a local broker.
+- **Quorum queues are always scanned whole**, to keep their order. A quorum DLQ deeper than
+  the browse depth answers `409` until it drains, the depth is raised, or it is shovelled to
+  a classic queue.
 - **Park auto-creates `{queue}.parking`** (durable, default exchange). Parked messages stay
   there until you replay or delete them — QueueLens does not consume from parking queues.
 - **Replayed messages carry `x-queuelens-*` headers** (who, when, from where, original

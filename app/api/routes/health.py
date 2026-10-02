@@ -108,6 +108,7 @@ async def config(
         "max_preview_messages": settings.max_preview_messages,
         "max_message_size_bytes": settings.max_message_size_bytes,
         "refetch_window_size": settings.refetch_window_size,
+        "max_browse_depth": settings.max_browse_depth,
         "max_bulk_size": settings.max_bulk_size,
         "bulk_dry_run_ttl_seconds": settings.bulk_dry_run_ttl_seconds,
         "masking_enabled": settings.masking_enabled,

@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Deep browsing (#4).** The Messages screen pages through the whole queue, down to a
+  browse depth (`QUEUELENS_MAX_BROWSE_DEPTH`, default 5000, adjustable under Limits).
+  - One scan builds a short-lived snapshot, and pages, search, the payload-format filter
+    and "x-death ≥ 3" are served from it, with no further broker reads or deliveries.
+  - Anything a snapshot shows can be acted on: single and bulk actions picked from it scan
+    down to the message instead of a fixed 100-message window.
+  - API: `GET /api/queues/{q}/messages?snapshot=new|<id>&offset=&limit=&contains=&payload_format=&min_deaths=`,
+    plus an optional `snapshot` on actions and bulk dry runs.
+
+### Fixed
+- **Browsing a quorum queue no longer reorders it.** A quorum queue puts returned messages
+  at the back, so every preview rotated what it read to the tail. Each refresh showed
+  different messages, and the queue's order drifted with every look. Quorum queues are now
+  read whole and requeued in order, which leaves them as they were. One deeper than the
+  browse depth, or larger than 64 MiB, is refused with an explanation instead.
+- **Actions on quorum DLQs can find the message again.** A quorum queue stamps
+  `x-delivery-count` on every redelivery, and fingerprints hashed it, so a message got a
+  new identity each time it was previewed. Replaying, parking or deleting a previewed
+  quorum message always failed with "not found uniquely". That header is now left out of
+  fingerprints.
+- The x-death count in the message table counts deaths, not x-death entries. One entry per
+  queue and reason carries its own count, so a message rejected five times from one queue
+  used to show 1.
+- The preview banner said "latest" messages. A preview shows the head of the queue, the
+  oldest messages.
+
 ## v0.11.0 — 2026-10-02
 
 ### Changed

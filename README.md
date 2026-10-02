@@ -326,8 +326,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) to get started; good first issues are lab
 
 - Single replica by design (SQLite, in-process alert state) — PostgreSQL is the path to
   multi-replica, on the roadmap. Environments are already chosen per request (per tab).
-- Bulk operations act on the scan window (up to `QUEUELENS_MAX_BULK_SIZE` from the head
-  of the queue), not the whole queue
+- Filter-based bulk operations act on the scan window (up to `QUEUELENS_MAX_BULK_SIZE` from
+  the head of the queue). Messages picked from a snapshot can be reached down to the browse
+  depth (default 5000)
+- Quorum DLQs are browsed only whole, to keep their order, so one deeper than the browse
+  depth isn't browsable until it drains or the depth is raised
 - Masking is key-based and display-only — it will not detect secrets under unlisted keys
 - Message fingerprints are best-effort identifiers, not global message IDs; ambiguous
   matches fail safely

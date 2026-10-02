@@ -3,14 +3,20 @@ from datetime import datetime
 from typing import Any
 
 from app.domain.models import MessageRecord
-from app.infrastructure.rabbitmq.message_browser import MessageBrowser
+from app.infrastructure.rabbitmq.message_browser import (
+    SCAN_BYTES_BUDGET,
+    MessageBrowser,
+    Scan,
+    with_payload,
+)
 
-# Raises before any basic.get when browsing the queue would be destructive.
-BrowseGuard = Callable[[str], Awaitable[None]]
+# Raises before any basic.get when browsing the queue would be destructive; returns
+# whether the queue must be scanned whole (quorum queues — see fetch()).
+BrowseGuard = Callable[[str], Awaitable[bool]]
 
 
-async def _no_guard(_queue: str) -> None:
-    return None
+async def _no_guard(_queue: str) -> bool:
+    return False
 
 
 class MessageService:
@@ -18,13 +24,27 @@ class MessageService:
         self._browser = browser
         self._guard = guard
 
-    async def list_messages(self, queue_name: str, limit: int) -> list[MessageRecord]:
-        await self._guard(queue_name)
-        return await self._browser.list_messages(queue_name, limit)
+    async def list_messages(
+        self, queue_name: str, limit: int, depth: int | None = None
+    ) -> list[MessageRecord]:
+        """The first `limit` messages. A quorum queue is read whole (up to `depth`)."""
+        whole = bool(await self._guard(queue_name))
+        scan = await self._browser.scan(
+            queue_name, (depth or limit) if whole else limit, whole=whole
+        )
+        return scan.records[:limit]
 
-    async def get_message(self, queue_name: str, fingerprint: str, limit: int) -> MessageRecord:
-        await self._guard(queue_name)
-        messages = await self._browser.list_messages(queue_name, limit)
+    async def snapshot(self, queue_name: str, depth: int) -> Scan:
+        """One scan down to `depth` (or the memory budget), kept slim for paging."""
+        whole = bool(await self._guard(queue_name))
+        return await self._browser.scan(
+            queue_name, depth, whole=whole, max_bytes=SCAN_BYTES_BUDGET, slim=True
+        )
+
+    async def get_message(
+        self, queue_name: str, fingerprint: str, limit: int, depth: int | None = None
+    ) -> MessageRecord:
+        messages = await self.list_messages(queue_name, limit, depth)
         matches = [message for message in messages if message.fingerprint == fingerprint]
         if len(matches) != 1:
             raise MessageNotUniquelyIdentifiable(
@@ -47,6 +67,7 @@ def message_to_dict(
     max_message_size_bytes: int | None = None,
     masked_fields: tuple[str, ...] = (),
 ) -> dict[str, Any]:
+    message = with_payload(message)  # snapshot records keep raw bodies only
     masked = frozenset(_normalize_key(field) for field in masked_fields)
     payload: Any = _jsonable(message.payload, masked)
     # the raw (still-compressed) bytes carry every value masking hides and the whole

@@ -126,7 +126,7 @@ async def test_dry_run_filters_and_execute_is_one_shot() -> None:
         )
 
     class FakeBrowser:
-        async def list_messages(self, _queue: str, _limit: int) -> list[MessageRecord]:
+        async def list_messages(self, _queue: str, _limit: int, **_kw: object) -> list[Any]:
             return [
                 record("aaaaaaaa", b'{"customer": "acme"}'),
                 record("bbbbbbbb", b'{"customer": "globex"}'),
@@ -168,7 +168,7 @@ async def test_dry_run_filters_and_execute_is_one_shot() -> None:
 @pytest.mark.asyncio
 async def test_bulk_replay_requires_target_and_park_derives_parking_queue() -> None:
     class EmptyBrowser:
-        async def list_messages(self, _queue: str, _limit: int) -> list[MessageRecord]:
+        async def list_messages(self, _queue: str, _limit: int, **_kw: object) -> list[Any]:
             return []
 
     service = BulkActionService(Settings(), EmptyBrowser(), object())  # type: ignore[arg-type]
@@ -288,7 +288,7 @@ async def test_dry_run_with_explicit_selection() -> None:
         )
 
     class FakeBrowser:
-        async def list_messages(self, _queue: str, _limit: int) -> list[MessageRecord]:
+        async def list_messages(self, _queue: str, _limit: int, **_kw: object) -> list[Any]:
             return [record("aaaaaaaa"), record("bbbbbbbb"), record("cccccccc")]
 
     service = BulkActionService(Settings(), FakeBrowser(), object())  # type: ignore[arg-type]
@@ -387,7 +387,7 @@ async def test_bulk_execute_records_its_attempt_before_touching_the_broker(tmp_p
 @pytest.mark.asyncio
 async def test_execute_scans_the_window_its_dry_run_approved() -> None:
     class Browser:
-        async def list_messages(self, _queue: str, limit: int) -> list[MessageRecord]:
+        async def list_messages(self, _queue: str, limit: int, **_kw: object) -> list[Any]:
             self.limit = limit
             return []
 
@@ -413,7 +413,7 @@ async def test_a_dry_run_only_executes_in_the_environment_it_scanned(tmp_path) -
     from app.infrastructure.persistence.store import BulkBatchRepository
 
     class Browser:
-        async def list_messages(self, queue: str, _limit: int) -> list[MessageRecord]:
+        async def list_messages(self, queue: str, _limit: int, **_kw: object) -> list[Any]:
             return [MessageRecord(
                 fingerprint="f" * 64, source_queue=queue, body=b"{}", payload={},
                 payload_format="json", payload_size=2, content_type=None, message_id="m",

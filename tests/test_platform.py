@@ -579,7 +579,7 @@ async def test_dry_run_batches_survive_restart(tmp_path) -> None:
         )
 
     class FakeBrowser:
-        async def list_messages(self, _queue, _limit):
+        async def list_messages(self, _queue, _limit, **_kw):
             return [record(1), record(2)]
 
     class FakeOperator:

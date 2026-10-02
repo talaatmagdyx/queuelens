@@ -8,7 +8,7 @@ from aiormq.exceptions import ChannelNotFoundEntity
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from app.api.routes.messages import effective_limit
+from app.api.routes.messages import effective_limit, scan_depth
 from app.api.scope import broker, broker_scope
 from app.application.action_service import ActionService
 from app.application.queue_service import UnsafeToBrowse
@@ -44,12 +44,14 @@ class ReplayRequest(BaseModel):
     target: TargetRequest | None = None
     confirm: bool = False
     annotate: bool = True  # stamp x-queuelens-* provenance headers
+    snapshot: str | None = Field(default=None, max_length=64)  # where it was picked
 
 
 class MessageActionRequest(BaseModel):
     source_queue: str = Field(min_length=1)
     fingerprint: str = Field(min_length=8)
     confirm: bool = False
+    snapshot: str | None = Field(default=None, max_length=64)  # where it was picked
 
 
 async def _custom_headers(request: Request) -> dict[str, object]:
@@ -174,7 +176,8 @@ async def replay(
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Replay confirmation is required")
     custom_headers = await _custom_headers(request)
-    max_scan = await effective_limit(request, "refetch_window_size")
+    max_scan = await scan_depth(request, body.source_queue, [body.fingerprint], body.snapshot)
+    depth = await effective_limit(request, "max_browse_depth")
     return await _run_action(
         request,
         user.username,
@@ -190,6 +193,7 @@ async def replay(
             annotate=body.annotate,
             extra_headers=custom_headers,
             max_scan=max_scan,
+            depth=depth,
         ),
         target=body.target.to_domain() if body.target else None,
         mode=body.mode,
@@ -205,7 +209,8 @@ async def park(
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Park confirmation is required")
     custom_headers = await _custom_headers(request)
-    max_scan = await effective_limit(request, "refetch_window_size")
+    max_scan = await scan_depth(request, body.source_queue, [body.fingerprint], body.snapshot)
+    depth = await effective_limit(request, "max_browse_depth")
     return await _run_action(
         request,
         user.username,
@@ -218,6 +223,7 @@ async def park(
             username=user.username,
             extra_headers=custom_headers,
             max_scan=max_scan,
+            depth=depth,
         ),
         target=ReplayTarget(type="queue", queue=f"{body.source_queue}.parking"),
     )
@@ -231,7 +237,8 @@ async def delete(
 ) -> dict[str, object]:
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Delete confirmation is required")
-    max_scan = await effective_limit(request, "refetch_window_size")
+    max_scan = await scan_depth(request, body.source_queue, [body.fingerprint], body.snapshot)
+    depth = await effective_limit(request, "max_browse_depth")
     return await _run_action(
         request,
         user.username,
@@ -242,6 +249,7 @@ async def delete(
             source_queue=body.source_queue,
             fingerprint=body.fingerprint,
             max_scan=max_scan,
+            depth=depth,
         ),
     )
 
