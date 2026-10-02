@@ -21,7 +21,8 @@
 
   function rel(iso) {
     if (!iso) return '—';
-    const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
+    // stored times are UTC without an offset: read them as UTC, not as local time
+    const m = Math.round((Date.now() - Date.parse(/Z$|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z')) / 60000);
     if (isNaN(m)) return '—';
     if (m < 1) return 'just now';
     if (m < 60) return m + 'm ago';

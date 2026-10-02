@@ -107,7 +107,7 @@
         </Card>
 
         <Alert tone="info" style={{ marginTop: 20 }} action={<ArrowLink onClick={() => {}}>Learn more</ArrowLink>}>
-          Counts are from RabbitMQ Management API and update automatically. Message preview is limited to 100 per queue.
+          Counts are from RabbitMQ Management API and update automatically. Message bodies are read only when you open a queue.
         </Alert>
       </div>
     );

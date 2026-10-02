@@ -149,7 +149,7 @@
     const visibleRows = rows; // filtered server-side, over the whole snapshot
     const pageCount = Math.max(1, Math.ceil(total / PAGE));
     const first = total ? (page - 1) * PAGE + 1 : 0;
-    const takenAt = snap ? new Date(snap.created_at).toLocaleTimeString() : '';
+    const takenAt = snap ? snap.created_at.slice(11, 19) + ' UTC' : ''; // the table's times are UTC too
     return (
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0 }}>

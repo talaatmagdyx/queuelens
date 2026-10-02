@@ -31,13 +31,13 @@
     const failedToday = empty ? 0 : D.audit.filter((r) => r.result === 'Failed' && r.time.slice(0, 10) === today).length;
     const noConsumers = empty ? 0 : D.queues.filter((q) => q.consumers === 0).length;
     const autoRefresh = (((window.QL.serverSettings || {}).ui || {}).auto) !== false;
-    const previewLimit = ((window.QL.serverSettings || {}).limits || {}).max_preview_messages
-      || (window.QL.config || {}).max_preview_messages || 100;
+    const browseDepth = ((window.QL.serverSettings || {}).limits || {}).max_browse_depth
+      || (window.QL.config || {}).max_browse_depth || 5000;
     return (
       <div>
         <PageHeader title="DLQ Recovery Dashboard" subtitle="Inspect failed RabbitMQ messages and recover them safely." />
         <Alert tone="info" style={{ marginBottom: 20 }}>
-          Auto-refresh is {autoRefresh ? 'ON every 30 seconds' : 'OFF'}&nbsp;&nbsp;·&nbsp;&nbsp;Message preview is limited to {previewLimit} per queue&nbsp;&nbsp;·&nbsp;&nbsp;Counts from Management API
+          Auto-refresh is {autoRefresh ? 'ON every 30 seconds' : 'OFF'}&nbsp;&nbsp;·&nbsp;&nbsp;Message bodies are read only when you open a queue (one scan, up to {browseDepth})&nbsp;&nbsp;·&nbsp;&nbsp;Counts from Management API
         </Alert>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(215px, 1fr))', gap: 14, marginBottom: 22 }}>
           <StatCard icon="database" tone="info" value={String(dlq.length)} label="DLQ Queues" sublabel="Detected" />
