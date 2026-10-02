@@ -18,7 +18,7 @@ app/
     rabbitmq/management_client.py async RabbitMQ Management API client (httpx)
     rabbitmq/message_browser.py   non-destructive preview (basic_get + requeue)
     rabbitmq/message_operator.py  mutating actions (publish-before-ack)
-    persistence/                  SQLAlchemy asyncio + SQLite audit store
+    persistence/                  SQLAlchemy asyncio store (SQLite or PostgreSQL)
   domain/
     models.py              frozen dataclasses (QueueInfo, MessageRecord, AuditEntry, ReplayTarget)
     fingerprint.py         best-effort message identity
@@ -81,8 +81,9 @@ One code path drives all four actions:
 
 Every action writes a `started` event **before** execution and a `success`/`failed` event
 after. If the attempt event cannot be persisted, the action is rejected — audit is a
-precondition, not a best effort. Store is SQLite via SQLAlchemy asyncio (`aiosqlite`);
-the schema is created at startup (`Base.metadata.create_all`), no migrations in Phase 1.
+precondition, not a best effort. The store is SQLAlchemy asyncio on SQLite (`aiosqlite`)
+or PostgreSQL (`asyncpg`); tables are created at startup (`Base.metadata.create_all`) and
+`Database.MIGRATIONS` adds the columns later releases introduced.
 
 ### DLQ detection (`QueueService`)
 

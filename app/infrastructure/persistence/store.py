@@ -7,7 +7,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import delete, desc, select
+from sqlalchemy import delete, desc, select, update
 
 from app.infrastructure.persistence.database import Database
 from app.infrastructure.persistence.models import (
@@ -147,20 +147,20 @@ class AlertRuleRepository:
             await session.commit()
             return True
 
-    async def mark_fired(self, rule_id: int, at: datetime) -> None:
-        async with self._database.session() as session:
-            row = await session.get(AlertRuleModel, rule_id)
-            if row is not None:
-                row.last_fired_at = at
-                row.fired = True
-                await session.commit()
+    async def mark_fired(self, rule_id: int, at: datetime) -> bool:
+        return await self.set_fired(rule_id, True, last_fired_at=at)
 
-    async def set_fired(self, rule_id: int, fired: bool) -> None:
+    async def set_fired(self, rule_id: int, fired: bool, **values: Any) -> bool:
+        """Compare-and-set: True only for the caller that changed it, so evaluations that
+        overlap (a slow pass, a second replica on a shared database) notify once."""
         async with self._database.session() as session:
-            row = await session.get(AlertRuleModel, rule_id)
-            if row is not None:
-                row.fired = fired
-                await session.commit()
+            result = await session.execute(
+                update(AlertRuleModel)
+                .where(AlertRuleModel.id == rule_id, AlertRuleModel.fired != fired)
+                .values(fired=fired, **values)
+            )
+            await session.commit()
+            return bool(getattr(result, "rowcount", 0))
 
 
 class NotificationRepository:
@@ -387,13 +387,16 @@ class BulkBatchRepository:
         from app.infrastructure.persistence.models import BulkBatchModel
 
         async with self._database.session() as session:
-            row = await session.get(BulkBatchModel, batch_id, with_for_update=True)
-            if row is None or _as_utc(row.expires_at) < datetime.now(UTC):
-                return None
-            payload = dict(row.payload)
-            await session.delete(row)
+            # one statement: two executes racing for a batch can't both get it (SQLite
+            # ignores SELECT ... FOR UPDATE)
+            payload = await session.scalar(
+                delete(BulkBatchModel)
+                .where(BulkBatchModel.id == batch_id,
+                       BulkBatchModel.expires_at >= datetime.now(UTC))
+                .returning(BulkBatchModel.payload)
+            )
             await session.commit()
-            return payload
+            return dict(payload) if payload is not None else None
 
     async def prune_expired(self) -> int:
         from app.infrastructure.persistence.models import BulkBatchModel

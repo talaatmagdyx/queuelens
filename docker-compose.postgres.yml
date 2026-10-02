@@ -1,0 +1,36 @@
+# PostgreSQL instead of the SQLite file in the queuelens-data volume:
+#
+#   echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" >> .env
+#   docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
+#
+# Without POSTGRES_PASSWORD the postgres service refuses to start.
+#
+# Moving an existing install? Copy the SQLite data across once, before the first start
+# (docs/OPERATIONS.md → "Moving to PostgreSQL").
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: queuelens
+      POSTGRES_DB: queuelens
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "queuelens"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  queuelens:
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # asyncpg takes the password from PGPASSWORD when the URL has none
+      QUEUELENS_DATABASE_URL: postgresql+asyncpg://queuelens@postgres:5432/queuelens
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+
+volumes:
+  postgres-data:

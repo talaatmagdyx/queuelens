@@ -133,8 +133,11 @@ class AlertEngine:
             if offenders:
                 first = self._pending.setdefault((key_base, "*"), now)
                 held = (now - first).total_seconds()
-                if held >= rule["duration_seconds"] and not rule["fired"]:
-                    await self._rules.mark_fired(key_base, now)
+                if (
+                    held >= rule["duration_seconds"]
+                    and not rule["fired"]
+                    and await self._rules.mark_fired(key_base, now)  # False: fired elsewhere
+                ):
                     detail = ", ".join(f"{name}={value}" for name, value in offenders[:5])
                     notification = await self._fire(
                         rule,
@@ -149,8 +152,7 @@ class AlertEngine:
                     created.append(notification)
             else:
                 self._pending.pop((key_base, "*"), None)
-                if rule["fired"]:
-                    await self._rules.set_fired(key_base, False)
+                if rule["fired"] and await self._rules.set_fired(key_base, False):
                     notification = await self._fire(
                         rule,
                         level="Success",

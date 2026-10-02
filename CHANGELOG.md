@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **PostgreSQL as the datastore** (#1): set `QUEUELENS_DATABASE_URL` to
+  `postgresql+asyncpg://...`. The driver is in the image, `docker-compose.postgres.yml` adds
+  a database to the bundled compose, and CI runs the unit suite's persistence tests and a
+  full acceptance run on PostgreSQL 17. SQLite stays the default. Still one replica: the
+  per-queue locks and browse snapshots live in the process.
+- `python -m app.copy_db SOURCE_URL [TARGET_URL]` moves an existing install's users, alert
+  rules, settings and audit history across, in one transaction, with row counts checked.
+
+### Fixed
+- **Two simultaneous executions of a bulk dry run could both run it** on SQLite, which
+  ignores `SELECT ... FOR UPDATE`. In the app a lock already kept them apart; the token
+  is now taken with one `DELETE ... RETURNING`, safe on a shared database too.
+- An alert's fired / recovered flip is a compare-and-set, so overlapping evaluations
+  notify once.
+- Audit fields longer than their column are clipped (PostgreSQL would refuse the row,
+  and an attempt that can't be audited is refused).
+
 ## v0.12.1 — 2026-10-02
 
 ### Added

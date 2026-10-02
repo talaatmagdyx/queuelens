@@ -4,10 +4,12 @@
 
 QueueLens is designed as a **single-instance, internal-network operations tool**:
 
-- **Exactly one replica.** Bulk dry-run tokens, alert-engine state, and
-  environment bundles live in process memory; running two replicas causes
-  dry-run 404s and duplicate alert deliveries. The SQLite datastore implies the
-  same constraint.
+- **Exactly one replica, on either database.** Per-queue operation locks, browse
+  snapshots, environment bundles and the login limiter live in process memory. A
+  second replica could read or act on a queue while the first one does (a quorum
+  queue would lose its order), and snapshot pages would 404 when a request lands on the
+  other replica. Bulk dry-run tokens and alert fired-state are kept in the database and
+  are already safe to share; PostgreSQL alone doesn't lift this limit.
 - **TLS is mandatory and external.** Authentication is HTTP Basic — always
   deploy behind a TLS-terminating reverse proxy (or a service mesh). Never
   expose port 8000 directly to the internet.
@@ -22,12 +24,14 @@ QueueLens is designed as a **single-instance, internal-network operations tool**
 
 ## Backups & data
 
-Everything mutable lives in one SQLite file (`QUEUELENS_DATABASE_URL`,
-default `data/queuelens.db` on the `queuelens-data` volume): audit history,
-settings, alert rules, notifications, invited users, runtime-added environments.
+Everything mutable lives in one database (`QUEUELENS_DATABASE_URL`): audit history,
+settings, alert rules, notifications, invited users, runtime-added environments. By
+default that's the SQLite file `data/queuelens.db` on the `queuelens-data` volume; see
+[Database](#database) for PostgreSQL.
 
-- Back it up with `sqlite3 data/queuelens.db ".backup backup.db"` or by
-  snapshotting the volume. Restoring the file restores everything.
+- Back SQLite up with `sqlite3 data/queuelens.db ".backup backup.db"` or by
+  snapshotting the volume, and PostgreSQL with `pg_dump` or your provider's backups.
+  Restoring the database restores everything.
 - Retention pruning is **permanent** — export the audit log (CSV/JSON from the
   UI) before shortening retention if you need history.
 - Set `QUEUELENS_SECRET_KEY` in production so channel and environment
@@ -107,17 +111,39 @@ Ready-made alert rules (broker down, DLQ above threshold, DLQ growing, action fa
 ship in [`deploy/prometheus/alerts.yml`](../deploy/prometheus/alerts.yml); tune the
 thresholds to your traffic.
 
-## Audit store
+## Database
 
-- SQLite at `QUEUELENS_DATABASE_URL` (compose: named volume `queuelens-data`).
-- Schema is created automatically at startup; there are no migrations in Phase 1 — new
-  columns require recreating the database or manual DDL.
-- **Backup** = copy the `.db` file (stop the app or use `sqlite3 .backup` for a hot copy).
-- There is no retention/pruning job yet; the table grows with every action attempt/outcome.
-  Prune manually if needed: `DELETE FROM audit_events WHERE timestamp < :cutoff;`
-- Teams needing concurrent writers, retention policies, or central storage should wait for
-  the PostgreSQL backend (roadmap) — the store is already behind SQLAlchemy asyncio, so the
-  swap is a URL change plus migrations.
+- **SQLite** (default, zero configuration): `sqlite+aiosqlite:///./data/queuelens.db`.
+- **PostgreSQL**, for central storage, `pg_dump` / point-in-time backups and the database
+  tooling you already run: `postgresql+asyncpg://USER:PASSWORD@HOST:5432/DB`, or without
+  the password and with `PGPASSWORD` set, which keeps it out of the URL. The driver
+  is in the image; CI runs the whole acceptance suite on PostgreSQL 17. With compose, add
+  [`docker-compose.postgres.yml`](../docker-compose.postgres.yml).
+- Tables are created at startup, and columns added by later releases are added then too.
+- Retention (Configuration → Retention) prunes audit rows and notifications older than N
+  days, at every start.
+
+### Moving to PostgreSQL
+
+`python -m app.copy_db SOURCE_URL [TARGET_URL]` copies every table in one transaction,
+checks each table's row count, and refuses a target that already has rows. The target
+defaults to `QUEUELENS_DATABASE_URL`, which keeps the password off the command line. With
+compose:
+
+1. Stop QueueLens: `docker compose stop queuelens`.
+2. Set `POSTGRES_PASSWORD` in `.env` (see the top of `docker-compose.postgres.yml`).
+3. Copy, before QueueLens first starts on PostgreSQL (its first start would seed the
+   database, and the copy would then refuse):
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.postgres.yml run --rm queuelens \
+     python -m app.copy_db sqlite+aiosqlite:///./data/queuelens.db
+   ```
+
+4. Start: `docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d`.
+
+Keep the same `QUEUELENS_SECRET_KEY`: encrypted settings are copied as they are. Keep the
+SQLite file until you're satisfied.
 
 ## Operational behaviors worth knowing
 

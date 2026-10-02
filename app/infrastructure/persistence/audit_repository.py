@@ -67,9 +67,15 @@ class AuditRepository:
                 result=entry.result,
                 error_message=entry.error_message,
                 request_ip=entry.request_ip or request_ip,
-                user_agent=(entry.user_agent or user_agent or "")[:512] or None,
+                user_agent=entry.user_agent or user_agent or None,
                 metadata_json=metadata,
             )
+            # SQLite ignores VARCHAR lengths; PostgreSQL refuses the whole row, and an
+            # attempt that can't be audited is refused — so clip, never drop
+            for column in AuditEventModel.__table__.columns:
+                value, length = getattr(model, column.key), getattr(column.type, "length", None)
+                if length and isinstance(value, str) and len(value) > length:
+                    setattr(model, column.key, value[:length])
             session.add(model)
             await session.commit()
             await session.refresh(model)
