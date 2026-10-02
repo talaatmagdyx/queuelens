@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+# least privilege: jobs only read the repo; publish asks for packages: write itself
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
