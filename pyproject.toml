@@ -17,15 +17,15 @@ dependencies = [
   "pydantic-settings>=2.6,<3",
   "python-multipart>=0.0.20,<1",
   "pyyaml>=6,<7",
-  "cryptography>=43,<46",
+  "cryptography>=43,<51",
   "sqlalchemy[asyncio]>=2.0,<3",
   "uvicorn[standard]>=0.32,<1",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "mypy>=1.13,<2",
-  "pytest>=8.3,<9",
+  "mypy>=1.13,<3",
+  "pytest>=8.3,<10",
   "pytest-asyncio>=0.24,<2",
   "ruff>=0.8,<1",
   "types-pyyaml>=6,<7",

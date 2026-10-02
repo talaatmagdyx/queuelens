@@ -14,6 +14,7 @@ from app.application.action_service import ActionService
 from app.application.queue_service import UnsafeToBrowse
 from app.auth.basic import CurrentUser, require_admin, require_operator
 from app.domain.models import AuditEntry, ReplayTarget
+from app.infrastructure.rabbitmq.message_operator import error_text
 from app.observability.metrics import ACTIONS, OPERATION_SECONDS
 
 router = APIRouter(
@@ -110,7 +111,7 @@ async def _run_action(
                 source_queue=source_queue,
                 message_fingerprint=fingerprint,
                 result="failed",
-                error_message=str(error),
+                error_message=error_text(error),
                 metadata={"duration_ms": elapsed_ms, **mode_meta},
                 **target_fields,
             )
@@ -334,7 +335,7 @@ async def publish(
     except Exception as error:
         elapsed_ms = round((time.perf_counter() - started_at) * 1000)
         ACTIONS.labels(action="publish", result="failed").inc()
-        await _record("failed", str(error), duration_ms=elapsed_ms)
+        await _record("failed", error_text(error), duration_ms=elapsed_ms)
         if isinstance(error, ChannelNotFoundEntity):
             raise HTTPException(
                 status_code=404,

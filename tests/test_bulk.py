@@ -443,3 +443,17 @@ async def test_a_dry_run_only_executes_in_the_environment_it_scanned(tmp_path) -
     await database.close()
 
     assert Operator.calls == 0
+
+
+def test_error_text_never_raises() -> None:
+    """aiormq 7's DeliveryError raises from __str__ without a frame — describing a broker
+    failure must not become a second failure inside the safety path."""
+    from app.infrastructure.rabbitmq.message_operator import error_text
+
+    class Unprintable(Exception):
+        def __str__(self) -> str:
+            raise AttributeError("'NoneType' object has no attribute 'name'")
+
+    assert error_text(Unprintable(), "message was unroutable") == "message was unroutable"
+    assert error_text(Unprintable()) == "Unprintable"
+    assert error_text(ValueError("boom")) == "boom"

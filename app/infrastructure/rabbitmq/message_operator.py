@@ -11,6 +11,16 @@ from app.infrastructure.rabbitmq.connection import RabbitMQConnection
 from app.infrastructure.rabbitmq.message_browser import MessageBrowser, QueueLocks
 
 
+def error_text(error: BaseException, fallback: str = "") -> str:
+    """str() of a broker-client exception, safely: failure paths must never fail while
+    describing a failure (aiormq 7's DeliveryError raises from __str__ when it carries
+    no frame)."""
+    try:
+        return str(error) or fallback or type(error).__name__
+    except Exception:  # noqa: BLE001 - describing the error is best-effort
+        return fallback or type(error).__name__
+
+
 class MessageOperator:
     def __init__(self, connection: RabbitMQConnection, locks: QueueLocks | None = None) -> None:
         self._connection = connection
@@ -143,7 +153,7 @@ class MessageOperator:
                             {
                                 "fingerprint": fingerprint,
                                 "status": "failed",
-                                "error": str(error) or "message was unroutable",
+                                "error": error_text(error, "message was unroutable"),
                             }
                         )
                 for message in reversed(scanned):
