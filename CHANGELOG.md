@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.13.0 — 2026-10-02
 
 ### Added
 - **PostgreSQL as the datastore** (#1): set `QUEUELENS_DATABASE_URL` to
@@ -19,6 +19,14 @@
   notify once.
 - Audit fields longer than their column are clipped (PostgreSQL would refuse the row,
   and an attempt that can't be audited is refused).
+
+### Upgrade notes
+- **No breaking changes.** SQLite installs carry on as they are.
+- **New dependency:** `asyncpg` (in the image already; `pip install .` pulls it).
+- **Moving to PostgreSQL:** stop QueueLens, run `python -m app.copy_db` once into the empty
+  database, then start it. Keep the same `QUEUELENS_SECRET_KEY`. See
+  [docs/OPERATIONS.md](docs/OPERATIONS.md#moving-to-postgresql).
+- **Still one replica**, on either database.
 
 ## v0.12.1 — 2026-10-02
 
