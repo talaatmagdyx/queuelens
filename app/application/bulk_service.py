@@ -134,6 +134,8 @@ class BulkActionService:
         payload_contains: str | None = None,
         selected_fingerprints: frozenset[str] | None = None,
         max_bulk: int | None = None,
+        scan_limit: int | None = None,
+        depth: int | None = None,
     ) -> dict[str, object]:
         if action == "replay":
             operator_action = mode
@@ -149,9 +151,15 @@ class BulkActionService:
         else:
             raise ValueError(f"Unsupported bulk action: {action}")
 
-        scan_limit = max_bulk or self._settings.max_bulk_size
-        await self._guard(source_queue)
-        records = await self._browser.list_messages(source_queue, scan_limit)
+        window = max_bulk or self._settings.max_bulk_size
+        # a selection made in a snapshot may reach past the window (scan_limit covers it)
+        scan_limit = scan_limit or window
+        whole = bool(await self._guard(source_queue))
+        if whole:  # quorum: only ever scanned whole — see fetch()
+            scan_limit = depth or scan_limit
+        records = await self._browser.list_messages(source_queue, scan_limit, whole=whole)
+        if whole and selected_fingerprints is None:
+            records = records[:window]  # the same head window a classic queue gets
         if payload_contains:
             needle = payload_contains.encode("utf-8")
             records = [record for record in records if needle in record.body]
@@ -212,7 +220,7 @@ class BulkActionService:
                     f" (vhost {batch.scope[1] or '?'}), not {self._scope[0]} (vhost "
                     f"{self._scope[1]}) — run the dry-run again here"
                 )
-            await self._guard(batch.source_queue)
+            whole = bool(await self._guard(batch.source_queue))
             results = await self._operator.operate_bulk(
                 source_queue=batch.source_queue,
                 fingerprints=batch.fingerprints,
@@ -220,6 +228,7 @@ class BulkActionService:
                 target=batch.target,
                 replay_headers=dict(replay_headers or {}),
                 max_scan=batch.scan_limit or self._settings.max_bulk_size,
+                whole=whole,
             )
         statuses = [str(result["status"]) for result in results]
         summary = {

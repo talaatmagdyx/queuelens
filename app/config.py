@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     max_preview_messages: int = 100
     max_message_size_bytes: int = 1_048_576
     refetch_window_size: int = 100
+    # how deep one browse snapshot reads (quorum queues deeper than this are refused)
+    max_browse_depth: int = 5000
     replay_targets_json: str = "{}"
     max_bulk_size: int = 500
     bulk_dry_run_ttl_seconds: int = 600

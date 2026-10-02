@@ -20,7 +20,7 @@ managed at runtime from the UI. It is not a fourth layer of the same knobs — i
 | Area | Env vars / `.env` provide | UI / settings store provides | On conflict |
 |---|---|---|---|
 | **Environments** | Full profiles via `QUEUELENS_ENVIRONMENTS_JSON` (own broker + credentials) | Runtime-added profiles and extra vhosts (`POST /api/environments`) | Merged by name at startup: a stored entry with the same name **adds vhosts and overrides broker fields** on top of the env-var profile. The default environment itself always comes from env vars |
-| **Preview / bulk limits** | `QUEUELENS_MAX_PREVIEW_MESSAGES`, `QUEUELENS_MAX_BULK_SIZE`, … as defaults | Configuration → Limits saves overrides | **Stored overrides win** at request time (never above 1000); a request's own `limit` can only lower the cap; a bulk batch executes with the window its dry run used; "Reset to Defaults" returns to the env-var values |
+| **Preview / bulk limits** | `QUEUELENS_MAX_PREVIEW_MESSAGES`, `QUEUELENS_MAX_BULK_SIZE`, `QUEUELENS_MAX_BROWSE_DEPTH`, … as defaults | Configuration → Limits saves overrides | **Stored overrides win** at request time (never above 1000; browse depth up to 50 000); a request's own `limit` can only lower the cap; a bulk batch executes with the window its dry run used; "Reset to Defaults" returns to the env-var values |
 | **Email channel** | `QUEUELENS_SMTP_HOST/_PORT` **seed** the channel on first boot only | Alerts → Delivery Channels edits (incl. SMTP auth + TLS) | After first boot the **stored channel config wins**; the env vars are never re-applied unless the channel is missing entirely |
 | **Users** | `QUEUELENS_ADMIN_*` + `QUEUELENS_USERS_JSON` are seeded into the users table at startup (idempotent — existing rows are not overwritten) and always authenticate | UI invites add more accounts — each starts with a one-time password that must be replaced (`POST /api/users/me/password`) before any other endpoint answers (`403`; `/api/me` reports `must_change_password`) | No conflict possible: env accounts always work; DB accounts add to them |
 | **Custom headers, retention, alert rules, UI toggles** | — (no env vars) | Settings store only | n/a |
@@ -81,7 +81,8 @@ The AMQP user needs read/write/configure on the inspected queues: browsing reque
 |---|---|---|
 | `QUEUELENS_MAX_PREVIEW_MESSAGES` | `100` | Messages fetched per queue preview |
 | `QUEUELENS_MAX_MESSAGE_SIZE_BYTES` | `1048576` | Payloads larger than this are truncated in responses (the message itself is untouched) |
-| `QUEUELENS_REFETCH_WINDOW_SIZE` | `100` | How many messages detail lookup and actions re-scan to find a fingerprint. Raise it for deep queues — actions can only act on messages within this window |
+| `QUEUELENS_REFETCH_WINDOW_SIZE` | `100` | How many messages detail lookup and actions re-scan to find a fingerprint. Messages picked from a snapshot are reached however deep they are, up to the browse depth |
+| `QUEUELENS_MAX_BROWSE_DEPTH` | `5000` | How deep one browse snapshot scans (the Limits override goes up to 50 000). Every message read is held unacked until the scan requeues it, and a scan also stops at 64 MiB of bodies. A quorum queue deeper than this is refused rather than browsed in part, because that would reorder it |
 | `QUEUELENS_MAX_BULK_SIZE` | `500` | Scan window and hard cap for bulk operations (dry-run and execute) |
 | `QUEUELENS_BULK_DRY_RUN_TTL_SECONDS` | `600` | How long a bulk dry-run token stays executable |
 

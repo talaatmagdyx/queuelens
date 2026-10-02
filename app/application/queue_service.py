@@ -1,15 +1,13 @@
 from collections.abc import Sequence
 from typing import Any
 
+from app.domain.errors import UnsafeToBrowse as UnsafeToBrowse
 from app.domain.models import QueueInfo
 from app.infrastructure.rabbitmq.management_client import (
     RabbitMQManagementClient,
     RabbitMQManagementError,
 )
-
-
-class UnsafeToBrowse(RuntimeError):
-    """Browsing this queue would count as deliveries and could drop messages."""
+from app.infrastructure.rabbitmq.message_browser import SCAN_BYTES_BUDGET
 
 
 def _major(rabbitmq_version: str | None) -> int:
@@ -51,13 +49,17 @@ class QueueService:
         self._management = management
         self._rabbitmq_version: str | None = None
 
-    async def assert_browsable(self, queue_name: str) -> None:
-        """Refuse previews, scans and actions on queues where requeue is destructive."""
+    async def assert_browsable(self, queue_name: str) -> bool:
+        """Refuse previews, scans and actions on queues where requeue is destructive.
+
+        Returns whether the queue must be scanned whole: a quorum queue puts returned
+        messages at the back, so only a scan of every message, requeued in order, leaves
+        it as it was."""
         try:
             raw = await self._management.get_queue(queue_name)
         except RabbitMQManagementError as error:
             if error.status_code == 404:
-                return  # the AMQP path reports the missing queue as usual
+                return False  # the AMQP path reports the missing queue as usual
             raise
         version = await self._version(strict=True)  # unknown version → can't judge → refuse
         quorum = (raw.get("type") or (raw.get("arguments") or {}).get("x-queue-type")) == "quorum"
@@ -82,6 +84,16 @@ class QueueService:
                 "or scan counts as a delivery and would eventually drop messages, so QueueLens "
                 f"will not browse or act on it. To browse it, {fix}."
             )
+        held = int(raw.get("message_bytes_ready") or 0)
+        if quorum and held > SCAN_BYTES_BUDGET:
+            # a whole scan holds every message at once; classic scans stop at the budget
+            raise UnsafeToBrowse(
+                f"{queue_name} is a quorum queue holding {held // (1024 * 1024)} MiB of "
+                f"messages, more than one scan may hold ({SCAN_BYTES_BUDGET // (1024 * 1024)} "
+                "MiB). Quorum queues can only be browsed whole without reordering them — "
+                "shovel it to a classic queue to browse it."
+            )
+        return quorum
 
     async def _version(self, *, strict: bool) -> str | None:
         if self._rabbitmq_version is None:

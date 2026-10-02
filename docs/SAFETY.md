@@ -44,8 +44,35 @@ rabbitmqctl set_policy dlq-unlimited '\.dlq$' '{"delivery-limit": -1}' --apply-t
 (only one policy applies per queue — merge `delivery-limit` into an existing DLQ policy
 instead of adding a second one). On 3.x, remove `x-delivery-limit` / the policy key.
 
+*Quorum queues are read whole, and requeued in order.* Measured on RabbitMQ 3.13 and 4.1, a
+quorum queue puts every returned message at the **back**; a classic queue puts it back where
+it was. So browsing part of a quorum queue rotates the browsed messages to the tail.
+QueueLens used to do this, which had two effects:
+- Every preview reordered the queue, and each refresh showed the next messages.
+- Actions couldn't find a message the preview had just shown.
+
+Now every scan of a quorum queue (preview, snapshot, lookup, single or bulk action) reads
+the whole queue and requeues it in the order it was read: a full rotation, which leaves the
+order as it was. The guard refuses (`409`) a quorum queue holding more than the browse depth
+or more than one scan's byte budget, before anything is read. The scan also re-checks the
+count from its own passive declare, and stops if the queue grew past the depth mid-scan.
+
+Each scan still counts one delivery per message, which is why only queues with unlimited
+deliveries are browsable at all. A quorum queue also stamps `x-delivery-count` on every
+redelivery; that header is left out of fingerprints, so a message keeps its identity
+across looks.
+
 Scans of one queue are serialized in-process (`QueueLocks`): a scan holds messages unacked
 until it requeues them, so two at once would each see part of the queue.
+
+*Deep browsing works from a snapshot.*
+- One scan down to the browse depth (default 5000), or until it has read 64 MiB of bodies,
+  is kept in memory for 5 minutes. That's raw bodies only, with payloads decoded per page,
+  and at most 4 snapshots per process.
+- Pages, search and filters come from that copy, so paging costs no broker reads and no
+  deliveries.
+- An action on a message picked from a snapshot scans down to the message's position. In a
+  classic queue a message only ever moves up, so its position is an upper bound.
 
 ### 2. Publish happens before ack — always
 For move, park, and copy (`MessageOperator.operate`), the outgoing publish completes
@@ -128,9 +155,12 @@ reconnection). Management API errors → `502`/`503`. No failure mode returns a 
 
 ## Known limits (Phase 1, by design)
 
-- **Fingerprints are best-effort.** They identify messages within a preview batch and a
-  bounded re-fetch window — not globally stable RabbitMQ IDs. On queues deeper than
-  `QUEUELENS_REFETCH_WINDOW_SIZE`, a message beyond the window cannot be acted on.
+- **Fingerprints are best-effort.** They identify messages within a scan, not as globally
+  stable RabbitMQ IDs.
+  - A message deeper than `QUEUELENS_REFETCH_WINDOW_SIZE` can be acted on when it was
+    picked from a snapshot, which reaches down to the browse depth.
+  - Messages deeper than the browse depth can't be reached until the queue drains or the
+    depth is raised.
 - **Scan-and-requeue is O(window) per action** and briefly holds the scanned messages
   unacked. Fine for operator workflows; bulk operations will need a different design.
 - **Masking is key-based and display-only.** Values under configured sensitive keys

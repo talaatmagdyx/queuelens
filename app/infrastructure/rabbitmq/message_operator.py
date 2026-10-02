@@ -13,7 +13,12 @@ from aiormq.exceptions import (
 
 from app.domain.models import MessageRecord, ReplayTarget
 from app.infrastructure.rabbitmq.connection import RabbitMQConnection
-from app.infrastructure.rabbitmq.message_browser import MessageBrowser, QueueLocks
+from app.infrastructure.rabbitmq.message_browser import (
+    MessageBrowser,
+    QueueLocks,
+    fetch,
+    requeue,
+)
 
 
 def error_text(error: BaseException, fallback: str = "") -> str:
@@ -79,17 +84,15 @@ class MessageOperator:
         target: ReplayTarget | None = None,
         replay_headers: dict[str, Any] | None = None,
         max_scan: int = 100,
+        whole: bool = False,
     ) -> dict[str, object]:
         scanned: list[AbstractIncomingMessage] = []
         matches: list[tuple[AbstractIncomingMessage, MessageRecord]] = []
         async with self._locks(source_queue), self._connection.channel() as channel:
             try:
                 queue = await cast(Any, channel).declare_queue(source_queue, passive=True)
-                for _ in range(max_scan):
-                    message = await queue.get(no_ack=False, fail=False)
-                    if message is None:
-                        break
-                    scanned.append(message)
+                await fetch(queue, source_queue, max_scan, scanned, whole=whole)
+                for message in scanned:
                     record = MessageBrowser._to_record(source_queue, message)
                     if record.fingerprint == fingerprint:
                         matches.append((message, record))
@@ -113,7 +116,7 @@ class MessageOperator:
                 else:
                     raise ValueError(f"Unsupported message action: {action}")
 
-                await self._requeue_other_messages(scanned, target_message)
+                await requeue(scanned, keep=target_message)
                 return {
                     "status": "success",
                     "action": action,
@@ -135,6 +138,7 @@ class MessageOperator:
         target: ReplayTarget | None = None,
         replay_headers: dict[str, Any] | None = None,
         max_scan: int = 500,
+        whole: bool = False,
     ) -> list[dict[str, object]]:
         """Act on every approved fingerprint independently.
 
@@ -150,11 +154,8 @@ class MessageOperator:
             try:
                 queue = await cast(Any, channel).declare_queue(source_queue, passive=True)
                 groups: dict[str, list[tuple[AbstractIncomingMessage, MessageRecord]]] = {}
-                for _ in range(max_scan):
-                    message = await queue.get(no_ack=False, fail=False)
-                    if message is None:
-                        break
-                    scanned.append(message)
+                await fetch(queue, source_queue, max_scan, scanned, whole=whole)
+                for message in scanned:
                     record = MessageBrowser._to_record(source_queue, message)
                     groups.setdefault(record.fingerprint, []).append((message, record))
 
@@ -241,17 +242,8 @@ class MessageOperator:
             return
         raise ValueError(f"Unsupported replay target type: {target.type}")
 
-    async def _requeue_other_messages(
-        self,
-        messages: list[AbstractIncomingMessage],
-        target_message: AbstractIncomingMessage,
-    ) -> None:
-        for message in reversed(messages):
-            if message is not target_message and not message.processed:
-                await message.nack(requeue=True)
-
     async def _requeue_unprocessed(self, messages: list[AbstractIncomingMessage]) -> None:
-        for message in reversed(messages):
+        for message in messages:  # in read order: a quorum queue keeps that order
             if not message.processed:
                 try:
                     await message.nack(requeue=True)

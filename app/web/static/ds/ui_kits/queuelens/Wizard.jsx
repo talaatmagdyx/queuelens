@@ -75,6 +75,7 @@
             mode: isPark ? undefined : action,
             target: target || undefined,
             fingerprints: fingerprints,
+            snapshot: msg && msg.snapshot, // reach messages deep in the snapshot they came from
           });
           // the server's dry run is the source of truth — show it before anything runs
           const notes = [];
@@ -90,11 +91,11 @@
           setSummary(outcome.summary);
         } else if (isPark) {
           await postJson('/api/messages/park',
-            { source_queue: srcQueue, fingerprint: msg.fingerprint, confirm: true });
+            { source_queue: srcQueue, fingerprint: msg.fingerprint, confirm: true, snapshot: msg.snapshot });
         } else {
           await postJson('/api/messages/replay', {
             source_queue: srcQueue, fingerprint: msg.fingerprint, mode: action,
-            confirm: true, annotate: headers, target: target,
+            confirm: true, annotate: headers, target: target, snapshot: msg.snapshot,
           });
         }
         setStage('done');

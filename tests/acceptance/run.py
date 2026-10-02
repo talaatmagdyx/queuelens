@@ -649,6 +649,45 @@ async def g2():
           left == 1 and set(codes) == {409} and "delivery limit of 2" in detail,
           f"preview codes {codes}; messages left {left} (control queue, never previewed: {control})")
 
+    # deep browsing (#4): one snapshot pages far past the preview window, and an action
+    # picked from it reaches the message
+    await decl("t2.deep.dlq")
+    for i in range(160):
+        await pub("t2.deep.dlq", {"n": i}, message_id=f"d{i}")
+    await wait_ql_count("t2.deep.dlq", 160)
+    base = "/api/queues/t2.deep.dlq/messages"
+    first = (await api("GET", f"{base}?snapshot=new&limit=50")).json()
+    sid = first["snapshot"]["id"]
+    tail = (await api("GET", f"{base}?snapshot={sid}&offset=150&limit=50")).json()["messages"]
+    check(2, "A snapshot pages past the preview window (one scan, offset 150)",
+          first["total"] == 160 and [m["message_id"] for m in tail] == [f"d{i}" for i in range(150, 160)],
+          (first.get("total"), [m["message_id"] for m in tail][:3]))
+    deep = next(m for m in tail if m["message_id"] == "d155")
+    body = {"source_queue": "t2.deep.dlq", "fingerprint": deep["fingerprint"], "confirm": True}
+    plain = await api("POST", "/api/messages/park", json=body)
+    reached = await api("POST", "/api/messages/park", json={**body, "snapshot": sid})
+    check(2, "An action reaches a message deep in its snapshot (past the 100-message window)",
+          plain.status_code == 409 and reached.status_code == 200
+          and await count("t2.deep.dlq.parking") == 1, (plain.status_code, reached.status_code))
+
+    # a quorum queue returns messages to the back: QueueLens reads it whole, requeues in order
+    async with httpx.AsyncClient(auth=MAUTH) as m:
+        major = int((await m.get(f"{MGMT}/api/overview")).json()["rabbitmq_version"][0])
+        args = {"x-queue-type": "quorum", **({"x-delivery-limit": -1} if major >= 4 else {})}
+        await m.put(f"{MGMT}/api/queues/%2F/t2.quorum.order", json={"durable": True, "arguments": args})
+    for i in range(8):
+        await pub("t2.quorum.order", {"q": i}, message_id=f"q{i}")
+    await until(lambda: _eq(count("t2.quorum.order"), 8), 10)
+    await wait_stats("t2.quorum.order")
+    looks = []
+    for _ in range(3):
+        r = await preview("t2.quorum.order", limit=3)
+        looks.append([x["message_id"] for x in r] if isinstance(r, list) else getattr(r, "status_code", r))
+    await until(lambda: _eq(count("t2.quorum.order"), 8), 10)
+    order = [x.message_id for x in await drain("t2.quorum.order")]
+    check(2, "Browsing a quorum DLQ leaves it as it was (read whole, requeued in order)",
+          looks == [["q0", "q1", "q2"]] * 3 and order == [f"q{i}" for i in range(8)], (looks, order))
+
 
 # ================================================================== G3 compressed payloads
 async def g3():

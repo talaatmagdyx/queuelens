@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.api.routes.actions import TargetRequest, _custom_headers
-from app.api.routes.messages import effective_limit
+from app.api.routes.messages import effective_limit, scan_depth
 from app.api.scope import broker, broker_scope
 from app.application.action_service import provenance_headers
 from app.application.bulk_service import BulkActionService, UnknownBulkBatch
@@ -29,6 +29,7 @@ class BulkDryRunRequest(BaseModel):
     target: TargetRequest | None = None
     payload_contains: str | None = None
     fingerprints: list[str] | None = Field(default=None, max_length=1000)
+    snapshot: str | None = Field(default=None, max_length=64)  # where they were picked
 
 
 class BulkExecuteRequest(BaseModel):
@@ -50,6 +51,18 @@ async def dry_run(
         raise HTTPException(status_code=403, detail="Deleting messages requires the Admin role")
     username = user.username
     max_bulk = await effective_limit(request, "max_bulk_size")
+    if body.fingerprints is not None and len(body.fingerprints) > max_bulk:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{len(body.fingerprints)} messages selected; one bulk run acts on at most "
+            f"{max_bulk}",
+        )
+    scan_limit = None
+    if body.fingerprints and body.snapshot:  # reach the deepest selected message
+        scan_limit = max(
+            max_bulk,
+            await scan_depth(request, body.source_queue, body.fingerprints, body.snapshot),
+        )
     try:
         return await _service(request).dry_run(
             source_queue=body.source_queue,
@@ -61,6 +74,8 @@ async def dry_run(
                 frozenset(body.fingerprints) if body.fingerprints is not None else None
             ),
             max_bulk=max_bulk,
+            scan_limit=scan_limit,
+            depth=await effective_limit(request, "max_browse_depth"),
         )
     except Exception as error:
         # Dry-run failures are audited too — a rejected bulk attempt is still an attempt.

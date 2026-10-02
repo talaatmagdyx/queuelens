@@ -5,7 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from app.api.scope import broker, broker_scope
 from app.application.message_service import MessageService, message_to_dict
 from app.application.queue_service import UnsafeToBrowse
+from app.application.snapshots import Snapshot
 from app.auth.basic import get_current_username
+from app.domain.models import MessageRecord
 from app.observability.metrics import PREVIEW_REQUESTS
 
 router = APIRouter(
@@ -13,18 +15,46 @@ router = APIRouter(
 )
 
 HARD_CEILING = 1000
+# one snapshot scan may go deeper than a page: every message it reads is held unacked
+CEILINGS = {"max_browse_depth": 50_000}
 
 
 async def effective_limit(request: Request, key: str) -> int:
-    """A stored override (Configuration → Limits) wins over the env-var default;
-    1000 is the absolute ceiling. Callers may ask for less, never for more."""
+    """A stored override (Configuration → Limits) wins over the env-var default, within
+    the key's ceiling (1000 unless CEILINGS says otherwise). Callers may ask for less."""
     stored = await request.app.state.settings_store.get_safe("limits", {}) or {}
     value = stored.get(key) or getattr(request.app.state.settings, key)
-    return max(1, min(int(value), HARD_CEILING))
+    return max(1, min(int(value), CEILINGS.get(key, HARD_CEILING)))
 
 
 def _service(request: Request) -> MessageService:
     return cast(MessageService, broker(request).message_service)
+
+
+def _snapshot(request: Request, snapshot_id: str, queue_name: str) -> Snapshot:
+    found = request.app.state.snapshots.get(snapshot_id, request.state.scope, queue_name)
+    if found is None:
+        raise HTTPException(
+            status_code=404, detail="Snapshot expired or unknown — scan the queue again"
+        )
+    return cast(Snapshot, found)
+
+
+async def scan_depth(
+    request: Request, queue_name: str, fingerprints: list[str], snapshot_id: str | None
+) -> int:
+    """How far an action scans: the refetch window — or, for messages picked from a
+    snapshot, down to the deepest of them (plus the window as slack), so anything a
+    snapshot showed can be acted on. Messages only move up a classic queue."""
+    window = await effective_limit(request, "refetch_window_size")
+    found = snapshot_id and request.app.state.snapshots.get(
+        snapshot_id, request.state.scope, queue_name
+    )
+    if not found:
+        return window
+    deepest = max((found.positions.get(fp, -1) for fp in fingerprints), default=-1)
+    depth = await effective_limit(request, "max_browse_depth")
+    return min(depth, max(window, deepest + 1 + window))
 
 
 @router.get("/{queue_name}/messages")
@@ -33,23 +63,50 @@ async def list_messages(
     queue_name: str,
     _username: str = Depends(get_current_username),
     limit: int | None = Query(default=None, ge=1, le=HARD_CEILING),
+    snapshot: str | None = Query(default=None, max_length=64),
+    offset: int = Query(default=0, ge=0),
+    contains: str | None = Query(default=None, max_length=256),
+    payload_format: str | None = Query(default=None, pattern="^(json|text|base64)$"),
+    min_deaths: int | None = Query(default=None, ge=1),
 ) -> dict[str, object]:
+    """The head of the queue (`limit` messages), or — with `snapshot=new` — one scan down
+    to the browse depth, kept for a few minutes and paged with `snapshot=<id>`, `offset`,
+    `limit` and filters without touching the broker again."""
     settings = request.app.state.settings
     cap = await effective_limit(request, "max_preview_messages")
+    page = min(limit or cap, cap)
+    depth = await effective_limit(request, "max_browse_depth")
+
+    def render(records: list[MessageRecord]) -> list[dict[str, object]]:
+        return [
+            message_to_dict(
+                record, settings.max_message_size_bytes, masked_fields=settings.masked_field_names
+            )
+            for record in records
+        ]
+
     PREVIEW_REQUESTS.inc()
     try:
-        messages = await _service(request).list_messages(queue_name, min(limit or cap, cap))
+        if snapshot is None and not (offset or contains or payload_format or min_deaths):
+            records = await _service(request).list_messages(queue_name, page, depth=depth)
+            return {"messages": render(records)}
+        if snapshot is None or snapshot == "new":  # paging and filters work on a snapshot
+            scan = await _service(request).snapshot(queue_name, depth)
+            found = request.app.state.snapshots.add(
+                request.state.scope, queue_name, scan.records,
+                ready=scan.ready, stopped=scan.stopped, depth=depth,
+            )
+        else:
+            found = _snapshot(request, snapshot, queue_name)
     except UnsafeToBrowse as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    matches = found.matching(contains, payload_format, min_deaths)
     return {
-        "messages": [
-            message_to_dict(
-                message,
-                settings.max_message_size_bytes,
-                masked_fields=settings.masked_field_names,
-            )
-            for message in messages
-        ]
+        "messages": render(matches[offset : offset + page]),
+        "total": len(matches),
+        "offset": offset,
+        "limit": page,
+        "snapshot": found.meta(),
     }
 
 
@@ -59,11 +116,21 @@ async def get_message(
     queue_name: str,
     fingerprint: str = Path(min_length=8),
     _username: str = Depends(get_current_username),
+    snapshot: str | None = Query(default=None, max_length=64),
 ) -> dict[str, object]:
     settings = request.app.state.settings
     refetch = await effective_limit(request, "refetch_window_size")
+    found = snapshot and request.app.state.snapshots.get(
+        snapshot, request.state.scope, queue_name
+    )
     try:
-        message = await _service(request).get_message(queue_name, fingerprint, refetch)
+        if found and fingerprint in found.positions:
+            message = found.records[found.positions[fingerprint]]  # no broker read
+        else:
+            depth = await effective_limit(request, "max_browse_depth")
+            message = await _service(request).get_message(
+                queue_name, fingerprint, refetch, depth=depth
+            )
     except UnsafeToBrowse as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except LookupError as error:

@@ -1,11 +1,14 @@
 import asyncio
 import base64
+import dataclasses
 import json
 import zlib
+from dataclasses import dataclass
 from typing import Any, cast
 
 from aio_pika.abc import AbstractIncomingMessage
 
+from app.domain.errors import UnsafeToBrowse
 from app.domain.fingerprint import message_fingerprint
 from app.domain.models import MessageRecord
 from app.domain.xdeath import parse_x_death
@@ -24,33 +27,109 @@ class QueueLocks:
         return self._locks.setdefault(queue, asyncio.Lock())
 
 
+# Bodies one scan may hold (every message read stays unacked until the scan requeues it).
+# ponytail: a constant — a Limits setting if operators need snapshots bigger than this.
+SCAN_BYTES_BUDGET = 64 * 1024 * 1024
+
+# Payload of a slim record: decoded on demand (with_payload) instead of kept in memory.
+UNDECODED: Any = object()
+
+
+def too_deep(queue_name: str, messages: int, depth: int) -> str:
+    return (
+        f"{queue_name} is a quorum queue holding {messages} messages, more than the browse "
+        f"depth ({depth}). A quorum queue puts every returned message at the back, so "
+        "browsing part of one would reorder it — QueueLens browses quorum queues only "
+        "whole. Raise the browse depth (Configuration → Limits) or shovel the queue to a "
+        "classic one to browse it."
+    )
+
+
+async def fetch(
+    queue: Any,
+    queue_name: str,
+    limit: int,
+    held: list[AbstractIncomingMessage],
+    *,
+    whole: bool = False,
+    max_bytes: int | None = None,
+) -> tuple[int, str | None]:
+    """basic.get up to `limit` messages into `held` — the caller's list, so whatever was
+    taken is requeued even when this raises. Returns (messages ready when it started, why
+    it stopped early: "depth" / "memory", or None at the end of the queue).
+
+    `whole` is for quorum queues: they return messages to the back (measured on 3.13 and
+    4.1), so only a scan that reads everything and requeues it in order leaves them as
+    they were. It refuses before taking anything when the queue is deeper than `limit`."""
+    declared = getattr(queue, "declaration_result", None)  # Declare-Ok of the passive declare
+    ready = int(getattr(declared, "message_count", 0) or 0)
+    if whole and ready > limit:
+        raise UnsafeToBrowse(too_deep(queue_name, ready, limit))
+    size = 0
+    while True:
+        message = await queue.get(no_ack=False, fail=False)
+        if message is None:
+            return ready, None
+        held.append(message)
+        if len(held) > limit:  # only a whole scan gets here: the queue grew while we read
+            raise UnsafeToBrowse(too_deep(queue_name, len(held), limit))
+        size += len(message.body)
+        if not whole and len(held) == limit:
+            return ready, "depth"
+        if not whole and max_bytes is not None and size >= max_bytes:
+            return ready, "memory"
+
+
+async def requeue(messages: list[AbstractIncomingMessage], keep: object = None) -> None:
+    """Return every unsettled message in the order it was read — on a quorum queue that
+    order is what the queue ends up with (classic queues restore positions regardless)."""
+    for message in messages:
+        if message is not keep and not message.processed:
+            await message.nack(requeue=True)
+
+
+@dataclass(frozen=True, slots=True)
+class Scan:
+    records: list[MessageRecord]
+    ready: int  # messages ready when the scan started
+    stopped: str | None  # "depth" / "memory" when it didn't reach the end of the queue
+
+
 class MessageBrowser:
     def __init__(self, connection: RabbitMQConnection, locks: QueueLocks | None = None) -> None:
         self._connection = connection
         self._locks = locks or QueueLocks()
 
-    async def list_messages(self, queue_name: str, limit: int) -> list[MessageRecord]:
+    async def list_messages(
+        self, queue_name: str, limit: int, *, whole: bool = False
+    ) -> list[MessageRecord]:
+        return (await self.scan(queue_name, limit, whole=whole)).records
+
+    async def scan(
+        self,
+        queue_name: str,
+        limit: int,
+        *,
+        whole: bool = False,
+        max_bytes: int | None = None,
+        slim: bool = False,
+    ) -> Scan:
         messages: list[AbstractIncomingMessage] = []
         async with self._locks(queue_name), self._connection.channel() as channel:
             try:
                 queue = await cast(Any, channel).declare_queue(queue_name, passive=True)
-                for _ in range(limit):
-                    message = await queue.get(no_ack=False, fail=False)
-                    if message is None:
-                        break
-                    messages.append(message)
-                records = [self._to_record(queue_name, message) for message in messages]
+                ready, stopped = await fetch(
+                    queue, queue_name, limit, messages, whole=whole, max_bytes=max_bytes
+                )
+                records = [self._to_record(queue_name, m, slim=slim) for m in messages]
             finally:
-                await self._requeue(messages)
-        return records
-
-    async def _requeue(self, messages: list[AbstractIncomingMessage]) -> None:
-        for message in reversed(messages):
-            if not message.processed:
-                await message.nack(requeue=True)
+                await requeue(messages)
+        return Scan(records, ready, stopped)
 
     @staticmethod
-    def _to_record(queue_name: str, message: AbstractIncomingMessage) -> MessageRecord:
+    def _to_record(
+        queue_name: str, message: AbstractIncomingMessage, *, slim: bool = False
+    ) -> MessageRecord:
         headers = dict(message.headers or {})
         timestamp = message.timestamp
         body = bytes(message.body)
@@ -78,7 +157,7 @@ class MessageBrowser:
             "user_id": message.user_id,
             "app_id": message.app_id,
         }
-        return MessageRecord(
+        record = MessageRecord(
             fingerprint=fingerprint,
             source_queue=queue_name,
             body=body,
@@ -98,6 +177,22 @@ class MessageBrowser:
             decoded_from=decoded_from,
             payload_encoded=base64.b64encode(body).decode("ascii") if decoded_from else None,
         )
+        # a snapshot keeps raw bodies only; decoded payloads (Python objects can be many
+        # times the body) are rebuilt per page by with_payload()
+        if slim:
+            return dataclasses.replace(record, payload=UNDECODED, payload_encoded=None)
+        return record
+
+
+def with_payload(record: MessageRecord) -> MessageRecord:
+    """A slim record (snapshot) with its payload decoded again, for display."""
+    if record.payload is not UNDECODED:
+        return record
+    payload, _format, decoded_from = _decode_payload(
+        record.body, record.properties.get("content_encoding")
+    )
+    encoded = base64.b64encode(record.body).decode("ascii") if decoded_from else None
+    return dataclasses.replace(record, payload=payload, payload_encoded=encoded)
 
 
 # Cap decompression output so a hostile message can't balloon memory (zip bomb).

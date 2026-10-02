@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 import pytest
@@ -12,7 +13,7 @@ from app.config import Settings
 from app.domain.fingerprint import message_fingerprint
 from app.domain.models import MessageRecord
 from app.domain.xdeath import parse_x_death
-from app.infrastructure.rabbitmq.message_browser import MessageBrowser
+from app.infrastructure.rabbitmq.message_browser import MessageBrowser, Scan
 from app.main import create_app
 
 
@@ -90,8 +91,8 @@ async def test_detail_lookup_rejects_duplicate_best_effort_matches() -> None:
     )
 
     class DuplicateBrowser:
-        async def list_messages(self, _queue: str, _limit: int) -> list[MessageRecord]:
-            return [message, message]
+        async def scan(self, _queue: str, _limit: int, **_kwargs: object) -> Scan:
+            return Scan([message, message], 2, None)
 
     with pytest.raises(MessageNotUniquelyIdentifiable):
         await MessageService(DuplicateBrowser()).get_message(
@@ -198,10 +199,10 @@ async def test_message_route_returns_message_detail() -> None:
     )
 
     class FakeMessageService:
-        async def get_message(self, _queue: str, _fingerprint: str, _limit: int) -> MessageRecord:
+        async def get_message(self, _queue: str, _fp: str, _limit: int, **_kw: object) -> Any:
             return message
 
-        async def list_messages(self, _queue: str, _limit: int) -> list[MessageRecord]:
+        async def list_messages(self, _queue: str, _limit: int, **_kw: object) -> list[Any]:
             return [message]
 
     app = create_app(Settings(auth_enabled=False))

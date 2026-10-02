@@ -12,6 +12,7 @@ from app.api.routes import actions, audit, bulk, health, messages, metrics, plat
 from app.application.alert_engine import AlertEngine
 from app.application.environments import EnvironmentManager
 from app.application.queue_service import UnsafeToBrowse
+from app.application.snapshots import SnapshotStore
 from app.config import Settings, get_settings
 from app.infrastructure.persistence.audit_repository import REQUEST_CONTEXT, AuditRepository
 from app.infrastructure.persistence.database import Database
@@ -148,6 +149,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.notifications = NotificationRepository(database)
     app.state.users = UserRepository(database)
     app.state.bulk_batches = BulkBatchRepository(database)
+    app.state.snapshots = SnapshotStore()
     manager = EnvironmentManager(app.state, app.state.settings, app.state.bulk_batches)
     app.state.environment_manager = manager
     manager.attach_default()  # services exist pre-lifespan so tests can override them
