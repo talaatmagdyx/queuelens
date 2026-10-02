@@ -592,7 +592,12 @@ async def test_demo_seed_dead_letters_for_real(tmp_path) -> None:
                 message = await queue.get(timeout=5)
                 seen.append(message)
             deaths = {m.message_id: m.headers["x-death"][0]["count"] for m in seen}
-            assert deaths["pay-0000"] == 1 and deaths["pay-0003"] == 5 and deaths["pay-0004"] == 3
+            async with httpx.AsyncClient(base_url=MANAGEMENT_URL, timeout=10, auth=(
+                    _amqp.username or "guest", _amqp.password or "guest")) as mgmt:
+                major = int((await mgmt.get("/api/overview")).json()["rabbitmq_version"][0])
+            # 3.x adds to the x-death a republished message carries; 4.x starts it afresh
+            expected = (1, 5, 3) if major < 4 else (1, 1, 1)
+            assert (deaths["pay-0000"], deaths["pay-0003"], deaths["pay-0004"]) == expected
             assert {m.headers["x-death"][0]["queue"] for m in seen} == {prefix + "payments.retry"}
             assert seen[5].content_encoding == "gzip"
             for message in seen:

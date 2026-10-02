@@ -2,7 +2,9 @@
 
 Every message is dead-lettered for real — published to a work queue and rejected, so its
 x-death history is the broker's own, not a hand-written header. Messages that died more
-than once went round the work queue that many times. Safe to run again: it does nothing
+than once went round the work queue that many times: RabbitMQ 3.x adds to the x-death a
+republished message carries, so they show 3 or 5 deaths; 4.x starts the count afresh for a
+republished copy, so there every message shows one. Safe to run again: it does nothing
 when the demo DLQs already hold messages.
 """
 

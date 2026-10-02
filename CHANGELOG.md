@@ -5,7 +5,8 @@
 ### Added
 - **`docker compose up` ships the demo dead-letter queues the README promised.** The new
   one-shot `demo` service runs `python -m app.demo`, which dead-letters realistic messages
-  into five DLQs: real `x-death` (some died 3 or 5 times), gzip and plain-text bodies, and
+  into five DLQs: real `x-death` (on RabbitMQ 3.x some died 3 or 5 times; 4.x restarts the
+  count for a republished message), gzip and plain-text bodies, and
   a quorum DLQ with a delivery limit to show the "not browsable" badge. It does nothing
   when they already exist. Until now the quickstart started an empty broker.
 - `scripts/screenshots.py` regenerates the README and landing-page screenshots from a
