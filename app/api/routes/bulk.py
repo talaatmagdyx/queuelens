@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.api.routes.actions import TargetRequest, _custom_headers
 from app.api.routes.messages import effective_limit
+from app.api.scope import broker, broker_scope
 from app.application.action_service import provenance_headers
 from app.application.bulk_service import BulkActionService, UnknownBulkBatch
 from app.application.queue_service import UnsafeToBrowse
@@ -16,7 +17,9 @@ from app.domain.models import AuditEntry
 from app.infrastructure.rabbitmq.message_operator import error_text
 from app.observability.metrics import ACTIONS, OPERATION_SECONDS
 
-router = APIRouter(prefix="/api/messages/bulk", tags=["bulk"])
+router = APIRouter(
+    prefix="/api/messages/bulk", tags=["bulk"], dependencies=[Depends(broker_scope)]
+)
 
 
 class BulkDryRunRequest(BaseModel):
@@ -34,7 +37,7 @@ class BulkExecuteRequest(BaseModel):
 
 
 def _service(request: Request) -> BulkActionService:
-    return cast(BulkActionService, request.app.state.bulk_service)
+    return cast(BulkActionService, broker(request).bulk_service)
 
 
 @router.post("/dry-run")
@@ -95,7 +98,7 @@ async def execute(
     user: CurrentUser = Depends(require_operator),
 ) -> dict[str, object]:
     username = user.username
-    pending_check = await request.app.state.bulk_service.peek_batch(body.batch_id)
+    pending_check = await _service(request).peek_batch(body.batch_id)
     if pending_check and pending_check.action == "delete" and not user.is_admin:
         raise HTTPException(status_code=403, detail="Deleting messages requires the Admin role")
     if not body.confirm:

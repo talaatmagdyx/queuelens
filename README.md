@@ -262,8 +262,8 @@ all managed from the UI, secrets write-only.
 </td>
 <td>
 
-**Notifications** — alert fires, recoveries, and
-environment switches, delivered in-app too.
+**Notifications** — alert fires and recoveries,
+delivered in-app too.
 
 ![Notifications](docs/screenshots/notifications.png)
 
@@ -296,7 +296,7 @@ The short version (the full checklist lives in [docs/OPERATIONS.md](docs/OPERATI
 - [ ] Run behind a VPN or authenticating reverse proxy with TLS — never expose it publicly
 - [ ] Use a least-privilege broker user (read DLQs, write replay targets, configure only `*.parking`)
 - [ ] Persist `/app/data` on a volume and back it up if audit history matters
-- [ ] **Run a single replica** — environment switching and SQLite are single-process by design
+- [ ] **Run a single replica** — SQLite, alert-engine state and broker connections are single-process by design
 - [ ] Scrape `/metrics` and load the bundled Prometheus alert rules
 
 ## Documentation
@@ -324,8 +324,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) to get started; good first issues are lab
 
 ## Honest limitations
 
-- Single replica by design (SQLite + instance-global environment switching) —
-  PostgreSQL and per-request env scoping are the path to multi-replica, on the roadmap
+- Single replica by design (SQLite, in-process alert state) — PostgreSQL is the path to
+  multi-replica, on the roadmap. Environments are already chosen per request (per tab).
 - Bulk operations act on the scan window (up to `QUEUELENS_MAX_BULK_SIZE` from the head
   of the queue), not the whole queue
 - Masking is key-based and display-only — it will not detect secrets under unlisted keys

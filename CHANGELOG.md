@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **Environments are chosen per request, not per instance.** Each request names its
+  environment and vhost (`X-QueueLens-Environment` / `X-QueueLens-Vhost`; default
+  environment without them), and the console keeps the choice per tab. One operator's
+  switch no longer re-points everyone else's views and actions, and two vhosts can be
+  browsed at once. `POST /api/environments/activate` now only checks a scope is reachable;
+  the "Environment switched" notification is gone (nothing changes for anyone else).
+- An environment in use can be removed; its connections close and requests naming it get
+  `404`. The Metrics screen shows the tab's environment; `/metrics` and alert rules use the
+  default one.
+
+### Safety
+- Audit rows for broker actions record `metadata.environment` and `metadata.vhost`.
+- A bulk dry run executes only in the environment/vhost it scanned. The batch store is
+  shared, and a same-named queue elsewhere can hold identical messages.
+
 ## v0.10.2 — 2026-10-01
 
 ### Fixed

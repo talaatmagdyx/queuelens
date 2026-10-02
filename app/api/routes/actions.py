@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.api.routes.messages import effective_limit
+from app.api.scope import broker, broker_scope
 from app.application.action_service import ActionService
 from app.application.queue_service import UnsafeToBrowse
 from app.auth.basic import CurrentUser, require_admin, require_operator
@@ -16,7 +17,9 @@ from app.domain.models import AuditEntry, ReplayTarget
 from app.infrastructure.rabbitmq.message_operator import error_text
 from app.observability.metrics import ACTIONS, OPERATION_SECONDS
 
-router = APIRouter(prefix="/api/messages", tags=["actions"])
+router = APIRouter(
+    prefix="/api/messages", tags=["actions"], dependencies=[Depends(broker_scope)]
+)
 
 
 class TargetRequest(BaseModel):
@@ -60,7 +63,7 @@ async def _custom_headers(request: Request) -> dict[str, object]:
 
 
 def _service(request: Request) -> ActionService:
-    return cast(ActionService, request.app.state.action_service)
+    return cast(ActionService, broker(request).action_service)
 
 
 async def _run_action(
@@ -316,7 +319,7 @@ async def publish(
     await _record("started")  # no audit trail → no publish
     started_at = time.perf_counter()
     try:
-        connection = request.app.state.rabbitmq_connection
+        connection = broker(request).rabbitmq_connection
         async with connection.channel() as channel:
             message = Message(
                 body=body.payload.encode("utf-8"),

@@ -403,6 +403,48 @@ async def test_execute_scans_the_window_its_dry_run_approved() -> None:
     assert operator.kwargs["max_scan"] == 50
 
 
+@pytest.mark.asyncio
+async def test_a_dry_run_only_executes_in_the_environment_it_scanned(tmp_path) -> None:
+    """The batch store is shared by every environment, and a same-named queue elsewhere can
+    hold identical messages — so a staging dry run must not execute against production."""
+    from app.infrastructure.persistence.database import Database
+    from app.infrastructure.persistence.store import BulkBatchRepository
+
+    class Browser:
+        async def list_messages(self, queue: str, _limit: int) -> list[MessageRecord]:
+            return [MessageRecord(
+                fingerprint="f" * 64, source_queue=queue, body=b"{}", payload={},
+                payload_format="json", payload_size=2, content_type=None, message_id="m",
+                correlation_id=None, timestamp=None, exchange="", routing_key=queue,
+                headers={}, properties={}, redelivered=False,
+            )]
+
+    class Operator:
+        calls = 0
+
+        async def operate_bulk(self, **kwargs: Any) -> list[dict[str, object]]:
+            Operator.calls += 1
+            return [{"fingerprint": fp, "status": "success"} for fp in kwargs["fingerprints"]]
+
+    database = Database(f"sqlite+aiosqlite:///{tmp_path}/b.db")
+    await database.start()
+    store = BulkBatchRepository(database)
+
+    def service(environment: str) -> BulkActionService:
+        return BulkActionService(Settings(environment=environment), Browser(),  # type: ignore[arg-type]
+                                 Operator(), store)  # type: ignore[arg-type]
+
+    staging, production = service("staging"), service("production")
+    batch_id = str((await staging.dry_run(source_queue="orders.dlq", action="delete"))["batch_id"])
+    with pytest.raises(UnknownBulkBatch, match="made against staging"):
+        await production.execute(batch_id)
+    with pytest.raises(UnknownBulkBatch):  # spent — the token approved one broker's messages
+        await staging.execute(batch_id)
+    await database.close()
+
+    assert Operator.calls == 0
+
+
 def test_error_text_never_raises() -> None:
     """aiormq 7's DeliveryError raises from __str__ without a frame — describing a broker
     failure must not become a second failure inside the safety path."""

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
+from app.api.scope import broker, broker_scope
 from app.application.queue_service import QueueService
 from app.auth.basic import get_current_username
 from app.observability.metrics import (
@@ -48,19 +49,22 @@ async def metrics(
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-@router.get("/api/metrics/summary")
+@router.get("/api/metrics/summary", dependencies=[Depends(broker_scope)])
 async def metrics_summary(
     request: Request,
     _username: str = Depends(get_current_username),
 ) -> dict[str, Any]:
-    """The queuelens_* metrics as JSON, for the console's Metrics screen."""
-    await _refresh_gauges(request)
-
-    dlq = [
-        {"queue": s.labels["queue"], "messages": int(s.value)}
-        for s in _samples(DLQ_MESSAGES)
-    ]
-    dlq.sort(key=lambda row: -row["messages"])
+    """The queuelens_* metrics as JSON, for the console's Metrics screen. Broker state is
+    the request's environment; counters are instance-wide. (The /metrics gauges always
+    describe the default environment — a scrape has one target.)"""
+    scoped = broker(request)
+    connection = scoped.rabbitmq_connection
+    ready = bool(connection.is_started and connection.is_connected)
+    try:
+        queues = await cast(QueueService, scoped.queue_service).list_queues(dlq_only=True)
+        dlq = [{"queue": queue.name, "messages": queue.messages} for queue in queues]
+    except Exception:  # broker or management API down — rabbitmq_ready says so
+        dlq, ready = [], False
 
     actions = [
         {"action": s.labels["action"], "result": s.labels["result"], "count": int(s.value)}
@@ -91,7 +95,7 @@ async def metrics_summary(
     )
 
     return {
-        "rabbitmq_ready": _samples(RABBITMQ_READY)[0].value == 1,
+        "rabbitmq_ready": ready,
         "dlq": dlq,
         "dlq_backlog": sum(row["messages"] for row in dlq),
         "preview_requests": int(previews),

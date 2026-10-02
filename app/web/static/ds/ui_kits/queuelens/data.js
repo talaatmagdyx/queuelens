@@ -5,11 +5,24 @@ window.QL = window.QL || {};
 window.QL.screens = window.QL.screens || {};
 
 (function () {
+  // This tab's environment/vhost, sent with every request: sessionStorage is per tab, so
+  // tabs can work against different brokers at once. Empty means the server's default.
+  var scope = {};
+  try { scope = JSON.parse(sessionStorage.getItem('ql_scope') || '{}') || {}; } catch (e) { scope = {}; }
+  function scoped(x) {
+    if (scope.environment) x.setRequestHeader('X-QueueLens-Environment', scope.environment);
+    if (scope.vhost) x.setRequestHeader('X-QueueLens-Vhost', scope.vhost);
+  }
+  window.QL.setScope = function (environment, vhost) {
+    try { sessionStorage.setItem('ql_scope', JSON.stringify({ environment: environment, vhost: vhost })); } catch (e) {}
+  };
+
   function getJson(url) {
     try {
       var x = new XMLHttpRequest();
       x.open('GET', url, false);
       x.setRequestHeader('Accept', 'application/json');
+      scoped(x);
       x.send();
       if (x.status >= 200 && x.status < 300) return JSON.parse(x.responseText);
       try { window.QL.lastError = JSON.parse(x.responseText).detail; } catch (e) { window.QL.lastError = 'HTTP ' + x.status; }
@@ -41,6 +54,16 @@ window.QL.screens = window.QL.screens || {};
   function target(e) {
     return e.target_queue || (e.target_exchange
       ? e.target_exchange + ' / ' + (e.target_routing_key || '') : '—');
+  }
+
+  if (scope.environment) {
+    // an Admin may have removed it since: fall back to the default rather than 404 forever
+    var listing = getJson('/api/environments');
+    var known = listing && listing.environments.filter(function (e) { return e.id === scope.environment; })[0];
+    if (listing && (!known || (scope.vhost && known.vhosts.indexOf(scope.vhost) < 0))) {
+      scope = {};
+      try { sessionStorage.removeItem('ql_scope'); } catch (e) {}
+    }
   }
 
   var t0 = performance.now();
@@ -180,6 +203,7 @@ window.QL.screens = window.QL.screens || {};
       var x = new XMLHttpRequest();
       x.open(method, path);
       x.setRequestHeader('Content-Type', 'application/json');
+      scoped(x);
       x.onload = function () {
         var detail = {};
         try { detail = JSON.parse(x.responseText); } catch (e) {}

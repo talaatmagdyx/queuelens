@@ -14,10 +14,10 @@ QueueLens is designed as a **single-instance, internal-network operations tool**
 - **Roles**: Viewer (read-only), Operator (replay/park/publish, alert rules,
   environment switching), Admin (delete, settings, users, environment
   management). Enforced server-side on every route.
-- **Environment switching is instance-global**: activating an environment
-  re-points every user's session and broadcasts a notification. Suitable for a
-  small operator team sharing one context; per-request scoping is on the roadmap.
-- **Alert rules evaluate the active environment only.**
+- **Environments are chosen per request** (per console tab): switching re-points
+  only that tab, so operators can work in different environments and vhosts at
+  once. Audit rows record the environment and vhost of every broker action.
+- **Alert rules and `/metrics` evaluate the default environment only.**
 - Failed logins are rate-limited (10/minute per client IP, in-memory).
 
 ## Backups & data

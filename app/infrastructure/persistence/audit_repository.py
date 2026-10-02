@@ -16,6 +16,9 @@ from app.infrastructure.persistence.models import AuditEventModel
 REQUEST_CONTEXT: ContextVar[tuple[str | None, str | None]] = ContextVar(
     "audit_request_context", default=(None, None)
 )
+# (environment, vhost) the request targets — set by app.api.scope.broker_scope, so every
+# broker action's audit row says where it happened
+BROKER_SCOPE: ContextVar[tuple[str, str] | None] = ContextVar("audit_broker_scope", default=None)
 
 
 def _audit_logger() -> logging.Logger:
@@ -39,6 +42,10 @@ class AuditRepository:
 
     async def record(self, entry: AuditEntry) -> dict[str, object]:
         request_ip, user_agent = REQUEST_CONTEXT.get()
+        metadata = entry.metadata
+        scope = BROKER_SCOPE.get()
+        if scope is not None:
+            metadata = {"environment": scope[0], "vhost": scope[1], **metadata}
         async with self._database.session() as session:
             model = AuditEventModel(
                 timestamp=entry.timestamp,
@@ -55,7 +62,7 @@ class AuditRepository:
                 error_message=entry.error_message,
                 request_ip=entry.request_ip or request_ip,
                 user_agent=(entry.user_agent or user_agent or "")[:512] or None,
-                metadata_json=entry.metadata,
+                metadata_json=metadata,
             )
             session.add(model)
             await session.commit()

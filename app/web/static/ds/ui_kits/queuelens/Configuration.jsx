@@ -1,6 +1,6 @@
 // Configuration screen — full design layout, server-backed.
 // UI toggles / custom headers / limits / retention persist via /api/settings;
-// environments & vhosts come from /api/environments and Set Active really switches.
+// environments & vhosts come from /api/environments; switching re-points this tab only.
 (function () {
   const { Icon, Badge, StatusPill, Button, Alert, Tabs, Select, Input, Switch, IconButton } = window.__NS;
   const { PageHeader, Card } = window.QL;
@@ -87,9 +87,9 @@
           </div>
         </div>
         {env.active
-          ? <StatusPill tone="success">Active</StatusPill>
+          ? <StatusPill tone="success">This tab</StatusPill>
           : <span style={{ display: 'inline-flex', gap: 6 }}>
-              <Button variant="secondary" size="sm" onClick={() => onActivate(env.id, null)}>Set Active</Button>
+              <Button variant="secondary" size="sm" onClick={() => onActivate(env.id, null)}>Switch to</Button>
               {env.removable && <IconButton icon="trash-2" size={30} onClick={() => onRemove(env.id)} />}
             </span>}
       </div>
@@ -137,8 +137,9 @@
       setSwitching(true);
       setError(null);
       try {
-        await window.QL.postJson('/api/environments/activate', { environment: envId, vhost: vhost || undefined });
-        location.reload(); // the data layer reloads against the newly active broker/vhost
+        const r = await window.QL.postJson('/api/environments/activate', { environment: envId, vhost: vhost || undefined });
+        window.QL.setScope(r.environment, r.vhost); // this tab only — other users and tabs keep theirs
+        location.reload();
       } catch (e) { setError(e.message); setSwitching(false); }
     };
 
@@ -237,7 +238,7 @@
                 </div>
               </Card>
 
-              <Card title="Environments & Virtual Hosts" subtitle="Set Active switches every view, action, and audit entry to that broker/vhost. Same-broker environments and vhosts can be added right here."
+              <Card title="Environments & Virtual Hosts" subtitle="Switch to points this tab — its views, actions, and audit entries — at that broker/vhost; other tabs and users keep their own. Same-broker environments and vhosts can be added right here."
                 action={<span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
                   {switching && <StatusPill tone="warning" size="sm">Switching…</StatusPill>}
                   <Button variant="secondary" size="sm" icon="plus" onClick={() => setAddingEnv(!addingEnv)}>Add Environment</Button>

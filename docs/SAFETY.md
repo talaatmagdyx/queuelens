@@ -93,6 +93,10 @@ Messages that arrived after the dry run are ignored by construction. Additional 
 - Tokens expire (`QUEUELENS_BULK_DRY_RUN_TTL_SECONDS`) and are stored in the database, so
   they survive restarts until then; an expired or used token fails safe with "run the
   dry-run again".
+- A token executes only in the environment and vhost its dry run scanned. Environments are
+  chosen per request and share the token store, and a same-named queue on another broker can
+  hold identical (same-fingerprint) messages. A token presented elsewhere is spent and
+  refused.
 - Audit: a `bulk_<action>` `started` event before execution, one event per fingerprint, and
   a closing envelope (`success`/`partial`).
 
