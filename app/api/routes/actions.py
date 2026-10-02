@@ -14,7 +14,7 @@ from app.application.action_service import ActionService
 from app.application.queue_service import UnsafeToBrowse
 from app.auth.basic import CurrentUser, require_admin, require_operator
 from app.domain.models import AuditEntry, ReplayTarget
-from app.infrastructure.rabbitmq.message_operator import error_text
+from app.infrastructure.rabbitmq.message_operator import REFUSALS, error_text, refusal_text
 from app.observability.metrics import ACTIONS, OPERATION_SECONDS
 
 router = APIRouter(
@@ -132,6 +132,12 @@ async def _run_action(
             raise HTTPException(
                 status_code=400,
                 detail="Message was unroutable; the target does not route to any queue",
+            ) from error
+        if isinstance(error, REFUSALS):
+            raise HTTPException(
+                status_code=409,
+                detail=f"{refusal_text(error)}. Nothing changed: the message is still in "
+                f"{source_queue}.",
             ) from error
         if isinstance(error, ValueError):
             raise HTTPException(status_code=400, detail=str(error)) from error
@@ -346,6 +352,8 @@ async def publish(
                 status_code=400,
                 detail="Message was unroutable; the exchange does not route this key to any queue",
             ) from error
+        if isinstance(error, REFUSALS):
+            raise HTTPException(status_code=409, detail=refusal_text(error)) from error
         if isinstance(error, ValueError):
             raise HTTPException(status_code=400, detail=str(error)) from error
         raise HTTPException(status_code=502, detail="Publish failed") from error

@@ -257,3 +257,48 @@ async def test_replay_to_missing_queue_target_fails_before_ack() -> None:
     assert target.acked is False
     assert target.nacked is True
     assert exchange.published == []
+
+
+def test_replays_keep_the_exact_expiration() -> None:
+    """aio-pika decodes "1001" ms to 1.001 s and re-encodes it with int() → "1000"."""
+    from aio_pika import Message
+
+    from app.infrastructure.rabbitmq.message_operator import _milliseconds, _Replay
+
+    def decoded(ms: int) -> float:
+        return float(str(ms)) / 1000  # what aio-pika's IncomingMessage.expiration holds
+
+    assert Message(b"", expiration=decoded(1001)).properties.expiration == "1000"  # the bug
+    assert all(_milliseconds(decoded(ms)) == str(ms) for ms in range(200_000))
+    for ms in (1, 1001, 3_600_001, 2**31 - 1):
+        replay = _Replay(b"", expiration_ms=_milliseconds(decoded(ms)), message_id="m")
+        assert replay.properties.expiration == str(ms)
+        assert replay.properties.message_id == "m"  # everything else as aio-pika builds it
+    assert _Replay(b"", expiration_ms=None).properties.expiration is None
+
+
+@pytest.mark.asyncio
+async def test_a_broker_refusal_is_explained_not_a_bare_502(tmp_path) -> None:
+    from aiormq.exceptions import ChannelPreconditionFailed
+
+    app = create_app(Settings(auth_enabled=False, database_url=f"sqlite+aiosqlite:///{tmp_path}/r.db"))
+    await app.state.database.start()
+
+    class RefusingActionService:
+        async def replay(self, **_kwargs: object) -> dict[str, object]:
+            raise ChannelPreconditionFailed(
+                "PRECONDITION_FAILED - user_id property set to 'svc' but authenticated user "
+                "was 'queuelens'"
+            )
+
+    app.state.action_service = RefusingActionService()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/messages/replay", json={
+            "source_queue": "orders.dlq", "fingerprint": "a" * 64, "mode": "move", "confirm": True})
+    await app.state.database.close()
+
+    detail = response.json()["detail"]
+    assert response.status_code == 409
+    assert "user_id property set to 'svc'" in detail and "impersonator" in detail
+    assert detail.endswith("Nothing changed: the message is still in orders.dlq.")

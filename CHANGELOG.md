@@ -13,6 +13,20 @@
   `404`. The Metrics screen shows the tab's environment; `/metrics` and alert rules use the
   default one.
 
+### Fixed
+- **A bulk run that the broker stopped midway no longer hides what it already did.** A
+  refused publish (e.g. another user's `user_id`) or a dropped connection closes the
+  channel. The batch used to answer `502 Bulk operation failed`, while the messages before
+  that point had already moved, without per-message audit rows. Now the batch stops, the
+  response reports every outcome (`failed` with RabbitMQ's reason, `not_attempted` for the
+  rest, which stay queued), and each one is audited. The result is `partial`.
+- **Replays keep `expiration` to the millisecond.** aio-pika decodes the TTL to float
+  seconds and truncates it when re-encoding, so some values changed (`"1001"` became
+  `"1000"`, `"65526"` became `"65525"`). This affects aio-pika 9 and 10.
+- **A replay the broker refuses explains itself.** `409` carries RabbitMQ's reason instead of
+  a bare `502 Message operation failed`, including the hint for `user_id`: RabbitMQ only
+  accepts another user's `user_id` from that user or an `impersonator`. Nothing changes.
+
 ### Safety
 - Audit rows for broker actions record `metadata.environment` and `metadata.vhost`.
 - A bulk dry run executes only in the environment/vhost it scanned. The batch store is

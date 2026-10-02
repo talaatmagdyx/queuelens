@@ -228,6 +228,8 @@ class BulkActionService:
             "failed": statuses.count("failed"),
             "skipped_duplicates": statuses.count("skipped_duplicate"),
             "not_found": statuses.count("not_found"),
+            # the batch stopped early (the broker closed the channel); these stay queued
+            "not_attempted": statuses.count("not_attempted"),
         }
         return batch, {
             "batch_id": batch_id,

@@ -157,6 +157,7 @@ async def test_dry_run_filters_and_execute_is_one_shot() -> None:
         "failed": 0,
         "skipped_duplicates": 0,
         "not_found": 0,
+        "not_attempted": 0,
     }
     assert operator.calls == [frozenset({"aaaaaaaa" * 8})]
 
@@ -227,6 +228,7 @@ async def test_bulk_routes_confirmation_expiry_and_audit(tmp_path) -> None:
                     "failed": 1,
                     "skipped_duplicates": 0,
                     "not_found": 0,
+                    "not_attempted": 0,
                 },
                 "results": [
                     {"fingerprint": "a" * 64, "status": "success"},
@@ -457,3 +459,39 @@ def test_error_text_never_raises() -> None:
     assert error_text(Unprintable(), "message was unroutable") == "message was unroutable"
     assert error_text(Unprintable()) == "Unprintable"
     assert error_text(ValueError("boom")) == "boom"
+
+
+@pytest.mark.asyncio
+async def test_bulk_stops_on_a_broker_refusal_and_reports_what_already_moved() -> None:
+    """A refused publish closes the channel: the batch can't go on, but messages already
+    moved did move — they must come back as results (and get audited), not vanish in a 502."""
+    from aiormq.exceptions import ChannelPreconditionFailed
+
+    messages = _messages(3)
+    exchange = UnroutableExchange(fail_routing_keys=set())
+    operator = MessageOperator(  # type: ignore[arg-type]
+        ActionConnection(ChannelContext(ActionChannel(messages, exchange)))
+    )
+    by_fp = {MessageBrowser._to_record("orders.dlq", m).fingerprint: m for m in messages}
+    first, refused, later = sorted(by_fp)
+
+    async def publish(message: Any, routing_key: str) -> None:
+        if message.headers.get("x-queuelens-original-fingerprint") == refused:
+            raise ChannelPreconditionFailed(
+                "PRECONDITION_FAILED - user_id property set to 'svc' but authenticated user "
+                "was 'queuelens'"
+            )
+        exchange.published.append((message, routing_key))
+
+    exchange.publish = publish  # type: ignore[method-assign]
+    results = await operator.operate_bulk(
+        source_queue="orders.dlq", fingerprints=frozenset(by_fp), action="move",
+        target=ReplayTarget(type="queue", queue="orders.retry"), max_scan=10,
+    )
+
+    status = {r["fingerprint"]: r for r in results}
+    assert [status[fp]["status"] for fp in (first, refused, later)] == [
+        "success", "failed", "not_attempted"]
+    assert "impersonator" in str(status[refused]["error"])
+    assert by_fp[first].acked and not by_fp[refused].acked and not by_fp[later].acked
+    assert len(exchange.published) == 1

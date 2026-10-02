@@ -14,7 +14,7 @@ from app.application.bulk_service import BulkActionService, UnknownBulkBatch
 from app.application.queue_service import UnsafeToBrowse
 from app.auth.basic import CurrentUser, require_operator
 from app.domain.models import AuditEntry
-from app.infrastructure.rabbitmq.message_operator import error_text
+from app.infrastructure.rabbitmq.message_operator import REFUSALS, error_text, refusal_text
 from app.observability.metrics import ACTIONS, OPERATION_SECONDS
 
 router = APIRouter(
@@ -164,6 +164,12 @@ async def execute(
                 status_code=404,
                 detail="Queue not found; check the source queue and replay target",
             ) from error
+        if isinstance(error, REFUSALS):
+            # only raised before the first message is touched (target checks); a refusal
+            # mid-batch comes back as per-message results instead
+            raise HTTPException(
+                status_code=409, detail=f"{refusal_text(error)}. Nothing was moved."
+            ) from error
         if isinstance(error, ValueError):
             raise HTTPException(status_code=400, detail=str(error)) from error
         raise HTTPException(status_code=502, detail="Bulk operation failed") from error
@@ -179,6 +185,7 @@ async def execute(
         ("failed", summary["failed"]),
         ("skipped_duplicate", summary["skipped_duplicates"]),
         ("not_found", summary["not_found"]),
+        ("not_attempted", summary.get("not_attempted", 0)),
     ):
         if count:
             ACTIONS.labels(action=batch.action, result=label).inc(count)

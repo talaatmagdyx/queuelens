@@ -1,10 +1,15 @@
 import json
 from typing import Any, cast
 
+import aiormq
 from aio_pika import Message
 from aio_pika.abc import AbstractIncomingMessage
 from aio_pika.exceptions import DeliveryError
-from aiormq.exceptions import ChannelInvalidStateError
+from aiormq.exceptions import (
+    ChannelAccessRefused,
+    ChannelInvalidStateError,
+    ChannelPreconditionFailed,
+)
 
 from app.domain.models import MessageRecord, ReplayTarget
 from app.infrastructure.rabbitmq.connection import RabbitMQConnection
@@ -19,6 +24,45 @@ def error_text(error: BaseException, fallback: str = "") -> str:
         return str(error) or fallback or type(error).__name__
     except Exception:  # noqa: BLE001 - describing the error is best-effort
         return fallback or type(error).__name__
+
+
+# The broker refused the operation and closed the channel; the channel's unacked messages
+# go back to their queue, so for a single action nothing changed.
+REFUSALS = (ChannelPreconditionFailed, ChannelAccessRefused)
+
+
+def refusal_text(error: BaseException) -> str:
+    text = error_text(error)
+    if "user_id" in text:
+        # RabbitMQ validates user_id against the publishing connection's user
+        text += (
+            " — the message carries another broker user's user_id, which RabbitMQ accepts "
+            "only from that user or one with the impersonator tag"
+        )
+    return f"RabbitMQ refused it: {text}"
+
+
+def _milliseconds(seconds: float | None) -> str | None:
+    # aio-pika decodes the broker's millisecond string to float seconds (float(ms) / 1000);
+    # round() recovers it exactly, int() — what aio-pika re-encodes with — can drop 1 ms
+    return None if seconds is None else str(round(seconds * 1000))
+
+
+class _Replay(Message):
+    """A copy that keeps the original's expiration exactly. aio-pika (9 and 10) encodes
+    expiration from float seconds with int() truncation: "1001" ms → 1.001 s → "1000"."""
+
+    __slots__ = ("_expiration_ms",)
+
+    def __init__(self, body: bytes, *, expiration_ms: str | None, **kwargs: Any) -> None:
+        super().__init__(body, **kwargs)
+        self._expiration_ms = expiration_ms
+
+    @property
+    def properties(self) -> aiormq.spec.Basic.Properties:
+        properties = super().properties
+        properties.expiration = self._expiration_ms
+        return properties
 
 
 class MessageOperator:
@@ -122,7 +166,8 @@ class MessageOperator:
                     await self._ensure_target(channel, target, create=action == "park")
 
                 results: list[dict[str, object]] = []
-                for fingerprint in sorted(fingerprints):
+                ordered = sorted(fingerprints)
+                for position, fingerprint in enumerate(ordered):
                     group = groups.get(fingerprint)
                     if not group:
                         results.append({"fingerprint": fingerprint, "status": "not_found"})
@@ -133,6 +178,7 @@ class MessageOperator:
                         )
                         continue
                     message, record = group[0]
+                    published = False
                     try:
                         if action in {"copy", "move", "park"}:
                             headers = {
@@ -142,6 +188,7 @@ class MessageOperator:
                             await self._publish(
                                 channel, record, cast(ReplayTarget, target), headers
                             )
+                            published = True
                         if action == "copy":
                             await message.nack(requeue=True)
                         else:
@@ -156,9 +203,19 @@ class MessageOperator:
                                 "error": error_text(error, "message was unroutable"),
                             }
                         )
-                for message in reversed(scanned):
-                    if not message.processed:
-                        await message.nack(requeue=True)
+                    except Exception as error:  # noqa: BLE001 - reported, not swallowed
+                        # The channel is gone (the broker refused a publish, or the
+                        # connection dropped): nothing more can be settled on it and the
+                        # broker requeues every unacked message. Stop, and report what
+                        # already happened instead of raising — earlier messages in this
+                        # batch did move, and the route must audit each of them.
+                        results.append(_halted(fingerprint, error, published, action))
+                        results.extend(
+                            {"fingerprint": later, "status": "not_attempted"}
+                            for later in ordered[position + 1 :]
+                        )
+                        break
+                await self._requeue_unprocessed(scanned)
                 return results
             except Exception:
                 await self._requeue_unprocessed(scanned)
@@ -210,8 +267,9 @@ class MessageOperator:
         replay_headers: dict[str, Any],
     ) -> None:
         properties = record.properties
-        outgoing = Message(
-            body=record.body,
+        outgoing = _Replay(
+            record.body,
+            expiration_ms=_milliseconds(properties.get("expiration")),
             headers={**record.headers, **replay_headers},
             content_type=record.content_type,
             content_encoding=properties.get("content_encoding"),
@@ -219,7 +277,6 @@ class MessageOperator:
             priority=properties.get("priority"),
             correlation_id=record.correlation_id,
             reply_to=properties.get("reply_to"),
-            expiration=properties.get("expiration"),
             message_id=record.message_id,
             timestamp=record.timestamp,
             type=properties.get("type"),
@@ -238,6 +295,24 @@ class MessageOperator:
             await exchange.publish(outgoing, routing_key=target.routing_key)
             return
         raise ValueError(f"Unsupported replay target type: {target.type}")
+
+
+def _halted(
+    fingerprint: str, error: BaseException, published: bool, action: str
+) -> dict[str, object]:
+    if published and action == "copy":
+        # the copy is confirmed and the original goes back on channel close — as intended
+        return {"fingerprint": fingerprint, "status": "success"}
+    if published:
+        return {
+            "fingerprint": fingerprint,
+            "status": "failed",
+            "error": f"copied to the target, but the original could not be acknowledged "
+            f"({error_text(error)}) — it is back in the queue, so replaying it again "
+            "would duplicate it",
+        }
+    text = refusal_text(error) if isinstance(error, REFUSALS) else error_text(error)
+    return {"fingerprint": fingerprint, "status": "failed", "error": text}
 
 
 def _target_to_dict(target: ReplayTarget | None) -> dict[str, str | None] | None:

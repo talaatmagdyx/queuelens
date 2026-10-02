@@ -293,7 +293,8 @@ execution. Response:
     "succeeded": 3,
     "failed": 0,
     "skipped_duplicates": 1,
-    "not_found": 0
+    "not_found": 0,
+    "not_attempted": 0
   },
   "results": [
     {"fingerprint": "…", "status": "success"},
@@ -303,14 +304,18 @@ execution. Response:
 ```
 
 Per-message statuses: `success`, `failed` (with `error`; the message was requeued),
-`skipped_duplicate`, `not_found` (no longer in the queue). Each message follows the same
+`skipped_duplicate`, `not_found` (no longer in the queue), and `not_attempted`. The last
+means the broker closed the channel earlier in the batch (a refused publish or a lost
+connection), so the batch stopped and the message stayed in the queue. Each message follows the same
 publish-before-ack spine as single actions and fails independently. Audit gets a
 `bulk_<action>` `started` event **before** the broker is touched (no audit, no execution),
 one event per fingerprint, and a closing envelope whose result is `success` or `partial`.
 
 Errors: `400` missing confirmation / no replay target, `404` unknown or expired batch token,
-unknown queue or target, `502` channel-level broker failure (the whole batch aborts and the
-broker requeues everything unacked).
+unknown queue or target, `409` RabbitMQ refused the target before anything moved (e.g. an
+existing parking queue declared with other arguments; the detail carries RabbitMQ's
+reason), `502` broker failure before anything moved. A refusal or lost connection *during*
+the batch is not an error response. The batch stops, and the results report what moved.
 
 ## Audit
 
