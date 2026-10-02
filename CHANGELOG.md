@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.11.0 — 2026-10-02
 
 ### Changed
 - **Environments are chosen per request, not per instance.** Each request names its
@@ -26,11 +26,44 @@
 - **A replay the broker refuses explains itself.** `409` carries RabbitMQ's reason instead of
   a bare `502 Message operation failed`, including the hint for `user_id`: RabbitMQ only
   accepts another user's `user_id` from that user or an `impersonator`. Nothing changes.
+- Describing a broker error can no longer break a failure path. aiormq 7's
+  `DeliveryError.__str__` raises when the error carries no frame. That could abort a whole
+  bulk batch with a 502, and it lost the error text from failed actions' audit rows.
 
 ### Safety
 - Audit rows for broker actions record `metadata.environment` and `metadata.vhost`.
 - A bulk dry run executes only in the environment/vhost it scanned. The batch store is
   shared, and a same-named queue elsewhere can hold identical messages.
+
+### Security
+- The verified-login cache key is an HMAC-SHA256 under a random per-process key, instead of
+  SHA-256(pepper + password). It never stored passwords, but a keyed lookup is the right
+  construction.
+- CI workflows run with a read-only token by default; only the image publish job can write
+  packages.
+- CodeQL code scanning (Python, the console's JavaScript, the workflows) runs on every PR.
+  Dependabot proposes weekly updates for Python packages, Actions and Docker base images.
+
+### Dependencies
+- **aio-pika 10 / aiormq 7 are supported** (`aio-pika>=9.4,<11`). The suite and the
+  acceptance run pass on 9.6 and 10.1.
+- `cryptography<51`. For development: pytest 9, pytest-asyncio 1.x, mypy 2, and newer
+  GitHub Actions.
+
+### Docs
+- README and site say where "browsing never consumes" stops: quorum queues with a delivery
+  limit, which QueueLens refuses to browse.
+
+### Upgrade notes
+- **Scripts that called `POST /api/environments/activate` to point the instance at another
+  environment must now send `X-QueueLens-Environment` / `X-QueueLens-Vhost` on their
+  requests.** `activate` only checks reachability, and requests without the headers use the
+  default environment.
+- Bulk dry runs created before the upgrade carry no environment, so they are refused at
+  execute. Run the dry run again.
+- Additive API fields: `default` on `/api/environments` entries, the `not_attempted`
+  per-message status and summary key on bulk execute, and `metadata.environment` /
+  `metadata.vhost` on audit rows.
 
 ## v0.10.2 — 2026-10-01
 
