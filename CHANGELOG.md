@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.12.0 — 2026-10-02
 
 ### Added
 - **Deep browsing (#4).** The Messages screen pages through the whole queue, down to a
@@ -28,6 +28,25 @@
   used to show 1.
 - The preview banner said "latest" messages. A preview shows the head of the queue, the
   oldest messages.
+
+### Upgrade notes
+- **Quorum DLQs are now always read whole,** on every preview and action. Before, they
+  were browsed in part, which reordered them.
+  - A quorum queue holding more than the browse depth (default 5000) or more than 64 MiB
+    now answers `409` until it drains.
+  - Fixes: raise `QUEUELENS_MAX_BROWSE_DEPTH` (Limits allows up to 50 000), or shovel the
+    queue to a classic one.
+  - Previews of large quorum DLQs take longer, because they read the whole queue (about
+    2 s per 5000 messages locally).
+- **Fingerprints change once** for messages carrying `x-delivery-count`, which on quorum
+  queues means any message that has been redelivered.
+  - Bulk dry runs on quorum queues created before the upgrade find nothing. Run the dry
+    run again.
+  - Audit rows written before the upgrade keep the old fingerprints.
+- A bulk selection larger than the bulk limit is now refused with `400`. Before, it was
+  silently cut to the scan window.
+- New setting: `QUEUELENS_MAX_BROWSE_DEPTH`. Additive API: the snapshot query parameters,
+  `snapshot` on actions and bulk dry runs, and `max_browse_depth` in `/api/config`.
 
 ## v0.11.0 — 2026-10-02
 
