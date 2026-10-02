@@ -19,6 +19,9 @@ REQUEST_CONTEXT: ContextVar[tuple[str | None, str | None]] = ContextVar(
 # (environment, vhost) the request targets — set by app.api.scope.broker_scope, so every
 # broker action's audit row says where it happened
 BROKER_SCOPE: ContextVar[tuple[str, str] | None] = ContextVar("audit_broker_scope", default=None)
+# role of the authenticated user (Admin / Operator / Viewer) — set by app.auth.basic, so an
+# audit row says with which rights an action was taken, not only by whom
+ACTING_ROLE: ContextVar[str | None] = ContextVar("audit_acting_role", default=None)
 
 
 def _audit_logger() -> logging.Logger:
@@ -46,6 +49,9 @@ class AuditRepository:
         scope = BROKER_SCOPE.get()
         if scope is not None:
             metadata = {"environment": scope[0], "vhost": scope[1], **metadata}
+        role = ACTING_ROLE.get()
+        if role is not None:
+            metadata = {"role": role, **metadata}
         async with self._database.session() as session:
             model = AuditEventModel(
                 timestamp=entry.timestamp,

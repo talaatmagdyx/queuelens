@@ -8,6 +8,8 @@ from hmac import compare_digest
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
+from app.infrastructure.persistence.audit_repository import ACTING_ROLE
+
 security = HTTPBasic(auto_error=False)
 
 # Sliding-window limiter for failed logins, keyed per (client IP, username) so one
@@ -69,6 +71,14 @@ def _record_failure(ip: str, username: str) -> None:
 async def get_current_user(
     request: Request,
     credentials: HTTPBasicCredentials | None = Depends(security),
+) -> CurrentUser:
+    user = await _authenticate(request, credentials)
+    ACTING_ROLE.set(user.role)  # every audit row written for this request names it
+    return user
+
+
+async def _authenticate(
+    request: Request, credentials: HTTPBasicCredentials | None
 ) -> CurrentUser:
     settings = request.app.state.settings
     if not settings.auth_enabled:

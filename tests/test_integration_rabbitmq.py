@@ -318,7 +318,10 @@ async def test_quorum_delivery_limits_against_real_broker(tmp_path) -> None:
             started, seen = asyncio.get_running_loop().time(), []
             while True:
                 elapsed = asyncio.get_running_loop().time() - started
-                n = (await channel.declare_queue(name, passive=True)).declaration_result
+                # a fresh channel each time: a robust channel hands back the cached Declare-Ok
+                # of its first declare, so a message lost after that would still read as 1
+                async with connection.channel() as fresh:
+                    n = (await fresh.declare_queue(name, passive=True)).declaration_result
                 seen.append((round(elapsed, 1), n.message_count))
                 if n.message_count == 1 or elapsed > timeout:
                     return seen

@@ -366,7 +366,9 @@ Event fields: `id`, `timestamp`, `username`, `action`, `source_queue`,
 `message_fingerprint`, `payload_hash`, `target_type`, `target_exchange`, `target_queue`,
 `target_routing_key`, `result`, `error_message`, `request_ip`, `user_agent`, `metadata`.
 `request_ip` / `user_agent` are those of the HTTP request that caused the event (the proxy's
-address when QueueLens sits behind one). CSV export prefixes cells starting with `= + - @`
+address when QueueLens sits behind one). `metadata.role` is the acting user's role (Admin /
+Operator / Viewer) on every row a request writes. Broker actions also carry
+`metadata.environment` / `metadata.vhost`. CSV export prefixes cells starting with `= + - @`
 with `'` so spreadsheets never evaluate them.
 
 ## Errors
