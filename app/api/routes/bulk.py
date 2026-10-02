@@ -13,6 +13,7 @@ from app.application.bulk_service import BulkActionService, UnknownBulkBatch
 from app.application.queue_service import UnsafeToBrowse
 from app.auth.basic import CurrentUser, require_operator
 from app.domain.models import AuditEntry
+from app.infrastructure.rabbitmq.message_operator import error_text
 from app.observability.metrics import ACTIONS, OPERATION_SECONDS
 
 router = APIRouter(prefix="/api/messages/bulk", tags=["bulk"])
@@ -71,7 +72,7 @@ async def dry_run(
                 target_exchange=body.target.exchange if body.target else None,
                 target_routing_key=body.target.routing_key if body.target else None,
                 result="failed",
-                error_message=str(error),
+                error_message=error_text(error),
                 metadata={"stage": "dry_run", "mode": body.mode},
             )
         )
@@ -146,7 +147,7 @@ async def execute(
                     pending.target.routing_key if pending and pending.target else None
                 ),
                 result="failed",
-                error_message=str(error),
+                error_message=error_text(error),
                 metadata={
                     "batch_id": body.batch_id,
                     "mode": pending.operator_action if pending else None,
