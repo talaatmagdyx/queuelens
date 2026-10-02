@@ -92,9 +92,20 @@ SMTP_SECRET, SLACK_SECRET, PD_SECRET = (token_urlsafe(9) for _ in range(3))
 RESULTS: list[dict] = []
 
 
+def _redact(text: str) -> str:
+    """Evidence is printed to CI logs and saved as an artifact — never with this run's
+    generated credentials or sample secrets in it."""
+    for secret in (ADMIN[1], OPSENV[1], SECRET, NEW_VIEWER_PW, SMTP_SECRET, SLACK_SECRET,
+                   PD_SECRET, PW["broken"], KEY,
+                   *(password for _, password in USERS.values())):
+        text = text.replace(secret, "***")
+    return text
+
+
 def rec(group, name, status, evidence=""):
-    RESULTS.append({"group": group, "name": name, "status": status, "evidence": str(evidence)[:700]})
-    print(f"[{status:5}] G{group:<2} {name} :: {str(evidence)[:170]}", flush=True)
+    evidence = _redact(str(evidence))
+    RESULTS.append({"group": group, "name": name, "status": status, "evidence": evidence[:700]})
+    print(f"[{status:5}] G{group:<2} {name} :: {evidence[:170]}", flush=True)
 
 
 def check(group, name, cond, evidence="", bad="FAIL"):

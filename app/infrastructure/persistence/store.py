@@ -1,6 +1,7 @@
 """Repositories for settings, alert rules, notifications, and users."""
 
 import hashlib
+import hmac
 import secrets
 import time
 from datetime import UTC, datetime, timedelta
@@ -250,7 +251,8 @@ _TIMING_DECOY = hash_password(secrets.token_hex(16))
 
 # A successful Basic-auth check is remembered briefly: every request carries the
 # password, and PBKDF2 (~30 ms) on each one adds up. Only successes are cached, keyed
-# by a per-process keyed hash (never the password), and dropped on password change.
+# by an HMAC under a random per-process key (never the password, never a plain hash),
+# and dropped on password change.
 # ponytail: in-process cache — per replica, fine for the documented single instance.
 VERIFIED_FOR_SECONDS = 60.0
 
@@ -259,10 +261,11 @@ class UserRepository:
     def __init__(self, database: Database) -> None:
         self._database = database
         self._verified: dict[tuple[str, bytes], float] = {}
-        self._pepper = secrets.token_bytes(16)
+        self._cache_key = secrets.token_bytes(32)
 
     def _key(self, username: str, password: str) -> tuple[str, bytes]:
-        return username, hashlib.sha256(self._pepper + password.encode()).digest()
+        mac = hmac.new(self._cache_key, password.encode(), "sha256")  # keyed lookup, not storage
+        return username, mac.digest()
 
     async def seed_env_users(self, users: dict[str, str], admin_username: str) -> None:
         """Ensure env-configured accounts exist in the DB (idempotent)."""
