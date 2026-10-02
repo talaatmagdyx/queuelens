@@ -54,10 +54,11 @@ Every design decision follows one rule: **a failed action must never lose a mess
 | Guarantee | How it's enforced |
 |---|---|
 | Browsing never consumes | Non-destructive preview with requeue — read 220 messages, all 220 stay put. **Quorum queues with a delivery limit are the exception:** there every requeue counts as a delivery, so QueueLens refuses to browse them and badges them *not browsable*. RabbitMQ 4 gives every quorum queue a limit of 20 by default — to browse your quorum DLQs, lift it ([details](docs/SAFETY.md#1-browsing-never-consumes-messages)) |
+| Browsing never reorders | A quorum queue puts every returned message at the *back*, so reading part of one would shuffle it. QueueLens reads quorum queues **whole** and requeues them in order, which leaves them exactly as they were. One too deep to read whole is refused, not shuffled |
 | Replay can't drop messages | **Publish-before-ack**: the original is removed only *after* the broker confirms the publish. Unroutable publishes bounce back as errors, not silence |
 | Bulk actions can't surprise you | A **mandatory dry-run** counts exactly what will be touched; execute runs on that exact set via a one-shot confirmation token |
 | Deletes are deliberate | Explicit type-to-confirm, Admin role only |
-| Everything is on the record | An *attempt* event is written before every action and an *outcome* event after — if the attempt can't be persisted, the action is refused |
+| Everything is on the record | An *attempt* event is written before every action and an *outcome* event after — if the attempt can't be persisted, the action is refused. Every row says **who**, **with which role**, and **in which environment and vhost** |
 | Ambiguity fails closed | Message fingerprints that match zero or multiple messages abort the action instead of guessing |
 
 On RabbitMQ 4, lifting the limit on your dead-letter queues is one policy (merge
@@ -80,8 +81,10 @@ deliberately lazy toward RabbitMQ:
 
 - **The dashboard reads metadata only** — queue lists and counts from the Management API;
   message bodies are never fetched in the background
-- **Message preview is manual and bounded** — bodies are read only when *you* open a queue,
-  capped at `QUEUELENS_MAX_PREVIEW_MESSAGES`, and requeued immediately
+- **Browsing reads a queue once** — bodies are read only when *you* open a queue: one scan,
+  down to the browse depth (`QUEUELENS_MAX_BROWSE_DEPTH`, default 5000) or 64 MiB, requeued
+  straight away. Pages, search and filters are then served from that snapshot for five
+  minutes — paging costs no further broker reads and no deliveries
 - **No automatic payload scanning** — there is no crawler walking your queues; payload
   filters run only inside a user-initiated, size-capped bulk dry-run
 - **Topology is cached** — the exchanges/bindings/queues snapshot (the most expensive
@@ -99,18 +102,19 @@ deliberately lazy toward RabbitMQ:
 | Feature | Status |
 |---|---|
 | Safe message preview | ✅ Stable — quorum queues with a delivery limit are refused ([why](docs/SAFETY.md#1-browsing-never-consumes-messages)) |
+| Deep browsing — page, search and filter the whole queue (snapshots) | ✅ Stable |
 | Single-message replay / park / delete | ✅ Stable |
 | Bulk operations (dry-run → execute) | ✅ Stable |
 | Compressed-payload decode (gzip / deflate) | ✅ Stable |
 | Multi-environment (per-env credentials) | ✅ Stable |
-| Multi-vhost (switchable, one active per instance) | ✅ Stable |
+| Multi-vhost — chosen per browser tab, several at once | ✅ Stable |
 | RBAC (Viewer / Operator / Admin) | ✅ Stable |
 | Audit log + full-history export | ✅ Stable |
 | Alerts — in-app notifications | ✅ Stable |
 | Alerts — external delivery (email / Slack / PagerDuty / webhook) | 🧪 Experimental |
 | Prometheus metrics + bundled rules | ✅ Stable |
-| Simultaneous multi-vhost browsing | 🗺️ Roadmap |
 | PostgreSQL audit store (multi-replica) | 🗺️ Roadmap |
+| SSO behind an authenticating proxy | 🗺️ Roadmap |
 
 ## Features
 
@@ -119,6 +123,9 @@ deliberately lazy toward RabbitMQ:
   target another queue dead-letters into
 - **Message X-ray** — payload (JSON / text / base64), headers, properties, routing data,
   and the parsed **`x-death` history** as a readable failure journey
+- **Deep browsing** — page through the whole queue (down to the browse depth), search payloads
+  and headers, filter by format or death count — all from one snapshot scan, and any
+  message it shows can be replayed, parked or deleted
 - **Compressed payloads decoded** — `content_encoding: gzip`/`deflate` bodies are
   transparently inflated for display (zip-bomb capped), with a toggle back to the raw
   base64 bytes; replay always publishes the original compressed body
@@ -142,14 +149,15 @@ deliberately lazy toward RabbitMQ:
   webhooks — all with 3-attempt backoff retry and per-channel outcome tracking
 - **Quiet hours** — mute Info/Warning notifications overnight; real alerts always deliver
 - **Multiple environments** — development / staging / production brokers with **per-environment
-  credentials**, switchable from the UI
+  credentials**. Each browser tab picks its own environment and vhost, so switching never
+  re-points anyone else, and two vhosts can be worked side by side
 - **Prometheus metrics** at `/metrics` + ready-made [alert rules](deploy/prometheus/alerts.yml)
 
 ### 🛡️ Govern
 - **Role-based access** — Viewer (read-only), Operator (recover), Admin (delete, config,
   users) — enforced server-side on every endpoint
-- **Audit log** — filterable, with per-action durations, and **full-history streaming
-  export** (CSV / JSON)
+- **Audit log** — filterable, with per-action durations, the acting role, environment and vhost
+  on every row, and **full-history streaming export** (CSV / JSON)
 - **Write-only secrets** — credentials go in through the API but never come back out;
   optional Fernet **encryption at rest**
 - **Login rate limiting** — failed Basic-auth attempts are throttled per IP
@@ -280,6 +288,7 @@ Management UI manages the broker; QueueLens recovers your messages.
 |---|:---:|:---:|
 | Queue counts & broker admin | ✅ | read-only |
 | Browse messages without consuming them | ⚠️ requeue quirks | ✅ |
+| Page and search a deep DLQ, then act on any message | ❌ | ✅ |
 | Parsed `x-death` failure history | raw headers | ✅ |
 | Safe replay (publish-before-ack) | manual & risky | ✅ |
 | Bulk actions with mandatory dry-run | ❌ | ✅ |
@@ -317,9 +326,10 @@ python -m pip install '.[dev]'
 ruff check app tests && mypy app && pytest -q
 ```
 
-Fully async stack: FastAPI + aio-pika + httpx + SQLAlchemy asyncio. CI runs lint,
-`mypy --strict`, the unit suite with coverage, an integration flow against a real
-RabbitMQ container, a Playwright browser e2e suite, and the Docker build — on every push.
+Fully async stack: FastAPI + aio-pika (9 or 10) + httpx + SQLAlchemy asyncio. CI runs lint,
+`mypy --strict`, the unit suite with coverage, integration tests against real RabbitMQ
+**3.13 and 4.1**, a black-box acceptance run of every feature group (200+ checks, also on
+both brokers), a Playwright browser e2e suite, CodeQL, and the Docker build — on every push.
 See [CONTRIBUTING.md](CONTRIBUTING.md) to get started; good first issues are labeled.
 
 ## Honest limitations

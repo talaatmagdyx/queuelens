@@ -389,11 +389,12 @@ footer a{color:var(--fog)}
     </div>
     <div class="contract-list rv">
       <div class="clause"><span class="no">§ 01</span><h3>Browsing never consumes</h3><p>Non-destructive preview with requeue — read 220 messages, all 220 stay exactly where they were. The exception is quorum queues with a delivery limit: there every requeue counts as a delivery, so QueueLens refuses to browse them — and RabbitMQ 4 gives every quorum queue a limit of 20. Lift it on your DLQs with <code>delivery-limit: -1</code> (4.x; on 3.x remove the limit). <a href="https://github.com/talaatmagdyx/queuelens/blob/main/docs/SAFETY.md#1-browsing-never-consumes-messages">Details</a></p></div>
-      <div class="clause"><span class="no">§ 02</span><h3>Publish before ack</h3><p>Replay removes the original only <em>after</em> the broker confirms the publish. Unroutable publishes bounce back as errors, never silence.</p></div>
-      <div class="clause"><span class="no">§ 03</span><h3>Dry-run is mandatory</h3><p>Bulk actions first count exactly what will be touched; execute runs on that exact set via a one-shot confirmation token.</p></div>
-      <div class="clause"><span class="no">§ 04</span><h3>Deletes are deliberate</h3><p>Type-to-confirm, Admin role only. There is no "oops" path.</p></div>
-      <div class="clause"><span class="no">§ 05</span><h3>Everything is on the record</h3><p>An <em>attempt</em> event is written before every action and an <em>outcome</em> after. If the attempt can't be persisted, the action is refused.</p></div>
-      <div class="clause"><span class="no">§ 06</span><h3>Ambiguity fails closed</h3><p>A message fingerprint matching zero or multiple messages aborts the action instead of guessing.</p></div>
+      <div class="clause"><span class="no">§ 02</span><h3>Browsing never reorders</h3><p>A quorum queue puts every returned message at the <em>back</em>, so reading part of one would shuffle it. QueueLens reads quorum queues whole and requeues them in order — they end up exactly as they were. One too deep to read whole is refused, never shuffled.</p></div>
+      <div class="clause"><span class="no">§ 03</span><h3>Publish before ack</h3><p>Replay removes the original only <em>after</em> the broker confirms the publish. Unroutable publishes bounce back as errors, never silence.</p></div>
+      <div class="clause"><span class="no">§ 04</span><h3>Dry-run is mandatory</h3><p>Bulk actions first count exactly what will be touched; execute runs on that exact set via a one-shot confirmation token.</p></div>
+      <div class="clause"><span class="no">§ 05</span><h3>Deletes are deliberate</h3><p>Type-to-confirm, Admin role only. There is no "oops" path.</p></div>
+      <div class="clause"><span class="no">§ 06</span><h3>Everything is on the record</h3><p>An <em>attempt</em> event is written before every action and an <em>outcome</em> after. If the attempt can't be persisted, the action is refused. Every row says who, with which role, and in which environment and vhost.</p></div>
+      <div class="clause"><span class="no">§ 07</span><h3>Ambiguity fails closed</h3><p>A message fingerprint matching zero or multiple messages aborts the action instead of guessing.</p></div>
     </div>
   </div>
 </section>
@@ -408,7 +409,7 @@ footer a{color:var(--fog)}
     <div class="lite-grid rv">
       <ul class="lite-list">
         <li><span class="tick">✓</span><span><b>Dashboard reads metadata only</b> — queue lists and counts from the Management API; message bodies are never fetched in the background.</span></li>
-        <li><span class="tick">✓</span><span><b>Preview is manual and bounded</b> — bodies are read only when you open a queue, capped, and requeued immediately.</span></li>
+        <li><span class="tick">✓</span><span><b>A queue is read once</b> — bodies are read only when you open a queue: one capped scan, requeued straight away. Pages, search and filters come from that snapshot, with no further broker reads.</span></li>
         <li><span class="tick">✓</span><span><b>No automatic payload scanning</b> — no crawler walks your queues; filters run only inside a user-initiated, size-capped dry-run.</span></li>
         <li><span class="tick">✓</span><span><b>Topology is cached</b> — the exchanges/bindings snapshot is served from a 30-second cache.</span></li>
         <li><span class="tick">✓</span><span><b>Diagnostics on demand</b> — the connection test fires when you click it, not on a timer.</span></li>
@@ -419,15 +420,16 @@ footer a{color:var(--fog)}
         <div class="head">feature status</div>
         <table>
           <tr><td>Safe message preview</td><td><span class="pill stable">STABLE</span></td></tr>
+          <tr><td>Deep browsing (snapshots)</td><td><span class="pill stable">STABLE</span></td></tr>
           <tr><td>Replay · park · delete</td><td><span class="pill stable">STABLE</span></td></tr>
           <tr><td>Bulk operations</td><td><span class="pill stable">STABLE</span></td></tr>
           <tr><td>Compressed-payload decode</td><td><span class="pill stable">STABLE</span></td></tr>
-          <tr><td>Multi-environment &amp; vhost</td><td><span class="pill stable">STABLE</span></td></tr>
+          <tr><td>Environments &amp; vhosts, per tab</td><td><span class="pill stable">STABLE</span></td></tr>
           <tr><td>RBAC + audit export</td><td><span class="pill stable">STABLE</span></td></tr>
           <tr><td>Alerts — in-app</td><td><span class="pill stable">STABLE</span></td></tr>
           <tr><td>Alerts — email / Slack / PagerDuty</td><td><span class="pill exp">EXPERIMENTAL</span></td></tr>
-          <tr><td>Simultaneous multi-vhost view</td><td><span class="pill road">ROADMAP</span></td></tr>
           <tr><td>PostgreSQL / multi-replica</td><td><span class="pill road">ROADMAP</span></td></tr>
+          <tr><td>SSO behind an auth proxy</td><td><span class="pill road">ROADMAP</span></td></tr>
         </table>
       </div>
     </div>
@@ -444,6 +446,7 @@ footer a{color:var(--fog)}
       <div class="feat"><span class="ico">🔬</span><h3>Inspect</h3><ul>
         <li><b>DLQ auto-detection</b> by convention or topology</li>
         <li>Payload, headers &amp; parsed <b>x-death journey</b></li>
+        <li><b>Deep browsing</b> — page &amp; search the whole queue</li>
         <li><b>Risk-sorted</b> dashboard</li>
         <li>Dead-letter <b>topology graph</b></li>
         <li>Sensitive-field <b>masking</b></li>
@@ -459,12 +462,12 @@ footer a{color:var(--fog)}
         <li><b>Alert rules</b> — pattern + threshold + duration</li>
         <li>Email · Slack · <b>PagerDuty</b> · webhooks, all with retry</li>
         <li><b>Quiet hours</b> that real alerts override</li>
-        <li><b>Multi-environment</b> with per-env credentials</li>
+        <li><b>Environments &amp; vhosts per tab</b>, per-env credentials</li>
         <li>Prometheus <b>/metrics</b> + bundled rules</li>
       </ul></div>
       <div class="feat"><span class="ico">🛡️</span><h3>Govern</h3><ul>
         <li><b>RBAC</b> — Viewer / Operator / Admin, server-side</li>
-        <li>Audit log with <b>full-history export</b></li>
+        <li>Audit log — <b>role, env &amp; vhost</b> on every row, full export</li>
         <li><b>Write-only secrets</b>, optional encryption at rest</li>
         <li>Login <b>rate limiting</b></li>
         <li>Non-root container, healthchecked</li>
@@ -555,6 +558,7 @@ footer a{color:var(--fog)}
         <tr><th>Capability</th><th>Management UI</th><th>QueueLens</th></tr>
         <tr><td>Queue counts &amp; broker admin</td><td class="yes">✓</td><td>read-only</td></tr>
         <tr><td>Browse messages without consuming them</td><td>requeue quirks</td><td class="yes">✓</td></tr>
+        <tr><td>Page &amp; search a deep DLQ, then act on any message</td><td class="no">—</td><td class="yes">✓</td></tr>
         <tr><td>Parsed x-death failure history</td><td>raw headers</td><td class="yes">✓</td></tr>
         <tr><td>Safe replay (publish-before-ack)</td><td class="no">manual &amp; risky</td><td class="yes">✓</td></tr>
         <tr><td>Bulk actions with mandatory dry-run</td><td class="no">—</td><td class="yes">✓</td></tr>
