@@ -105,3 +105,35 @@ async def test_audit_records_request_origin_and_csv_cannot_run_formulas(tmp_path
         e["request_ip"] == "127.0.0.1" and e["user_agent"] == "qa-agent/1.0" for e in events
     )
     assert '"\'=HYPERLINK' in csv and ',"=HYPERLINK' not in csv
+
+
+@pytest.mark.asyncio
+async def test_audit_rows_record_the_acting_role(tmp_path) -> None:
+    """#3: an audit row says with which rights an action was taken, not only by whom."""
+    import json
+    import secrets
+
+    admin = ("admin", secrets.token_urlsafe(12))
+    ops = ("ops", secrets.token_urlsafe(12))
+    app = create_app(Settings(
+        auth_enabled=True, admin_password=admin[1], users_json=json.dumps(dict([ops])),
+        database_url=f"sqlite+aiosqlite:///{tmp_path}/role.db",
+    ))
+    await app.state.database.start()
+
+    class Actions:
+        async def park(self, **_kwargs: object) -> dict[str, object]:
+            return {"status": "success", "action": "park"}
+
+    app.state.action_service = Actions()
+    body = {"source_queue": "orders.dlq", "fingerprint": "a" * 64, "confirm": True}
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        for who in (admin, ops):
+            assert (await client.post("/api/messages/park", json=body, auth=who)).status_code == 200
+    events = await app.state.audit_repository.list(action="park")
+    await app.state.database.close()
+
+    roles = {(e["username"], e["result"]): e["metadata"]["role"] for e in events}
+    assert roles == {("admin", "started"): "Admin", ("admin", "success"): "Admin",
+                     ("ops", "started"): "Operator", ("ops", "success"): "Operator"}

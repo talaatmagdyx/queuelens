@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Audit rows record the acting user's role (`metadata.role`: Admin / Operator / Viewer), so
+  the log says with which rights an action was taken, not only by whom (#3).
+
+### Fixed
+- The quorum delivery-limit integration test could miss the loss it guards against. It
+  polled the message count on one robust channel, and a robust channel hands back the
+  cached `Declare-Ok` of its first declare. A message lost after that first look would
+  still read as present. It now counts on a fresh channel each time.
+
 ## v0.12.0 — 2026-10-02
 
 ### Added
