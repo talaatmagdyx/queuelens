@@ -21,7 +21,8 @@ and STARTTLS-only with an untrusted certificate). Locally:
     ACCEPTANCE=1 python tests/acceptance/run.py
 
 Endpoints are overridable with ACCEPTANCE_* env vars (see below); CI runs it as the
-`acceptance` job.
+`acceptance` job. ACCEPTANCE_DATABASE_URL (postgresql+asyncpg://...) runs it on a
+DISPOSABLE PostgreSQL database instead of a SQLite file: its QueueLens tables are dropped.
 """
 
 import asyncio
@@ -38,6 +39,7 @@ import threading
 import time
 import traceback
 import zlib
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -74,6 +76,8 @@ SMTP_TLS_PORT = int(ENV("ACCEPTANCE_SMTP_TLS_PORT", "1026"))
 MAILPIT = ENV("ACCEPTANCE_MAILPIT_URL", "http://127.0.0.1:8025")
 MAILPIT_TLS = ENV("ACCEPTANCE_MAILPIT_TLS_URL", "http://127.0.0.1:8027")
 DB = f"{WORK}/acceptance.db"
+PG = ENV("ACCEPTANCE_DATABASE_URL")
+DATABASE_URL = PG or f"sqlite+aiosqlite:///{DB}"
 LOG = f"{WORK}/server.log"
 RESULTS_FILE = ENV("ACCEPTANCE_RESULTS", f"{WORK}/acceptance-results.json")
 # every credential and sample secret is generated per run — nothing secret-looking in git
@@ -153,7 +157,7 @@ def server_env(**over):
             "QUEUELENS_RABBITMQ_MANAGEMENT_URL": MGMT,
             "QUEUELENS_RABBITMQ_MANAGEMENT_USERNAME": MAUTH[0],
             "QUEUELENS_RABBITMQ_MANAGEMENT_PASSWORD": MAUTH[1],
-            "QUEUELENS_DATABASE_URL": f"sqlite+aiosqlite:///{DB}",
+            "QUEUELENS_DATABASE_URL": DATABASE_URL,
             "QUEUELENS_MAX_PREVIEW_MESSAGES": "10",
             "QUEUELENS_MAX_MESSAGE_SIZE_BYTES": "4096",
             "QUEUELENS_REFETCH_WINDOW_SIZE": "60",
@@ -335,21 +339,47 @@ async def mailpit_text(msg_id, base=MAILPIT):
         return (await c.get(f"{base}/api/v1/message/{msg_id}")).json().get("Text", "")
 
 
-def db_rows(sql, args=()):
+def _pg(sql, fetch):
+    import asyncpg  # the app's own driver
+
+    async def run():
+        con = await asyncpg.connect(PG.replace("+asyncpg", ""))
+        try:
+            return await (con.fetch(sql) if fetch else con.execute(sql))
+        finally:
+            await con.close()
+
+    with ThreadPoolExecutor(1) as pool:  # called from inside the running event loop
+        return pool.submit(lambda: asyncio.run(run())).result()
+
+
+def db_rows(sql):
+    if PG:
+        return _pg(sql, fetch=True)
     con = sqlite3.connect(DB, timeout=10)
     try:
-        return con.execute(sql, args).fetchall()
+        return con.execute(sql).fetchall()
     finally:
         con.close()
 
 
-def db_exec(sql, args=()):
+def db_exec(sql):
+    if PG:
+        return _pg(sql, fetch=False)
     con = sqlite3.connect(DB, timeout=10)
     try:
-        con.execute(sql, args)
+        con.execute(sql)
         con.commit()
     finally:
         con.close()
+
+
+def stored_bytes():
+    """Everything the database holds, to grep for a plaintext secret."""
+    if not PG:
+        return open(DB, "rb").read()
+    tables = [t for (t,) in db_rows("select tablename from pg_tables where schemaname = 'public'")]
+    return "".join(str(row[0]) for t in tables for row in db_rows(f"select x::text from {t} x")).encode()
 
 
 def by_payload(messages, key, value):
@@ -377,6 +407,14 @@ async def cleanup():
     for suffix in ("", "-wal", "-shm", "-journal"):
         if os.path.exists(DB + suffix):
             os.remove(DB + suffix)
+    if PG:
+        from app.infrastructure.persistence.database import Database
+        from app.infrastructure.persistence.models import Base
+
+        database = Database(PG)
+        async with database.engine.begin() as connection:
+            await connection.run_sync(Base.metadata.drop_all)
+        await database.close()
     open(LOG, "w").close()
 
 
@@ -1200,7 +1238,7 @@ async def g21():
     plain = json.loads(Fernet(KEY.encode()).decrypt(enc["__encrypted__"].encode()))
     check(21, "Re-saving with the sentinel keeps the stored password", plain["email"]["password"] == SMTP_SECRET)
     check(21, "Secret-bearing settings encrypted at rest (Fernet)",
-          "__encrypted__" in rows["channels"] and SMTP_SECRET.encode() not in open(DB, "rb").read())
+          "__encrypted__" in rows["channels"] and SMTP_SECRET.encode() not in stored_bytes())
 
 
 # ================================================================== G15–G18 alerts, notifications, delivery, quiet hours
@@ -1528,8 +1566,8 @@ async def final():
         await pub("t7.dlq", {"restart": i})
     dr = (await api("POST", "/api/messages/bulk/dry-run", json={"source_queue": "t7.dlq", "action": "park",
                                                                   "payload_contains": "restart"})).json()
-    db_exec("insert into audit_events (timestamp, username, action, result, metadata_json) values (?,?,?,?,?)",
-            ("2020-01-01 00:00:00.000000", "old", "replay", "success", "{}"))
+    db_exec("insert into audit_events (timestamp, username, action, result, metadata_json) "
+            "values ('2020-01-01 00:00:00.000000', 'old', 'replay', 'success', '{}')")
     await put_settings({"retention": {"days": 30}})
     stop_server()
     started = start_server()

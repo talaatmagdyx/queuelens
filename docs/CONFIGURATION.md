@@ -73,7 +73,7 @@ The AMQP user needs read/write/configure on the inspected queues: browsing reque
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `QUEUELENS_DATABASE_URL` | `sqlite+aiosqlite:///./data/queuelens.db` | Audit store (SQLAlchemy asyncio URL). Schema is auto-created at startup |
+| `QUEUELENS_DATABASE_URL` | `sqlite+aiosqlite:///./data/queuelens.db` | Audit log, settings, alert rules and users (SQLAlchemy asyncio URL): SQLite, or PostgreSQL as `postgresql+asyncpg://user:password@host:5432/db` (or leave the password out and set `PGPASSWORD`). Tables are created at startup ([moving to PostgreSQL](OPERATIONS.md#moving-to-postgresql)) |
 
 ## Limits
 
@@ -142,7 +142,7 @@ See [`config/replay-targets.example.json`](../config/replay-targets.example.json
 | `QUEUELENS_SECRET_KEY` | *(empty)* | Optional Fernet key — encrypts delivery-channel and environment credentials at rest. Generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 
 Settings managed in the UI (custom headers, limits overrides, retention, delivery channels,
-alert rules, invited users, runtime-added environments) live in the SQLite database
+alert rules, invited users, runtime-added environments) live in the database
 (`QUEUELENS_DATABASE_URL`), not in environment variables.
 
 ## Complete example

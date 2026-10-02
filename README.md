@@ -113,7 +113,8 @@ deliberately lazy toward RabbitMQ:
 | Alerts — in-app notifications | ✅ Stable |
 | Alerts — external delivery (email / Slack / PagerDuty / webhook) | 🧪 Experimental |
 | Prometheus metrics + bundled rules | ✅ Stable |
-| PostgreSQL audit store (multi-replica) | 🗺️ Roadmap |
+| PostgreSQL datastore | 🧪 Experimental |
+| Multiple replicas | 🗺️ Roadmap |
 | SSO behind an authenticating proxy | 🗺️ Roadmap |
 
 ## Features
@@ -307,7 +308,7 @@ The short version (the full checklist lives in [docs/OPERATIONS.md](docs/OPERATI
 - [ ] Run behind a VPN or authenticating reverse proxy with TLS — never expose it publicly
 - [ ] Use a least-privilege broker user (read DLQs, write replay targets, configure only `*.parking`)
 - [ ] Persist `/app/data` on a volume and back it up if audit history matters
-- [ ] **Run a single replica** — SQLite, alert-engine state and broker connections are single-process by design
+- [ ] **Run a single replica** (also on PostgreSQL) — per-queue locks, browse snapshots and broker connections are single-process by design
 - [ ] Scrape `/metrics` and load the bundled Prometheus alert rules
 
 ## Documentation
@@ -336,8 +337,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) to get started; good first issues are lab
 
 ## Honest limitations
 
-- Single replica by design (SQLite, in-process alert state) — PostgreSQL is the path to
-  multi-replica, on the roadmap. Environments are already chosen per request (per tab).
+- Single replica by design: per-queue locks and browse snapshots live in the process, so
+  this holds on PostgreSQL too (which brings central storage and `pg_dump` backups, not
+  more replicas). Environments are already chosen per request (per tab).
 - Filter-based bulk operations act on the scan window (up to `QUEUELENS_MAX_BULK_SIZE` from
   the head of the queue). Messages picked from a snapshot can be reached down to the browse
   depth (default 5000)
