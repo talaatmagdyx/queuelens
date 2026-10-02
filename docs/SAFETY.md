@@ -86,8 +86,11 @@ Messages that arrived after the dry run are ignored by construction. Additional 
   `QUEUELENS_MAX_BULK_SIZE` (default 500), never above 1000; the batch records its window and
   execution scans exactly that. One batch executes at a time (an asyncio lock).
 - Per-message independence: each message publishes-before-acks on its own; an unroutable
-  publish fails and requeues *that* message and the batch continues. A channel-level broker
-  failure aborts the whole batch and the broker requeues everything unacked.
+  publish fails and requeues *that* message and the batch continues. When the broker closes
+  the channel instead (it refused a publish, or the connection dropped), the batch **stops**
+  there. The broker requeues everything still unacked, and the response still reports, and
+  the audit still records, every message that already moved. That message is `failed` with
+  RabbitMQ's reason, and the rest are `not_attempted` and stay in the queue.
 - Duplicates are skipped and reported (`skipped_duplicate`), never guessed at — same
   ambiguity rule as single actions, degraded gracefully instead of aborting the batch.
 - Tokens expire (`QUEUELENS_BULK_DRY_RUN_TTL_SECONDS`) and are stored in the database, so
@@ -137,7 +140,13 @@ reconnection). Management API errors → `502`/`503`. No failure mode returns a 
   (see [OPERATIONS.md](OPERATIONS.md)).
 - **Replays gain a `message_id` when the original had none.** aiormq stamps a random id on
   every publish without one; it is how a broker return is matched to its publish (the
-  mechanism behind guarantee 3). Everything else is copied as-is.
+  mechanism behind guarantee 3). Everything else is copied as-is, including `expiration`
+  to the millisecond. aio-pika on its own would truncate some TTLs (`"1001"` → `"1000"`).
+- **A message carrying another broker user's `user_id` can't be replayed by QueueLens's
+  user.** RabbitMQ validates `user_id` against the publishing connection unless that user
+  has the `impersonator` tag. QueueLens copies `user_id` rather than silently dropping
+  it, so the broker refuses the copy. The action answers `409` with RabbitMQ's reason, and
+  nothing changes; in bulk, the batch stops there (see section 5).
 - **Copy replay can duplicate.** By definition, copy leaves the original and creates a new
   message. Downstream consumers should be idempotent or use the
   `x-queuelens-original-fingerprint` header to deduplicate.

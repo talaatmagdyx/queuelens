@@ -240,6 +240,7 @@ async def test_bulk_dry_run_and_execute_against_real_broker(tmp_path) -> None:
                     "failed": 0,
                     "skipped_duplicates": 1,
                     "not_found": 0,
+                    "not_attempted": 0,
                 }
 
                 # 3 parked; the non-matching message and both duplicates remain
@@ -353,3 +354,107 @@ async def test_quorum_delivery_limits_against_real_broker(tmp_path) -> None:
             with contextlib.suppress(Exception):
                 await cleanup.queue_delete(name)
         await connection.close()
+
+
+@pytest.mark.asyncio
+async def test_refused_replays_and_exact_expiration_against_real_broker(tmp_path) -> None:
+    """RabbitMQ validates user_id against the publishing connection's user, so a message a
+    different broker user published (with its user_id set) can't be replayed by QueueLens's
+    user. Nothing may be lost or hidden: a single replay explains itself and changes nothing;
+    a bulk replay stops but reports — and audits — what already moved. Replays also keep the
+    original expiration to the millisecond."""
+    import secrets
+
+    from app.infrastructure.rabbitmq.message_operator import _Replay
+
+    suffix = uuid.uuid4().hex[:8]
+    dlq, target = f"it.uid.dlq.{suffix}", f"it.uid.target.{suffix}"
+    other = (f"it-uid-{suffix}", secrets.token_urlsafe(12))
+    management = httpx.AsyncClient(
+        base_url=MANAGEMENT_URL, auth=(_amqp.username or "guest", _amqp.password or "guest")
+    )
+    (await management.put(f"/api/users/{other[0]}", json={"password": other[1], "tags": ""}))\
+        .raise_for_status()
+    (await management.put(f"/api/permissions/%2F/{other[0]}",
+                          json={"configure": ".*", "write": ".*", "read": ".*"})).raise_for_status()
+    connection = await aio_pika.connect_robust(AMQP_URL)
+    channel = await connection.channel()
+
+    async def count(queue: str) -> int:
+        # a fresh channel: a robust channel hands back its cached Queue — and the stale
+        # Declare-Ok of the first declare — for a name it already declared
+        async with connection.channel() as fresh:
+            declared = await fresh.declare_queue(queue, passive=True)
+            return int(declared.declaration_result.message_count or 0)
+
+    try:
+        await channel.declare_queue(dlq, durable=True)
+        await channel.declare_queue(target, durable=True)
+        foreign = await aio_pika.connect(AMQP_URL.replace(
+            f"{_amqp.username}:{_amqp.password}@", f"{other[0]}:{other[1]}@"))
+        async with foreign, foreign.channel() as foreign_channel:
+            await foreign_channel.default_exchange.publish(
+                aio_pika.Message(b'{"n": "foreign"}', message_id="foreign", user_id=other[0]),
+                routing_key=dlq,
+            )
+        # 65526 ms is a TTL aio-pika's own Message can't send (it truncates it to 65525)
+        for name in ("exact", "second"):
+            await channel.default_exchange.publish(
+                _Replay(f'{{"n": "{name}"}}'.encode(), expiration_ms="65526", message_id=name),
+                routing_key=dlq,
+            )
+
+        assert (await count(dlq), await count(target)) == (3, 0)
+        app = create_app(_settings(tmp_path))
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                listed = (await client.get(f"/api/queues/{dlq}/messages")).json()["messages"]
+                fp = {m["message_id"]: m["fingerprint"] for m in listed}
+
+                moved = await client.post("/api/messages/replay", json={
+                    "source_queue": dlq, "fingerprint": fp["exact"], "mode": "move",
+                    "target": {"type": "queue", "queue": target}, "confirm": True})
+                assert moved.status_code == 200, moved.text
+                copy = await (await channel.declare_queue(target, passive=True)).get(timeout=5)
+                assert copy.expiration == 65.526  # "65526" on the wire, not "65525"
+                await copy.nack(requeue=True)
+
+                refused = await client.post("/api/messages/replay", json={
+                    "source_queue": dlq, "fingerprint": fp["foreign"], "mode": "move",
+                    "target": {"type": "queue", "queue": target}, "confirm": True})
+                assert refused.status_code == 409
+                assert "impersonator" in refused.json()["detail"]
+                assert (await count(dlq), await count(target)) == (2, 1)  # nothing changed
+
+                preview = (await client.post("/api/messages/bulk/dry-run", json={
+                    "source_queue": dlq, "action": "replay", "mode": "move",
+                    "target": {"type": "queue", "queue": target}})).json()
+                executed = await client.post(
+                    "/api/messages/bulk/execute",
+                    json={"batch_id": preview["batch_id"], "confirm": True},
+                )
+                assert executed.status_code == 200, executed.text  # not a bare 502
+                result = executed.json()
+                status = {r["fingerprint"]: r["status"] for r in result["results"]}
+                assert status[fp["foreign"]] == "failed"
+                # the batch runs in fingerprint order: "second" ran before the refusal or not
+                assert status[fp["second"]] in {"success", "not_attempted"}
+                moved_in_bulk = status[fp["second"]] == "success"
+                assert (await count(dlq), await count(target)) == (  # every message accounted for
+                    1 if moved_in_bulk else 2, 2 if moved_in_bulk else 1)
+
+                events = (await client.get(f"/api/audit?source_queue={dlq}")).json()["events"]
+                audited = {e["message_fingerprint"]: e["result"] for e in events
+                           if e["action"] == "replay" and e["metadata"].get("batch_id")}
+                assert audited == status  # each message's outcome is on record
+    finally:
+        async with contextlib.AsyncExitStack() as stack:
+            stack.push_async_callback(connection.close)
+            stack.push_async_callback(management.aclose)
+            cleanup = await connection.channel()
+            for queue_name in (dlq, target):
+                with contextlib.suppress(Exception):
+                    await cleanup.queue_delete(queue_name)
+            with contextlib.suppress(Exception):
+                await management.delete(f"/api/users/{other[0]}")

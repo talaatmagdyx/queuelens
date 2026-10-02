@@ -117,7 +117,7 @@
             {isPark
               ? `${many ? 'The messages were' : 'The message was'} published to ${srcQueue}.parking.`
               : `${many ? 'The messages were' : 'The message was'} published to ${destination}${action === 'move' ? ' and removed from ' + srcQueue : ''}.`}<br />
-            {summary && `Result: ${summary.succeeded} succeeded, ${summary.failed} failed, ${summary.skipped_duplicates} duplicates skipped. `}
+            {summary && `Result: ${summary.succeeded} succeeded, ${summary.failed} failed, ${summary.skipped_duplicates} duplicates skipped${summary.not_attempted ? `, ${summary.not_attempted} not attempted (the batch stopped — they are still in the queue)` : ''}. `}
             {`${many ? 'The actions were' : 'The action was'} recorded in the audit log.`}
           </div>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 26 }}>
