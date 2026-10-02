@@ -74,6 +74,12 @@ per test with explicit `Settings`, `tmp_path` SQLite URLs for anything touching 
 - **publish** (tags only) — multi-arch images to GHCR, only after test, docker and
   acceptance pass.
 
+Also on every PR: **CodeQL** (`codeql.yml` — Python, the console's JavaScript, and the
+workflows themselves; vendored minified libraries are excluded), results under
+Security → Code scanning. **Dependabot** (`dependabot.yml`) proposes grouped weekly updates
+for Python packages, GitHub Actions and the Docker base images (the Python/Node runtime
+line is bumped by hand); security fixes arrive immediately.
+
 ## Code conventions
 
 - **Layering** — routes → application services → infrastructure → domain. Routes resolve
