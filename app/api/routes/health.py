@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from app.api.scope import broker, broker_scope
 from app.auth.basic import get_current_username
 
 router = APIRouter(tags=["health"])
@@ -15,17 +16,17 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@router.get("/api/broker")
-async def broker(
+@router.get("/api/broker", dependencies=[Depends(broker_scope)])
+async def broker_info(
     request: Request,
     _username: str = Depends(get_current_username),
 ) -> dict[str, object]:
-    settings = request.app.state.settings
+    settings = broker(request).settings
     parsed = urlparse(settings.rabbitmq_url)  # never echo credentials
     host = parsed.hostname or "rabbitmq"
     version = None
     try:
-        overview = await request.app.state.management_client.overview()
+        overview = await broker(request).management_client.overview()
         version = overview.get("rabbitmq_version")
     except Exception:
         pass
@@ -73,12 +74,12 @@ async def users(
     }
 
 
-@router.get("/api/exchanges")
+@router.get("/api/exchanges", dependencies=[Depends(broker_scope)])
 async def exchanges(
     request: Request,
     _username: str = Depends(get_current_username),
 ) -> dict[str, object]:
-    raw = await request.app.state.management_client.list_exchanges()
+    raw = await broker(request).management_client.list_exchanges()
     return {
         "exchanges": [
             {"name": item.get("name", ""), "type": item.get("type", "direct")}
@@ -89,13 +90,13 @@ async def exchanges(
     }
 
 
-@router.get("/api/config")
+@router.get("/api/config", dependencies=[Depends(broker_scope)])
 async def config(
     request: Request,
     _username: str = Depends(get_current_username),
 ) -> dict[str, object]:
     """Read-only runtime configuration (env-var driven; secrets never included)."""
-    settings = request.app.state.settings
+    settings = broker(request).settings
     return {
         "app_name": settings.app_name,
         "environment": settings.environment,
@@ -118,7 +119,7 @@ async def config(
 TOPOLOGY_CACHE_SECONDS = 30.0
 
 
-@router.get("/api/topology")
+@router.get("/api/topology", dependencies=[Depends(broker_scope)])
 async def topology(
     request: Request,
     _username: str = Depends(get_current_username),
@@ -129,10 +130,11 @@ async def topology(
     the most expensive read in the app, and bindings rarely change that fast."""
     import time
 
-    cached = getattr(request.app.state, "topology_cache", None)
+    scoped = broker(request)  # one cache per environment/vhost
+    cached = scoped.topology_cache
     if cached is not None and time.monotonic() < cached[0]:
         return cast(dict[str, object], cached[1])
-    client = request.app.state.management_client
+    client = scoped.management_client
     exchanges_raw = await client.list_exchanges()
     bindings_raw = await client.list_bindings()
     queues_raw = await client.list_queues()
@@ -162,7 +164,7 @@ async def topology(
             for q in queues_raw
         ],
     }
-    request.app.state.topology_cache = (time.monotonic() + TOPOLOGY_CACHE_SECONDS, result)
+    scoped.topology_cache = (time.monotonic() + TOPOLOGY_CACHE_SECONDS, result)
     return result
 
 
@@ -194,7 +196,7 @@ async def alert_rules(
     return {"rules": rules, "source": "deploy/prometheus/alerts.yml"}
 
 
-@router.get("/api/broker/test")
+@router.get("/api/broker/test", dependencies=[Depends(broker_scope)])
 async def broker_test(
     request: Request,
     _username: str = Depends(get_current_username),
@@ -202,12 +204,12 @@ async def broker_test(
     """Live connectivity check: Management API round-trip plus AMQP state."""
     import time
 
-    connection = request.app.state.rabbitmq_connection
+    connection = broker(request).rabbitmq_connection
     started = time.perf_counter()
     management_ok = False
     detail: dict[str, object] = {}
     try:
-        overview = await request.app.state.management_client.overview()
+        overview = await broker(request).management_client.overview()
         management_ok = True
         detail = {
             "rabbitmq_version": overview.get("rabbitmq_version"),

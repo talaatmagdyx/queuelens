@@ -1383,39 +1383,61 @@ async def g10():
     check(10, "Environments from config listed (default + staging + broken)",
           {"development", "staging", "broken"} <= set(envs) and envs["staging"]["vhosts"] == ["/", "ql-staging"],
           {k: v["vhosts"] for k, v in envs.items()})
-    await api("GET", "/api/topology")  # warm the cache with the "/" vhost
+    await api("GET", "/api/topology")  # warm the default scope's cache
+    stg_scope = {"X-QueueLens-Environment": "staging", "X-QueueLens-Vhost": "ql-staging"}
     r = await api("POST", "/api/environments/activate", auth=OPSENV, json={"environment": "staging", "vhost": "ql-staging"})
-    broker = (await api("GET", "/api/broker", auth=ADMIN)).json()
+    broker = (await api("GET", "/api/broker", auth=OPSENV, headers=stg_scope)).json()
     async with httpx.AsyncClient(auth=MAUTH) as m:
         vh = (await m.get(f"{MGMT}/api/vhosts/ql-staging")).status_code
     check(10, "Operator switches environment + vhost (vhost created on first use)",
           r.status_code == 200 and broker["environment"] == "staging" and broker["vhost"] == "ql-staging" and vh == 200,
           (r.status_code, broker))
-    check(10, "Switch is instance-global (admin now sees staging too)", broker["vhost"] == "ql-staging", bad="LIMIT")
+    other = (await api("GET", "/api/broker", auth=ADMIN)).json()
+    check(10, "A switch is per client — everyone else keeps their environment",
+          (other["environment"], other["vhost"]) == ("development", "/"), other)
     stg = await aio_pika.connect_robust(amqp_url("ql-staging"))
     await decl("t10.staging.dlq", conn=stg)
     await pub("t10.staging.dlq", {"env": "staging"}, conn=stg)
-    names = {q["name"] for q in (await api("GET", "/api/queues")).json()["queues"]}
-    check(11, "Queues come from the active vhost only", "t10.staging.dlq" in names and "t1.orders.dlq" not in names)
-    msgs = await preview("t10.staging.dlq")
-    check(11, "Preview works in the switched vhost", msgs and msgs[0]["payload"] == {"env": "staging"})
-    topo = {q["name"] for q in (await api("GET", "/api/topology")).json()["queues"]}
-    check(10, "Topology reflects the newly active vhost", "t1.orders.dlq" not in topo,
-          "right after the switch /api/topology still returns the previous vhost's queues (cache not invalidated)")
-    n = [x for x in await notifications() if x["title"] == "Environment switched to staging"]
+    staged = {q["name"] for q in (await api("GET", "/api/queues", headers=stg_scope)).json()["queues"]}
+    default = {q["name"] for q in (await api("GET", "/api/queues")).json()["queues"]}
+    check(11, "Two vhosts browsed at once — each request sees only its own",
+          "t10.staging.dlq" in staged and "t1.orders.dlq" not in staged
+          and "t1.orders.dlq" in default and "t10.staging.dlq" not in default)
+    r = await api("GET", f"/api/queues/{quote('t10.staging.dlq', safe='')}/messages", headers=stg_scope)
+    msgs = r.json().get("messages", []) if r.status_code == 200 else []
+    check(11, "Preview works in the scoped vhost", msgs and msgs[0]["payload"] == {"env": "staging"})
+    topo = {q["name"] for q in (await api("GET", "/api/topology", headers=stg_scope)).json()["queues"]}
+    check(10, "Topology is per scope (never the other vhost's cached snapshot)",
+          "t10.staging.dlq" in topo and "t1.orders.dlq" not in topo)
+    dry = (await api("POST", "/api/messages/bulk/dry-run", headers=stg_scope,
+                     json={"source_queue": "t10.staging.dlq", "action": "park"})).json()
+    r = await api("POST", "/api/messages/bulk/execute", json={"batch_id": dry.get("batch_id"), "confirm": True})
+    check(7, "A dry run executes only where it scanned (staging batch refused on the default)",
+          r.status_code == 404 and "made against staging" in r.text and await count("t10.staging.dlq", conn=stg) == 1,
+          (r.status_code, r.text[:160]))
+    r = await api("POST", "/api/messages/park", auth=OPSENV, headers=stg_scope,
+                  json={"source_queue": "t10.staging.dlq", "fingerprint": msgs[0]["fingerprint"] if msgs else "", "confirm": True})
+    parked = [e for e in await audit(action="park") if e["source_queue"] == "t10.staging.dlq"]
+    check(13, "Audit rows name the environment and vhost they acted in",
+          r.status_code == 200 and parked and all(
+              (e["metadata"].get("environment"), e["metadata"].get("vhost")) == ("staging", "ql-staging") for e in parked),
+          [e["metadata"] for e in parked][:2])
     a = await audit(action="switch_environment")
-    check(10, "Switch notified to everyone + audited", n and n[0]["level"] == "Warning" and a and a[0]["username"] == "opsenv")
+    n = [x for x in await notifications() if "switched" in x["title"].lower()]
+    check(10, "Switch audited; nobody else is notified (nothing changed for them)",
+          a and a[0]["username"] == "opsenv" and not n)
     r = await api("POST", "/api/environments/activate", auth=OPSENV, json={"environment": "staging", "vhost": "t10-rogue-vhost"})
+    h = await api("GET", "/api/queues", auth=OPSENV,
+                  headers={"X-QueueLens-Environment": "staging", "X-QueueLens-Vhost": "t10-rogue-vhost"})
     async with httpx.AsyncClient(auth=MAUTH) as m:
         rogue = (await m.get(f"{MGMT}/api/vhosts/t10-rogue-vhost")).status_code
-    check(10, "Operator cannot create arbitrary broker vhosts", rogue == 404,
-          f"activate with an unlisted vhost → HTTP {r.status_code}, vhost now exists on the broker (mgmt {rogue}) "
-          "+ permissions granted")
+    check(10, "Operator cannot create arbitrary broker vhosts (switch or header)",
+          r.status_code == 404 and h.status_code == 404 and rogue == 404, (r.status_code, h.status_code, rogue))
     r = await api("POST", "/api/environments/activate", json={"environment": "broken"})
-    still = (await api("GET", "/api/broker")).json()["environment"]
-    check(10, "Unreachable/bad-credential env → 502, active env unchanged", r.status_code == 502 and still == "staging",
-          (r.status_code, still))
-    check(10, "Unknown env → 404", (await api("POST", "/api/environments/activate", json={"environment": "nope"})).status_code == 404)
+    check(10, "Unreachable/bad-credential env → 502", r.status_code == 502, r.status_code)
+    check(10, "Unknown env → 404 (switch and header)",
+          (await api("POST", "/api/environments/activate", json={"environment": "nope"})).status_code == 404
+          and (await api("GET", "/api/queues", headers={"X-QueueLens-Environment": "nope"})).status_code == 404)
 
     r = await api("POST", "/api/environments", json={"name": "t10env", "vhosts": ["/"]})
     r2 = await api("POST", "/api/environments", json={"name": "t10ext", "vhosts": ["/"], "host": f"{BROKER}:{AMQP_PORT}",
@@ -1433,14 +1455,16 @@ async def g10():
     codes = ((await api("DELETE", "/api/environments/staging")).status_code,
              (await api("DELETE", "/api/environments/t10env")).status_code)
     check(10, "Remove: env-var env refused (404), custom env removed", codes == (404, 200), codes)
-    r = await api("POST", "/api/environments/activate", json={"environment": "t10ext"})
+    ext = {"X-QueueLens-Environment": "t10ext"}
+    used = await api("GET", "/api/queues", headers=ext)  # opens its own connection
     d = await api("DELETE", "/api/environments/t10ext")
-    check(10, "Cannot remove the active environment (409)", r.status_code == 200 and d.status_code == 409,
-          (r.status_code, d.status_code))
-    r = await api("POST", "/api/environments/activate", json={"environment": "development", "vhost": "/"})
-    check(10, "Switch back to the default environment", r.status_code == 200)
+    after = await api("GET", "/api/queues", headers=ext)
+    check(10, "Removing an environment in use closes it; requests naming it then 404",
+          (used.status_code, d.status_code, after.status_code) == (200, 200, 404),
+          (used.status_code, d.status_code, after.status_code))
     async with stg.channel() as ch:
         await ch.queue_delete("t10.staging.dlq")
+        await ch.queue_delete("t10.staging.dlq.parking")
     await stg.close()
 
 

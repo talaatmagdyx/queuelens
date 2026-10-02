@@ -808,11 +808,31 @@ async def test_pagerduty_resolves_on_recovery_even_in_quiet_hours(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_environment_switch_drops_the_cached_topology(tmp_path) -> None:
-    app = _app(tmp_path)
-    app.state.topology_cache = (float("inf"), {"queues": [{"name": "other.broker.q"}]})
-    app.state.environment_manager.attach_default()  # every bundle swap goes through _swap
-    assert app.state.topology_cache is None
+async def test_the_topology_cache_is_per_environment(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    class Management:
+        async def list_exchanges(self) -> list[dict[str, object]]:
+            return []
+
+        async def list_bindings(self) -> list[dict[str, object]]:
+            return []
+
+        async def list_queues(self) -> list[dict[str, object]]:
+            return [{"name": "staging.q"}]
+
+    app = _app(tmp_path, environments_json='{"staging": {"vhosts": ["/"]}}')
+    app.state.topology_cache = (float("inf"), {"queues": [{"name": "default.q"}]})
+    staging = SimpleNamespace(started=True, management_client=Management(), topology_cache=None)
+    app.state.environment_manager._bundles[("staging", "/")] = staging
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        got = await client.get("/api/topology", headers={"X-QueueLens-Environment": "staging"})
+        default = await client.get("/api/topology")
+
+    assert [q["name"] for q in got.json()["queues"]] == ["staging.q"]
+    assert [q["name"] for q in default.json()["queues"]] == ["default.q"]
+    assert staging.topology_cache is not None  # cached on its own bundle
 
 
 @pytest.mark.asyncio

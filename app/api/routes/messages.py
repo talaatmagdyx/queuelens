@@ -2,12 +2,15 @@ from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
+from app.api.scope import broker, broker_scope
 from app.application.message_service import MessageService, message_to_dict
 from app.application.queue_service import UnsafeToBrowse
 from app.auth.basic import get_current_username
 from app.observability.metrics import PREVIEW_REQUESTS
 
-router = APIRouter(prefix="/api/queues", tags=["messages"])
+router = APIRouter(
+    prefix="/api/queues", tags=["messages"], dependencies=[Depends(broker_scope)]
+)
 
 HARD_CEILING = 1000
 
@@ -21,7 +24,7 @@ async def effective_limit(request: Request, key: str) -> int:
 
 
 def _service(request: Request) -> MessageService:
-    return cast(MessageService, request.app.state.message_service)
+    return cast(MessageService, broker(request).message_service)
 
 
 @router.get("/{queue_name}/messages")

@@ -194,7 +194,8 @@ What this gives you at runtime:
 - Three environments in the top-bar switcher and Configuration panel:
   `development` (default broker), `staging` (own broker, one user for both APIs),
   and `production` (own broker, split AMQP vs management users, three vhosts).
-- Activating `production` shows the red type-to-confirm banner; the `orders`,
-  `payments`, and `billing` vhosts are created on the broker on first activation.
+- Switching a tab to `production` shows the red type-to-confirm banner; the `orders`,
+  `payments`, and `billing` vhosts are created on the broker on first use. A switch
+  affects only that tab — other tabs and users keep their own environment.
 - Same-broker environments or extra vhosts can still be added later from the UI
   without touching this file.

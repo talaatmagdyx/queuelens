@@ -28,6 +28,9 @@ class BulkBatch:
     sample_fingerprints: list[str] = field(default_factory=list)
     expires_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     scan_limit: int = 0  # the window the dry run scanned; execute scans the same
+    # where the dry run looked: the batch store is shared by every environment, and a
+    # same-named queue elsewhere can hold identical (same-fingerprint) messages
+    scope: tuple[str, str] = ("", "")
 
 
 def _batch_to_payload(batch: BulkBatch) -> dict[str, object]:
@@ -52,6 +55,7 @@ def _batch_to_payload(batch: BulkBatch) -> dict[str, object]:
         "sample_fingerprints": batch.sample_fingerprints,
         "expires_at": batch.expires_at.isoformat(),
         "scan_limit": batch.scan_limit,
+        "scope": list(batch.scope),
     }
 
 
@@ -72,6 +76,7 @@ def _batch_from_payload(raw: dict[str, object]) -> BulkBatch:
         sample_fingerprints=[str(f) for f in payload.get("sample_fingerprints", [])],
         expires_at=datetime.fromisoformat(str(payload["expires_at"])),
         scan_limit=int(payload.get("scan_limit", 0)),
+        scope=tuple(payload.get("scope") or ("", "")),
     )
 
 
@@ -96,6 +101,7 @@ class BulkActionService:
         self._batch_store = batch_store
         self._batches: dict[str, BulkBatch] = {}
         self._lock = asyncio.Lock()  # one bulk execution at a time
+        self._scope = (settings.environment, settings.rabbitmq_vhost)
 
     async def _store_batch(self, batch: BulkBatch) -> None:
         if self._batch_store is not None:
@@ -172,6 +178,7 @@ class BulkActionService:
             expires_at=datetime.now(UTC)
             + timedelta(seconds=self._settings.bulk_dry_run_ttl_seconds),
             scan_limit=scan_limit,
+            scope=self._scope,
         )
         await self._store_batch(batch)
         return {
@@ -197,6 +204,13 @@ class BulkActionService:
             if batch is None:
                 raise UnknownBulkBatch(
                     "Unknown or expired dry-run batch; run the dry-run again"
+                )
+            if batch.scope != self._scope:
+                # the token is spent either way: a dry run approves one broker's messages
+                raise UnknownBulkBatch(
+                    f"This dry run was made against {batch.scope[0] or 'another environment'}"
+                    f" (vhost {batch.scope[1] or '?'}), not {self._scope[0]} (vhost "
+                    f"{self._scope[1]}) — run the dry-run again here"
                 )
             await self._guard(batch.source_queue)
             results = await self._operator.operate_bulk(

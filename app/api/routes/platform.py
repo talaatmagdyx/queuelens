@@ -6,6 +6,7 @@ from typing import Any, Literal, cast
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from app.api.scope import requested_scope
 from app.auth.basic import (
     CurrentUser,
     get_current_username,
@@ -330,7 +331,8 @@ async def list_environments(
     request: Request,
     _username: str = Depends(get_current_username),
 ) -> dict[str, Any]:
-    return {"environments": request.app.state.environment_manager.list()}
+    """`active` marks the environment this request is scoped to (its X-QueueLens-* headers)."""
+    return {"environments": request.app.state.environment_manager.list(*requested_scope(request))}
 
 
 class EnvironmentBody(BaseModel):
@@ -408,11 +410,9 @@ async def delete_environment(
     from app.domain.models import AuditEntry
 
     try:
-        request.app.state.environment_manager.remove_custom(name)
+        await request.app.state.environment_manager.remove_custom(name)
     except KeyError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
-    except ValueError as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
+        raise HTTPException(status_code=404, detail=str(error.args[0])) from error
     store = request.app.state.settings_store
     stored = await store.get("custom_environments", {}) or {}
     stored.pop(name, None)
@@ -440,6 +440,9 @@ async def activate_environment(
     body: ActivateBody,
     user: CurrentUser = Depends(require_operator),
 ) -> dict[str, Any]:
+    """Check that an environment/vhost is usable before a client switches to it. Nothing
+    changes for anyone else: the client then sends X-QueueLens-Environment /
+    X-QueueLens-Vhost with its requests."""
     username = user.username
     from datetime import UTC, datetime
 
@@ -450,7 +453,7 @@ async def activate_environment(
             body.environment, body.vhost
         )
     except KeyError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
+        raise HTTPException(status_code=404, detail=str(error.args[0])) from error
     except ConnectionError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     await request.app.state.audit_repository.record(
@@ -461,15 +464,5 @@ async def activate_environment(
             result="success",
             metadata=result,
         )
-    )
-    # the switch is instance-global — surface it to every user via Notifications
-    await request.app.state.notifications.add(
-        level="Warning",
-        title=f"Environment switched to {result['environment']}",
-        message=(
-            f"{username} activated {result['environment']} (vhost {result['vhost']}) — "
-            "all views and actions now target that broker"
-        ),
-        source="Environments",
     )
     return cast(dict[str, Any], result)

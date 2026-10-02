@@ -2,14 +2,15 @@ from typing import cast
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from app.api.scope import broker, broker_scope
 from app.application.queue_service import QueueService, queues_to_dicts
 from app.auth.basic import get_current_username
 
-router = APIRouter(prefix="/api/queues", tags=["queues"])
+router = APIRouter(prefix="/api/queues", tags=["queues"], dependencies=[Depends(broker_scope)])
 
 
 def _service(request: Request) -> QueueService:
-    return cast(QueueService, request.app.state.queue_service)
+    return cast(QueueService, broker(request).queue_service)
 
 
 @router.get("")

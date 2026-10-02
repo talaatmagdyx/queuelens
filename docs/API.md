@@ -7,6 +7,28 @@ require **HTTP Basic Auth** (`QUEUELENS_ADMIN_USERNAME` / `QUEUELENS_ADMIN_PASSW
 Interactive OpenAPI docs are served at `/docs` (Swagger UI) and `/redoc`, and the schema at
 `/openapi.json` — behind the same Basic Auth as the API.
 
+## Environment and vhost (per request)
+
+Broker endpoints — queues, messages, actions, bulk, `/api/broker`, `/api/exchanges`,
+`/api/config`, `/api/topology`, `/api/broker/test`, `/api/metrics/summary` — act on the
+environment and vhost the request names:
+
+| Header | Default | Meaning |
+|---|---|---|
+| `X-QueueLens-Environment` | the default environment (`QUEUELENS_ENVIRONMENT`) | a name from `GET /api/environments` |
+| `X-QueueLens-Vhost` | that environment's first vhost (the default's: `QUEUELENS_RABBITMQ_VHOST`) | one of its listed vhosts |
+
+Nothing is instance-global: two clients (or two console tabs) can work against different
+brokers at once. An unknown environment or unlisted vhost is `404`, never the default.
+Every audit row written for a scoped request carries `metadata.environment` and
+`metadata.vhost`. A bulk dry run executes only in the scope it scanned.
+
+`POST /api/environments/activate` (`{"environment", "vhost"?}`) checks that a scope is
+reachable (`404` unknown, `502` unreachable) and returns `{"environment", "vhost"}` to
+send from then on; it changes nothing for anyone else. `GET /api/environments` marks the
+asking request's scope `active` and the default one `default`. `/metrics` and the alert
+engine always use the default environment.
+
 ## Health
 
 ### `GET /health`
@@ -35,7 +57,7 @@ Example alert rules ship in [`deploy/prometheus/alerts.yml`](../deploy/prometheu
 ## Queues
 
 ### `GET /api/queues`
-List queues in the configured vhost.
+List queues in the request's vhost (see *Environment and vhost*).
 
 | Query param | Type | Default | Meaning |
 |---|---|---|---|
