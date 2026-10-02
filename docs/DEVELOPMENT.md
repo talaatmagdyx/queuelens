@@ -28,7 +28,16 @@ QUEUELENS_RABBITMQ_MANAGEMENT_PASSWORD=queuelens \
 uvicorn app.main:app --reload
 ```
 
-Or the whole stack: `docker compose up --build`.
+Or the whole stack: `docker compose up --build`. Its one-shot `demo` service runs
+`python -m app.demo`, which dead-letters realistic messages into a handful of DLQs (real
+`x-death`, some messages that died several times, gzip bodies, a quorum DLQ with a delivery
+limit). It is idempotent.
+
+The README and landing-page screenshots come from `python scripts/screenshots.py` (needs
+`pip install playwright`). It seeds the demo data, starts its own QueueLens, creates some
+history through the API, and captures every screen at 1440×900 into `docs/screenshots/`.
+Point it at a broker with nothing else on it (`QUEUELENS_RABBITMQ_URL`,
+`QUEUELENS_RABBITMQ_MANAGEMENT_URL`): other queues show up in the shots.
 
 ## Test strategy
 

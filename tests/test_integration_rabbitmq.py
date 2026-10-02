@@ -565,3 +565,49 @@ async def test_snapshots_page_deep_queues_and_keep_quorum_order(tmp_path) -> Non
                 with contextlib.suppress(Exception):
                     await cleanup.queue_delete(name)
         await connection.close()
+
+
+@pytest.mark.asyncio
+async def test_demo_seed_dead_letters_for_real(tmp_path) -> None:
+    """`python -m app.demo` (run once by docker compose) must give the quickstart real
+    dead-letters: broker-stamped x-death, repeated deaths counted, and no second batch."""
+    from app.demo import QUEUES, seed
+
+    prefix = f"it.demo.{uuid.uuid4().hex[:6]}."
+    connection = await aio_pika.connect_robust(AMQP_URL)
+    try:
+        assert await seed(AMQP_URL, prefix) is True
+        assert await seed(AMQP_URL, prefix) is False  # already seeded: nothing added
+
+        async with connection.channel() as channel:
+            counts = {}
+            for _work, dlq, *_rest in QUEUES:
+                declared = await channel.declare_queue(prefix + dlq, passive=True)
+                counts[dlq] = declared.declaration_result.message_count
+            assert counts == {dlq: n for _w, dlq, _e, _r, n, _p, _a in QUEUES}
+
+            queue = await channel.declare_queue(prefix + "payments.retry.dlq", passive=True)
+            seen = []
+            for _ in range(30):
+                message = await queue.get(timeout=5)
+                seen.append(message)
+            deaths = {m.message_id: m.headers["x-death"][0]["count"] for m in seen}
+            async with httpx.AsyncClient(base_url=MANAGEMENT_URL, timeout=10, auth=(
+                    _amqp.username or "guest", _amqp.password or "guest")) as mgmt:
+                major = int((await mgmt.get("/api/overview")).json()["rabbitmq_version"][0])
+            # 3.x adds to the x-death a republished message carries; 4.x starts it afresh
+            expected = (1, 5, 3) if major < 4 else (1, 1, 1)
+            assert (deaths["pay-0000"], deaths["pay-0003"], deaths["pay-0004"]) == expected
+            assert {m.headers["x-death"][0]["queue"] for m in seen} == {prefix + "payments.retry"}
+            assert seen[5].content_encoding == "gzip"
+            for message in seen:
+                await message.nack(requeue=True)
+    finally:
+        async with connection.channel() as cleanup:
+            for work, dlq, exchange, *_rest in QUEUES:
+                for name in (work, dlq):
+                    with contextlib.suppress(Exception):
+                        await cleanup.queue_delete(prefix + name)
+                with contextlib.suppress(Exception):
+                    await cleanup.exchange_delete(prefix + exchange)
+        await connection.close()

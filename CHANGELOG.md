@@ -1,12 +1,26 @@
 # Changelog
 
-## Unreleased
+## v0.12.1 — 2026-10-02
 
 ### Added
+- **`docker compose up` ships the demo dead-letter queues the README promised.** The new
+  one-shot `demo` service runs `python -m app.demo`, which dead-letters realistic messages
+  into five DLQs: real `x-death` (on RabbitMQ 3.x some died 3 or 5 times; 4.x restarts the
+  count for a republished message), gzip and plain-text bodies, and
+  a quorum DLQ with a delivery limit to show the "not browsable" badge. It does nothing
+  when they already exist. Until now the quickstart started an empty broker.
+- `scripts/screenshots.py` regenerates the README and landing-page screenshots from a
+  real console, and all nine are new.
 - Audit rows record the acting user's role (`metadata.role`: Admin / Operator / Viewer), so
   the log says with which rights an action was taken, not only by whom (#3).
 
 ### Fixed
+- **Alert rules' "last triggered" read three hours (your UTC offset) in the past.** The
+  Alerts screen parsed the stored UTC time as local time.
+- The dashboard and queue list still said "message preview is limited to 100 per queue";
+  since 0.12 a queue is read once, down to the browse depth.
+- The snapshot banner showed its time in local 12-hour format beside UTC message times; it
+  is UTC now too.
 - The quorum delivery-limit integration test could miss the loss it guards against. It
   polled the message count on one robust channel, and a robust channel hands back the
   cached `Declare-Ok` of its first declare. A message lost after that first look would

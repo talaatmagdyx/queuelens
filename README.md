@@ -171,7 +171,9 @@ git clone https://github.com/talaatmagdyx/queuelens && cd queuelens
 docker compose up --build
 ```
 
-Open **[http://localhost:8000/app](http://localhost:8000/app)** — sign in with
+The one-shot `demo` service dead-letters a few hundred messages into `payments.retry.dlq`,
+`orders.created.dlq` and three more DLQs, with real `x-death` history, so there's
+something to recover. Open **[http://localhost:8000/app](http://localhost:8000/app)** — sign in with
 `admin` / `change-me` (change it before sharing the URL with anyone).
 The bundled RabbitMQ Management UI is at [http://localhost:15672](http://localhost:15672)
 (`queuelens` / `queuelens`).

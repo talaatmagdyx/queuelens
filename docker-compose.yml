@@ -42,6 +42,19 @@ services:
       - queuelens-data:/app/data
     restart: unless-stopped
 
+  # One-shot: dead-letters demo messages into a few DLQs so there is something to recover.
+  # Does nothing once they exist; leave this service out when you point QueueLens at a
+  # real broker.
+  demo:
+    build: .
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      QUEUELENS_RABBITMQ_URL: amqp://queuelens:queuelens@rabbitmq:5672/
+    command: ["python", "-m", "app.demo"]
+    restart: "no"
+
   mailpit:
     image: axllent/mailpit
     ports:
