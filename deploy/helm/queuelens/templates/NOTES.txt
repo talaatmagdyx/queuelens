@@ -1,0 +1,28 @@
+{{- $fullname := include "queuelens.fullname" . -}}
+QueueLens {{ .Values.image.tag | default .Chart.AppVersion }} is installed as {{ $fullname }} in namespace {{ .Release.Namespace }} (one replica, by design).
+
+Open the console:
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}/
+{{- end }}
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $fullname }} 8000:{{ .Values.service.port }}
+  then http://127.0.0.1:8000/
+{{- end }}
+
+Sign in as {{ .Values.env.QUEUELENS_ADMIN_USERNAME | default "admin" }}; the password is the QUEUELENS_ADMIN_PASSWORD key of Secret {{ include "queuelens.secretName" . }}:
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "queuelens.secretName" . }} -o jsonpath='{.data.QUEUELENS_ADMIN_PASSWORD}' | base64 -d
+
+Health: GET /health (liveness), GET /ready (readiness: needs the broker connection).
+{{- if not .Values.persistence.enabled }}
+
+WARNING: persistence is disabled, so /app/data is an emptyDir. Unless QUEUELENS_DATABASE_URL
+points at PostgreSQL, the audit log, settings, alert rules and invited users are lost every
+time the pod restarts.
+{{- end }}
+{{- if and .Values.ingress.enabled (not .Values.ingress.tls) }}
+
+WARNING: the ingress has no TLS. QueueLens uses HTTP Basic Auth, which sends the password
+with every request: terminate TLS in front of it.
+{{- end }}

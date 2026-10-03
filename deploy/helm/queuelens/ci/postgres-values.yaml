@@ -1,0 +1,9 @@
+# Rendered by scripts/test_helm_chart.sh: PostgreSQL holds the data, so no volume. The
+# password is the PGPASSWORD key of the existing Secret, which keeps it out of the URL.
+existingSecret: queuelens-credentials
+persistence:
+  enabled: false
+env:
+  QUEUELENS_DATABASE_URL: postgresql+asyncpg://queuelens@postgres.databases:5432/queuelens
+  QUEUELENS_RABBITMQ_MANAGEMENT_URL: http://rabbitmq.messaging:15672
+  QUEUELENS_RABBITMQ_MANAGEMENT_USERNAME: queuelens

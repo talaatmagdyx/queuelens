@@ -1,0 +1,178 @@
+# QueueLens chart values. Guide: docs/KUBERNETES.md.
+#
+# Every QueueLens setting is an environment variable with the QUEUELENS_ prefix
+# (docs/CONFIGURATION.md lists them all). Non-secret ones go in `env`; secret ones in a
+# Secret, either one you manage (`existingSecret`) or one the chart creates (`secretEnv`).
+#
+# The chart always runs exactly one replica, so there is no replicaCount: browse snapshots,
+# per-queue operation locks and the login limiter live in the process, and a second
+# replica would race the first on the same queues (docs/OPERATIONS.md).
+
+image:
+  repository: ghcr.io/talaatmagdyx/queuelens
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Non-secret settings, rendered as plain env vars. Numbers and booleans come out as
+# written; a map or list comes out as JSON, which suits the *_JSON settings. For example:
+#   QUEUELENS_RABBITMQ_MANAGEMENT_URL: http://rabbitmq:15672
+#   QUEUELENS_RABBITMQ_MANAGEMENT_USERNAME: queuelens
+#   QUEUELENS_RABBITMQ_VHOST: /
+#   QUEUELENS_MAX_PREVIEW_MESSAGES: 200
+#   QUEUELENS_ENVIRONMENTS_JSON:
+#     staging: {vhosts: ["/", staging]}
+#   # PostgreSQL instead of SQLite; the password goes in the Secret as PGPASSWORD
+#   QUEUELENS_DATABASE_URL: postgresql+asyncpg://queuelens@postgres:5432/queuelens
+env: {}
+
+# Secret settings come from one Secret, and every key in it becomes an env var of the same
+# name, so name the keys after the variables. Three are required, and the pod does not
+# start without them, so QueueLens never runs on its built-in default credentials:
+#   QUEUELENS_ADMIN_PASSWORD                the admin account's password
+#   QUEUELENS_RABBITMQ_URL                  amqp://USER:PASSWORD@HOST:5672/
+#   QUEUELENS_RABBITMQ_MANAGEMENT_PASSWORD  the Management API user's password
+# Optional ones go in the same Secret: QUEUELENS_SECRET_KEY (encrypts stored credentials;
+# recommended), QUEUELENS_USERS_JSON, PGPASSWORD, and QUEUELENS_ENVIRONMENTS_JSON when
+# it carries credentials.
+#
+# Either name a Secret you manage (kubectl, sealed-secrets, external-secrets, ...). The
+# pod does not restart by itself when it changes: `kubectl rollout restart` after editing.
+existingSecret: ""
+# Or let the chart create the Secret from these values (they are stored in the release, so
+# prefer existingSecret for anything that lasts). Setting both is refused.
+secretEnv: {}
+
+# More env vars as EnvVar objects (valueFrom allowed), added after `env`.
+extraEnv: []
+
+# /app/data holds the SQLite database: audit log, settings, alert rules, invited users.
+persistence:
+  # Turn off when QUEUELENS_DATABASE_URL points at PostgreSQL; /app/data is then an emptyDir.
+  enabled: true
+  # Mount a PersistentVolumeClaim you created instead of the chart's.
+  existingClaim: ""
+  # "" uses the cluster's default StorageClass; "-" sets storageClassName: "" (static PVs only).
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  # e.g. helm.sh/resource-policy: keep, to keep the claim (and its audit history) on uninstall.
+  annotations: {}
+
+service:
+  type: ClusterIP
+  port: 8000
+  # Container port (name or number) the Service sends traffic to. Point it at a sidecar's
+  # port (see extraContainers) to put an authenticating proxy in front of QueueLens.
+  targetPort: http
+  annotations: {}
+
+# QueueLens serves plain HTTP with Basic Auth: terminate TLS here or in front of it.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: queuelens.example.internal
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: queuelens-tls
+  #    hosts:
+  #      - queuelens.example.internal
+
+# A Prometheus Operator ServiceMonitor for /metrics (needs the monitoring.coreos.com CRDs).
+# It scrapes the QueueLens container's own port, also when the Service fronts a sidecar.
+serviceMonitor:
+  enabled: false
+  # Labels your Prometheus selects ServiceMonitors by, e.g. release: kube-prometheus-stack
+  labels: {}
+  interval: 30s
+  scrapeTimeout: 10s
+  # /metrics needs Basic Auth. Name a Secret in the release namespace holding the account
+  # to scrape with; a Viewer account can read metrics and change nothing.
+  basicAuth:
+    secretName: ""
+    usernameKey: username
+    passwordKey: password
+
+# /health answers once the app has started; /ready also needs the broker connection, so a
+# broker outage takes the pod out of the Service until it reconnects (docs/KUBERNETES.md).
+startupProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 2
+  failureThreshold: 30
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: http
+  periodSeconds: 5
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Browse snapshots hold message bodies in memory (up to QUEUELENS_MAX_BROWSE_DEPTH of them);
+# raise the memory limit if you browse deep queues of large messages.
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+# The image runs as its system user `queuelens`, uid/gid 999; fsGroup makes the data
+# volume writable for it.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 999
+  runAsGroup: 999
+  fsGroup: 999
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+# QueueLens writes only to /app/data and /tmp (both volumes), so the root filesystem is
+# read-only.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+serviceAccount:
+  create: true
+  # Defaults to the release's full name (or "default" when create is false).
+  name: ""
+  annotations: {}
+  # QueueLens never calls the Kubernetes API, so the pod gets no token.
+  automountServiceAccountToken: false
+
+# Extra containers in the pod, e.g. an authenticating proxy (oauth2-proxy) in front of
+# QueueLens. Containers in a pod share its network, so a sidecar reaches the app on
+# 127.0.0.1:8000. Name the sidecar's port anything but "http" and set service.targetPort
+# to that name. docs/KUBERNETES.md has an example.
+extraContainers: []
+# Extra pod volumes, e.g. a Secret or ConfigMap for a sidecar.
+extraVolumes: []
+# Extra mounts for the QueueLens container.
+extraVolumeMounts: []
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

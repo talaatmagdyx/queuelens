@@ -1,0 +1,54 @@
+# Rendered by scripts/test_helm_chart.sh: an oauth2-proxy sidecar in front of QueueLens. The
+# Service sends traffic to the proxy's port; the proxy reaches the app on 127.0.0.1:8000.
+existingSecret: queuelens-credentials
+service:
+  targetPort: proxy
+extraContainers:
+  - name: oauth2-proxy
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.13.0
+    args:
+      - --http-address=0.0.0.0:4180
+      - --upstream=http://127.0.0.1:8000
+      - --provider=oidc
+      - --oidc-issuer-url=https://sso.example.internal/realms/ops
+      - --email-domain=example.com
+    env:
+      - name: OAUTH2_PROXY_CLIENT_ID
+        value: queuelens
+      - name: OAUTH2_PROXY_CLIENT_SECRET
+        valueFrom:
+          secretKeyRef:
+            name: queuelens-oauth2-proxy
+            key: client-secret
+      - name: OAUTH2_PROXY_COOKIE_SECRET
+        valueFrom:
+          secretKeyRef:
+            name: queuelens-oauth2-proxy
+            key: cookie-secret
+    ports:
+      - name: proxy
+        containerPort: 4180
+    readinessProbe:
+      httpGet:
+        path: /ping
+        port: proxy
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+          - ALL
+extraVolumes:
+  - name: internal-ca
+    configMap:
+      name: internal-ca
+extraVolumeMounts:
+  - name: internal-ca
+    mountPath: /etc/ssl/internal
+    readOnly: true
+extraEnv:
+  - name: QUEUELENS_USERS_JSON
+    valueFrom:
+      secretKeyRef:
+        name: queuelens-users
+        key: users.json
