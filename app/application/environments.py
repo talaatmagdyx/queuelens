@@ -15,6 +15,7 @@ from app.application.bulk_service import BulkActionService
 from app.application.message_service import MessageService
 from app.application.queue_service import QueueService
 from app.config import Settings
+from app.infrastructure.persistence.coordination import Coordinator
 from app.infrastructure.rabbitmq.connection import RabbitMQConnection
 from app.infrastructure.rabbitmq.management_client import RabbitMQManagementClient
 from app.infrastructure.rabbitmq.message_browser import MessageBrowser, QueueLocks
@@ -39,9 +40,12 @@ class Bundle:
     topology_cache: Any = None
 
 
-def _build_bundle(settings: Settings, batch_store: Any = None) -> Bundle:
+def _build_bundle(
+    settings: Settings, batch_store: Any = None, coordinator: Coordinator | None = None
+) -> Bundle:
     connection = RabbitMQConnection(settings)
-    locks = QueueLocks()  # previews and actions on one queue never interleave
+    # previews and actions on one queue never interleave, on any replica
+    locks = QueueLocks(coordinator, settings.rabbitmq_management_url, settings.rabbitmq_vhost)
     browser = MessageBrowser(connection, locks)
     operator = MessageOperator(connection, locks)
     management = RabbitMQManagementClient(settings)
@@ -71,8 +75,15 @@ class EnvironmentManager:
     """Owns one service bundle per (environment, vhost); the default one is exposed on
     app.state, the others are resolved per request."""
 
-    def __init__(self, app_state: Any, base_settings: Settings, batch_store: Any = None) -> None:
+    def __init__(
+        self,
+        app_state: Any,
+        base_settings: Settings,
+        batch_store: Any = None,
+        coordinator: Coordinator | None = None,
+    ) -> None:
         self._batch_store = batch_store
+        self._coordinator = coordinator
         self._state = app_state
         self._base = base_settings
         self._bundles: dict[tuple[str, str], Bundle] = {}
@@ -151,6 +162,13 @@ class EnvironmentManager:
         for key in [k for k in self._bundles if k[0] == name]:
             await self._stop(self._bundles.pop(key))
 
+    async def sync_custom(self, stored: dict[str, Any]) -> None:
+        """Match what's stored, which another replica may have changed: add the new
+        environments, and close the ones that were removed."""
+        for name in self._custom - set(stored or {}) - set(self._base.environments):
+            await self.remove_custom(name)
+        self.apply_custom(stored)
+
     def scope(self, env: str | None, vhost: str | None) -> tuple[str, str]:
         """Validate a requested (environment, vhost); blanks mean the default environment
         and that environment's first vhost."""
@@ -204,7 +222,9 @@ class EnvironmentManager:
         """Build the default bundle and expose it on app.state without starting it."""
         bundle = self._bundles.get(self.default_key)
         if bundle is None:
-            bundle = _build_bundle(self._settings_for(*self.default_key), self._batch_store)
+            bundle = _build_bundle(
+                self._settings_for(*self.default_key), self._batch_store, self._coordinator
+            )
             self._bundles[self.default_key] = bundle
         for name in (
             "settings", "rabbitmq_connection", "management_client", "message_service",
@@ -222,7 +242,9 @@ class EnvironmentManager:
         key = (env, vhost)
         bundle = self._bundles.get(key)
         if bundle is None:
-            bundle = _build_bundle(self._settings_for(env, vhost), self._batch_store)
+            bundle = _build_bundle(
+                self._settings_for(env, vhost), self._batch_store, self._coordinator
+            )
             self._bundles[key] = bundle
         if not bundle.started:
             await bundle.management_client.start()

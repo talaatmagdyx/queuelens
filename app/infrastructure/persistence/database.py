@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -8,7 +9,10 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from app.infrastructure.persistence.coordination import lock_key
 from app.infrastructure.persistence.models import Base
+
+SCHEMA_LOCK = lock_key("queuelens", "schema")
 
 
 class Database:
@@ -25,12 +29,15 @@ class Database:
 
     async def start(self) -> None:
         async with self.engine.begin() as connection:
+            if connection.dialect.name == "postgresql":
+                # replicas starting together on an empty database would race CREATE TABLE
+                await connection.execute(
+                    text("SELECT pg_advisory_xact_lock(:key)"), {"key": SCHEMA_LOCK}
+                )
             await connection.run_sync(Base.metadata.create_all)
         for statement in self.MIGRATIONS:
             try:
                 async with self.engine.begin() as connection:
-                    from sqlalchemy import text
-
                     await connection.execute(text(statement))
             except Exception:  # noqa: BLE001 - column already exists
                 pass

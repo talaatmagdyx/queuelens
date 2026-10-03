@@ -1,0 +1,9 @@
+# Rendered by scripts/test_helm_chart.sh: three replicas on PostgreSQL, so no volume.
+existingSecret: queuelens-credentials
+replicaCount: 3
+persistence:
+  enabled: false
+env:
+  QUEUELENS_DATABASE_URL: postgresql+asyncpg://queuelens@postgres.databases:5432/queuelens
+  QUEUELENS_RABBITMQ_MANAGEMENT_URL: http://rabbitmq.messaging:15672
+  QUEUELENS_RABBITMQ_MANAGEMENT_USERNAME: queuelens

@@ -3,6 +3,7 @@
 import asyncio
 import fnmatch
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -73,12 +74,14 @@ class AlertEngine:
         settings_store: SettingsRepository,
         get_queue_service: Any,  # callable returning the active env's queue service
         interval_seconds: float = 15.0,
+        is_leader: Callable[[], Awaitable[bool]] | None = None,  # one evaluator per database
     ) -> None:
         self._rules = rules
         self._notifications = notifications
         self._settings_store = settings_store
         self._get_queue_service = get_queue_service
         self._interval = interval_seconds
+        self._is_leader = is_leader
         # (rule_id, queue) -> first time the condition was observed true.
         # Fired-state itself lives on the rule row so restarts don't re-notify.
         self._pending: dict[tuple[int, str], datetime] = {}
@@ -98,7 +101,10 @@ class AlertEngine:
     async def _run(self) -> None:
         while True:
             try:
-                await self.evaluate_once()
+                if self._is_leader is None or await self._is_leader():
+                    await self.evaluate_once()
+                else:
+                    self._pending.clear()  # the leader keeps the clock on held conditions
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001 - the loop must survive broker hiccups

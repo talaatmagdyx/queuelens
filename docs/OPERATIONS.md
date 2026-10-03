@@ -2,14 +2,22 @@
 
 ## Deployment model & constraints (read this first)
 
-QueueLens is designed as a **single-instance, internal-network operations tool**:
+QueueLens is an **internal-network operations tool**:
 
-- **Exactly one replica, on either database.** Per-queue operation locks, browse
-  snapshots, environment bundles and the login limiter live in process memory. A
-  second replica could read or act on a queue while the first one does (a quorum
-  queue would lose its order), and snapshot pages would 404 when a request lands on the
-  other replica. Bulk dry-run tokens and alert fired-state are kept in the database and
-  are already safe to share; PostgreSQL alone doesn't lift this limit.
+- **One replica on SQLite, any number on PostgreSQL.** SQLite is a file on one pod's
+  volume. On PostgreSQL the replicas share what has to be shared:
+  - **The per-queue lock.** Two replicas never read or act on one queue at once, so a
+    quorum queue keeps its order and an action can't miss its message.
+  - **The login limiter.** It counts failures from every replica.
+  - **One leader for the alert rules.** Only that replica evaluates them, and another
+    takes over within one interval if it dies.
+  - **Settings.** Runtime environments and the audit-stream switch reach every replica
+    within 5 s, and a removed environment stops working everywhere.
+  - **Bulk dry-run tokens and alert fired-state,** which already lived in the database.
+- **Browse snapshots stay on the replica that took them.** With more than one replica,
+  use sticky sessions (the Helm chart's Service pins clients by IP; an ingress
+  controller needs its own, see [KUBERNETES.md](KUBERNETES.md#more-than-one-replica)).
+  Without them, paging rescans the queue on whichever replica answers.
 - **TLS is mandatory and external.** Authentication is HTTP Basic, or SSO through an
   authenticating proxy ([docs/SSO.md](SSO.md)). Always deploy behind a TLS-terminating
   reverse proxy (or a service mesh), and never expose port 8000 directly to the internet.

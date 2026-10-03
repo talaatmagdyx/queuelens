@@ -70,8 +70,10 @@ Fakes have already lied to us once — see the integration test's module docstri
 Conventions: `pytest-asyncio` in auto mode (plain `async def` tests), fresh `create_app(...)`
 per test with explicit `Settings`, `tmp_path` SQLite URLs for anything touching audit.
 `tests/test_databases.py` also runs the persistence layer on PostgreSQL when
-`QUEUELENS_TEST_POSTGRES_URL` names a throwaway database (its tables are dropped), and
-`ACCEPTANCE_DATABASE_URL` does the same for the acceptance run. CI sets both:
+`QUEUELENS_TEST_POSTGRES_URL` names a throwaway database (its tables are dropped).
+`tests/test_replicas.py` then runs two or three app instances on it as replicas, and
+the integration suite has two replicas scan one real queue at once.
+`ACCEPTANCE_DATABASE_URL` runs the acceptance suite on PostgreSQL too. CI sets both:
 
 ```bash
 docker run -d --rm --name ql-pg -e POSTGRES_HOST_AUTH_METHOD=trust -p 5433:5432 postgres:17

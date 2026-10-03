@@ -3,7 +3,8 @@
 The Helm chart in [`deploy/helm/queuelens`](../deploy/helm/queuelens) runs the
 `ghcr.io/talaatmagdyx/queuelens` image (tag: the chart's `appVersion`) as one pod with:
 
-- a **Deployment**, always one replica, `Recreate` strategy ([why](#why-one-replica));
+- a **Deployment**: one replica with `Recreate` on SQLite, or several with rolling updates
+  on PostgreSQL ([more than one replica](#more-than-one-replica));
 - a **PersistentVolumeClaim** for `/app/data`, where the SQLite database lives;
 - a **Secret** with the credentials, unless you bring your own (`existingSecret`);
 - a **Service**, a **ServiceAccount** without an API token, and optionally an **Ingress**
@@ -113,8 +114,8 @@ env:
 ```
 
 The URL has no password: asyncpg reads `PGPASSWORD` from the Secret. (A URL with the
-password in it belongs in the Secret instead of `env`.) It is still one replica: the
-in-process state stays in the process ([why](#why-one-replica)).
+password in it belongs in the Secret instead of `env`.) With PostgreSQL the chart can run
+[more than one replica](#more-than-one-replica).
 
 Moving an install that already has SQLite data: add `PGPASSWORD` to the Secret and restart
 the pod, then copy inside it while nobody is working in the console (anything written
@@ -233,18 +234,45 @@ headers from any other address are ignored, and Basic Auth still works for scrip
 the admin. QueueLens's port stays reachable on the pod's IP from inside the cluster: add a
 NetworkPolicy if only the proxy should reach it.
 
-## Why one replica
+## More than one replica
 
-`replicas` is fixed at 1 and is not a value. Per-queue operation locks, browse snapshots,
-environment bundles and the login limiter live in process memory, on SQLite and
-PostgreSQL alike. A second replica could read or act on a queue while the first one does
-(a quorum queue would lose its order), and snapshot pages would 404 when a request landed
-on the other one. See [OPERATIONS.md](OPERATIONS.md#deployment-model--constraints-read-this-first).
+On SQLite there is one replica: the database is a file on one pod's volume, and the chart
+refuses `replicaCount` above 1 while `persistence.enabled` is on. The strategy is then
+`Recreate`: an update stops the old pod before starting the new one, which lets the
+`ReadWriteOnce` volume move. The cost is a few seconds without a console on every upgrade.
 
-The strategy is `Recreate` for the same reason: an update stops the old pod before it
-starts the new one, never running two, which also lets a `ReadWriteOnce` volume move
-between them. The cost is a few seconds without a console on every upgrade or restart.
-There is no PodDisruptionBudget: with one replica it would only block node drains.
+On PostgreSQL, set `replicaCount` and turn the volume off:
+
+```yaml
+replicaCount: 3
+persistence:
+  enabled: false
+env:
+  QUEUELENS_DATABASE_URL: postgresql+asyncpg://queuelens@postgres.databases:5432/queuelens
+```
+
+The replicas coordinate through PostgreSQL. Two of them never read or act on one queue at
+once, the login limiter counts every replica's failures, and one replica (whichever holds
+an advisory lock) evaluates the alert rules ([OPERATIONS.md](OPERATIONS.md#deployment-model--constraints-read-this-first)).
+Updates roll one pod at a time (`maxUnavailable: 0`).
+
+**Sticky sessions.** A browse snapshot lives on the replica that took it, so a client
+should keep talking to the same one. The chart sets `sessionAffinity: ClientIP` on the
+Service. An ingress controller routes to pods directly, though, so it needs its own; with
+ingress-nginx:
+
+```yaml
+ingress:
+  annotations:
+    nginx.ingress.kubernetes.io/affinity: cookie
+    nginx.ingress.kubernetes.io/session-cookie-name: queuelens
+```
+
+Without stickiness nothing breaks, but paging rescans the queue on whichever replica
+answers, which costs broker reads (and, on a quorum queue, a delivery count per message).
+
+**Metrics.** Every replica exports the same DLQ gauges and its own action counters. The
+bundled rules take `max by (queue)` and `sum by (action)`, so the alerts come out once.
 
 ## Upgrade
 

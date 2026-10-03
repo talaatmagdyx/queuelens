@@ -1,5 +1,5 @@
 {{- $fullname := include "queuelens.fullname" . -}}
-QueueLens {{ .Values.image.tag | default .Chart.AppVersion }} is installed as {{ $fullname }} in namespace {{ .Release.Namespace }} (one replica, by design).
+QueueLens {{ .Values.image.tag | default .Chart.AppVersion }} is installed as {{ $fullname }} in namespace {{ .Release.Namespace }} ({{ .Values.replicaCount }} replica{{ if gt (int .Values.replicaCount) 1 }}s{{ end }}).
 
 Open the console:
 {{- if .Values.ingress.enabled }}

@@ -10,6 +10,10 @@ metadata:
   {{- end }}
 spec:
   type: {{ .Values.service.type }}
+  {{- if gt (int .Values.replicaCount) 1 }}
+  # browse snapshots live on the replica that took them: keep each client on one pod
+  sessionAffinity: ClientIP
+  {{- end }}
   selector:
     {{- include "queuelens.selectorLabels" . | nindent 4 }}
   ports:

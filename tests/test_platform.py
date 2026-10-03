@@ -431,9 +431,6 @@ async def test_roles_enforced_viewer_operator_admin(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_failed_logins_are_rate_limited(tmp_path) -> None:
-    from app.auth import basic as auth_basic
-
-    auth_basic._failures.clear()
     app = _app(tmp_path, auth_enabled=True, admin_password=PW["root"])
     await app.state.database.start()
     transport = httpx.ASGITransport(app=app)
@@ -445,7 +442,6 @@ async def test_failed_logins_are_rate_limited(tmp_path) -> None:
         # even correct credentials are blocked while the window is hot
         also_blocked = await client.get("/api/queues", auth=("admin", PW["root"]))
     await app.state.database.close()
-    auth_basic._failures.clear()
 
     assert blocked.status_code == 429
     assert also_blocked.status_code == 429
@@ -730,9 +726,6 @@ async def test_add_environment_audit_names_the_acting_admin(tmp_path) -> None:
 async def test_throttling_one_account_does_not_lock_out_others(tmp_path) -> None:
     import json
 
-    from app.auth import basic as auth_basic
-
-    auth_basic._failures.clear()
     admin, ops = ("admin", cred()), ("ops", cred())
     app = _app(tmp_path, auth_enabled=True, admin_password=admin[1],
                users_json=json.dumps(dict([ops])))
@@ -744,7 +737,6 @@ async def test_throttling_one_account_does_not_lock_out_others(tmp_path) -> None
         admin_blocked = await client.get("/api/me", auth=admin)
         colleague = await client.get("/api/me", auth=ops)
     await app.state.database.close()
-    auth_basic._failures.clear()
 
     assert admin_blocked.status_code == 429
     assert colleague.status_code == 200  # same IP (shared proxy), different account

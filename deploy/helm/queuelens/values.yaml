@@ -3,10 +3,14 @@
 # Every QueueLens setting is an environment variable with the QUEUELENS_ prefix
 # (docs/CONFIGURATION.md lists them all). Non-secret ones go in `env`; secret ones in a
 # Secret, either one you manage (`existingSecret`) or one the chart creates (`secretEnv`).
-#
-# The chart always runs exactly one replica, so there is no replicaCount: browse snapshots,
-# per-queue operation locks and the login limiter live in the process, and a second
-# replica would race the first on the same queues (docs/OPERATIONS.md).
+
+# One on SQLite: the database is a file on this pod's volume. More need PostgreSQL
+# (QUEUELENS_DATABASE_URL) and persistence.enabled=false. PostgreSQL then holds the
+# per-queue locks, the login limiter and the choice of the one replica that evaluates
+# alerts. Browse snapshots stay on the replica that took them, so the Service pins each
+# client to one pod; an ingress controller needs its own sticky sessions
+# (docs/KUBERNETES.md#more-than-one-replica).
+replicaCount: 1
 
 image:
   repository: ghcr.io/talaatmagdyx/queuelens

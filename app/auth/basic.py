@@ -1,9 +1,9 @@
 """HTTP Basic auth with role resolution and failed-attempt rate limiting; in front of it,
 optionally, the user an authenticating proxy vouches for (app/auth/proxy.py)."""
 
-import time
-from collections import defaultdict, deque
+import hashlib
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from hmac import compare_digest
 
 from fastapi import Depends, HTTPException, Request, status
@@ -16,12 +16,11 @@ security = HTTPBasic(auto_error=False)
 
 # Sliding-window limiter for failed logins, keyed per (client IP, username) so one
 # bad client behind a shared proxy/NAT can't lock everyone else out, plus an
-# IP-wide ceiling against password spraying. In-memory — QueueLens runs
-# single-instance (see docs/OPERATIONS.md deployment constraints).
+# IP-wide ceiling against password spraying. Kept in the database
+# (LoginFailureRepository), so the limit holds however many replicas run.
 MAX_FAILURES = 10  # per (ip, username)
 MAX_IP_FAILURES = 50  # per ip, across usernames
 WINDOW_SECONDS = 60
-_failures: dict[str, deque[float]] = defaultdict(deque)
 
 
 @dataclass(frozen=True)
@@ -47,17 +46,20 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _keys(ip: str, username: str) -> tuple[tuple[str, int], ...]:
-    return ((f"{ip}\0{username}", MAX_FAILURES), (ip, MAX_IP_FAILURES))
+def _keys(ip: str, username: str) -> dict[str, int]:
+    """Limiter key -> its limit. Hashed: failed attempts' usernames are never stored."""
+    def digest(*parts: str) -> str:
+        return hashlib.sha256("\0".join(parts).encode()).hexdigest()
+
+    return {digest(ip, username): MAX_FAILURES, digest(ip): MAX_IP_FAILURES}
 
 
-def _check_rate_limit(ip: str, username: str) -> None:
-    now = time.monotonic()
-    for key, limit in _keys(ip, username):
-        window = _failures[key]
-        while window and now - window[0] > WINDOW_SECONDS:
-            window.popleft()
-        if len(window) >= limit:
+async def _check_rate_limit(request: Request, ip: str, username: str) -> None:
+    keys = _keys(ip, username)
+    since = datetime.now(UTC) - timedelta(seconds=WINDOW_SECONDS)
+    counts = await request.app.state.login_failures.counts(list(keys), since)
+    for key, limit in keys.items():
+        if counts.get(key, 0) >= limit:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Too many failed login attempts; try again in a minute",
@@ -65,9 +67,11 @@ def _check_rate_limit(ip: str, username: str) -> None:
             )
 
 
-def _record_failure(ip: str, username: str) -> None:
-    for key, _limit in _keys(ip, username):
-        _failures[key].append(time.monotonic())
+async def _record_failure(request: Request, ip: str, username: str) -> None:
+    now = datetime.now(UTC)
+    await request.app.state.login_failures.add(
+        list(_keys(ip, username)), now, now - timedelta(seconds=WINDOW_SECONDS)
+    )
 
 
 async def get_current_user(
@@ -90,7 +94,7 @@ async def _authenticate(
         if vouched is not None:
             return CurrentUser(username=vouched[0], role=vouched[1])
     ip = _client_ip(request)
-    _check_rate_limit(ip, credentials.username if credentials else "")
+    await _check_rate_limit(request, ip, credentials.username if credentials else "")
     if credentials is None:
         raise _unauthorized()
     matched = False
@@ -117,7 +121,7 @@ async def _authenticate(
             role=account.get("role", "Operator"),
             must_change_password=must_change,
         )
-    _record_failure(ip, credentials.username)
+    await _record_failure(request, ip, credentials.username)
     raise _unauthorized()
 
 

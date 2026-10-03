@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **More than one replica, on PostgreSQL.**
+  - **One queue at a time.** A per-queue advisory lock keeps two replicas from reading
+    or acting on one queue at once. Side by side, two scans each saw half the queue; with
+    the lock they take turns and each sees all of it.
+  - **One alert leader.** An advisory lock elects the replica that evaluates the alert
+    rules; another takes over within one interval if it dies.
+  - **A shared login limit.** Failures go in a table (hashed keys) and count on every
+    replica.
+  - **Settings sync.** Runtime environments and the audit-stream switch reach every
+    replica within 5 s, and a removed environment stops working everywhere.
+  - **The Helm chart** takes `replicaCount` with persistence off. It then rolls updates
+    one pod at a time and pins clients to a pod (`sessionAffinity: ClientIP`), because
+    browse snapshots stay on the replica that took them.
+
+### Fixed
+- **Replicas starting together on an empty PostgreSQL crashed** on concurrent
+  `CREATE TABLE` (`UniqueViolation`). Schema creation now takes an advisory lock, and
+  seeding runs one replica at a time.
+- **A password changed on one replica took up to a minute to stop working on another**
+  (the login cache). The cache now checks the stored password hash on every request.
+- **The bundled DLQ alerts fired once per replica, and action failures weren't added up
+  across replicas.** The rules take `max by (queue)` and `sum by (action)`.
+
 ## v0.14.0 — 2026-10-03
 
 ### Added

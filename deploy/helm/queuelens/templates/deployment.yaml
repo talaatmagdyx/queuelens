@@ -5,14 +5,23 @@ metadata:
   labels:
     {{- include "queuelens.labels" . | nindent 4 }}
 spec:
-  # Always one, deliberately not a value: browse snapshots, per-queue operation locks and
-  # the login limiter live in process memory (on SQLite and PostgreSQL alike). A second
-  # replica could act on a queue while the first does, and snapshot pages would 404 on it.
-  replicas: 1
-  # Recreate, not RollingUpdate: an update never runs two pods at once, which also lets a
-  # ReadWriteOnce volume move to the new pod.
+  {{- $replicas := int .Values.replicaCount }}
+  {{- if and (gt $replicas 1) .Values.persistence.enabled }}
+  {{- fail "replicaCount above 1 needs PostgreSQL (QUEUELENS_DATABASE_URL) and persistence.enabled=false: the SQLite file on the volume belongs to one pod (docs/KUBERNETES.md)" }}
+  {{- end }}
+  replicas: {{ $replicas }}
   strategy:
+    {{- if gt $replicas 1 }}
+    # PostgreSQL coordinates the replicas, so an update can replace them one at a time
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+    {{- else }}
+    # one pod: an update never runs two at once, which also lets a ReadWriteOnce volume
+    # move to the new pod
     type: Recreate
+    {{- end }}
   selector:
     matchLabels:
       {{- include "queuelens.selectorLabels" . | nindent 6 }}

@@ -45,7 +45,7 @@ tests:
       - eval_time: 16m
         alertname: DLQAboveThreshold
         exp_alerts:
-          - exp_labels: {severity: warning, job: queuelens, instance: "queuelens:8000", queue: orders.dlq}
+          - exp_labels: {severity: warning, queue: orders.dlq}
             exp_annotations:
               summary: DLQ orders.dlq holds more than 1000 messages
               description: orders.dlq has 1500 dead letters.
@@ -65,7 +65,7 @@ tests:
       - eval_time: 41m
         alertname: DLQGrowing
         exp_alerts:
-          - exp_labels: {severity: warning, job: queuelens, instance: "queuelens:8000", queue: orders.dlq}
+          - exp_labels: {severity: warning, queue: orders.dlq}
             exp_annotations:
               summary: DLQ orders.dlq is growing fast
               # delta() extrapolates to the whole window: 290 over 29m of samples reads 300
@@ -90,7 +90,7 @@ tests:
       - eval_time: 21m
         alertname: QueueLensActionFailures
         exp_alerts:
-          - exp_labels: {severity: warning, job: queuelens, instance: "queuelens:8000", action: replay, result: failed}
+          - exp_labels: {severity: warning, action: replay}
             exp_annotations:
               summary: QueueLens actions are failing
               # increase() extrapolates too: 14 over 14m of samples reads 15
@@ -98,3 +98,32 @@ tests:
       - eval_time: 36m
         alertname: QueueLensActionFailures
         exp_alerts: []
+
+  # Two replicas report the same DLQ: one alert, not one per pod. Their failed actions add
+  # up: 2 on each is 4 in all, which fires though neither pod alone passes 3.
+  - interval: 1m
+    input_series:
+      - series: 'queuelens_dlq_messages{job="queuelens", instance="10.0.0.1:8000", queue="orders.dlq"}'
+        values: '1500x20'
+      - series: 'queuelens_dlq_messages{job="queuelens", instance="10.0.0.2:8000", queue="orders.dlq"}'
+        values: '1500x20'
+      - series: 'queuelens_actions_total{job="queuelens", instance="10.0.0.1:8000", action="park", result="failed"}'
+        values: '0x5 2x15'
+      - series: 'queuelens_actions_total{job="queuelens", instance="10.0.0.2:8000", action="park", result="failed"}'
+        values: '0x5 2x15'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: DLQAboveThreshold
+        exp_alerts:
+          - exp_labels: {severity: warning, queue: orders.dlq}
+            exp_annotations:
+              summary: DLQ orders.dlq holds more than 1000 messages
+              description: orders.dlq has 1500 dead letters.
+      - eval_time: 6m
+        alertname: QueueLensActionFailures
+        exp_alerts:
+          - exp_labels: {severity: warning, action: park}
+            exp_annotations:
+              summary: QueueLens actions are failing
+              # increase() extrapolates: 2 + 2 over 5m of samples in a 15m window reads 4
+              description: 4 failed actions in the last 15 minutes — check the audit log.
