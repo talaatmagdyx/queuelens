@@ -115,7 +115,7 @@ deliberately lazy toward RabbitMQ:
 | Prometheus metrics + bundled rules | ✅ Stable |
 | PostgreSQL datastore | 🧪 Experimental |
 | Multiple replicas | 🗺️ Roadmap |
-| SSO behind an authenticating proxy | 🗺️ Roadmap |
+| SSO behind an authenticating proxy | 🧪 Experimental |
 
 ## Features
 
@@ -320,6 +320,7 @@ The short version (the full checklist lives in [docs/OPERATIONS.md](docs/OPERATI
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every environment variable, precedence rules, a complete worked `.env` example |
 | [docs/SAFETY.md](docs/SAFETY.md) | The safety model: every guarantee, its enforcement, the failure matrix |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | Deployment model & constraints, security posture, backups, troubleshooting |
+| [docs/SSO.md](docs/SSO.md) | SSO behind oauth2-proxy, Authelia or an SSO ingress: identity headers, group → role mapping, trusted proxies |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Local setup, test strategy, front-end pipeline, release checklist |
 
 ## Development

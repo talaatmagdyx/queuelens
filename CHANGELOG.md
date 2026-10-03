@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **SSO behind an authenticating proxy** (#2). Set `QUEUELENS_AUTH_PROXY_HEADER` and
+  oauth2-proxy, Authelia or an SSO ingress names the signed-in user. The audit log then
+  records real people, and roles come from local accounts, then from groups
+  (`QUEUELENS_AUTH_PROXY_ROLES_JSON`), then a default. The header counts only from
+  `QUEUELENS_TRUSTED_PROXIES`, and Basic Auth keeps working. See docs/SSO.md.
+
+### Changed
+- `X-Forwarded-For` / `-Proto` are applied by QueueLens from `QUEUELENS_TRUSTED_PROXIES`
+  (default `127.0.0.1,::1`, as before), and the image runs uvicorn with
+  `--no-proxy-headers`. If you set uvicorn's `FORWARDED_ALLOW_IPS`, move the value to
+  `QUEUELENS_TRUSTED_PROXIES` (`*` is no longer accepted).
+
 ## v0.13.0 — 2026-10-02
 
 ### Added

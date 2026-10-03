@@ -7,12 +7,14 @@ from aiormq.exceptions import ChannelNotFoundEntity
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.api.routes import actions, audit, bulk, health, messages, metrics, platform, queues
 from app.application.alert_engine import AlertEngine
 from app.application.environments import EnvironmentManager
 from app.application.queue_service import UnsafeToBrowse
 from app.application.snapshots import SnapshotStore
+from app.auth.proxy import KeepPeer
 from app.config import Settings, get_settings
 from app.infrastructure.persistence.audit_repository import REQUEST_CONTEXT, AuditRepository
 from app.infrastructure.persistence.database import Database
@@ -174,6 +176,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             (request.client.host if request.client else None, request.headers.get("user-agent"))
         )
         return await call_next(request)
+
+    # added last = outermost: KeepPeer sees the TCP peer, then X-Forwarded-For / -Proto
+    # apply from QUEUELENS_TRUSTED_PROXIES only (the image runs uvicorn --no-proxy-headers)
+    app.add_middleware(
+        ProxyHeadersMiddleware, trusted_hosts=app.state.settings.trusted_proxy_list
+    )
+    app.add_middleware(KeepPeer)
 
     from fastapi import Depends
     from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
