@@ -116,6 +116,8 @@ Ready-made alert rules (broker down, DLQ above threshold, DLQ growing, action fa
 ship in [`deploy/prometheus/alerts.yml`](../deploy/prometheus/alerts.yml); tune the
 thresholds to your traffic.
 
+Delivering them to Slack or a webhook through Alertmanager: [ALERTING.md](ALERTING.md).
+
 ## Database
 
 - **SQLite** (default, zero configuration): `sqlite+aiosqlite:///./data/queuelens.db`.

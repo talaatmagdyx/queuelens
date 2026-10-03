@@ -1,0 +1,100 @@
+# Unit tests for alerts.yml: `promtool test rules alerts.test.yml` (scripts/test_alerting.py
+# runs it in prom/prometheus:v3.15.0). One sample a minute, like a 30s-1m scrape.
+# Only firing alerts count: an alert still inside its `for:` is expected as [].
+
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # Down 4 minutes, back, then down for good: the blip never fires, the outage does at 5m.
+  - interval: 1m
+    input_series:
+      - series: 'queuelens_rabbitmq_ready{job="queuelens", instance="queuelens:8000"}'
+        values: '1 0x4 1x4 0x9 1x4'  # down 1-5m, up 6-10m, down 11-20m, up from 21m
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: QueueLensBrokerDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: QueueLensBrokerDown
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: QueueLensBrokerDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: queuelens, instance: "queuelens:8000"}
+            exp_annotations:
+              summary: QueueLens lost its RabbitMQ connection
+              description: queuelens_rabbitmq_ready has been 0 for 5 minutes.
+      - eval_time: 21m
+        alertname: QueueLensBrokerDown
+        exp_alerts: []
+
+  # Above 1000 for 15 minutes fires; exactly 1000 never does.
+  - interval: 1m
+    input_series:
+      - series: 'queuelens_dlq_messages{job="queuelens", instance="queuelens:8000", queue="orders.dlq"}'
+        values: '900 1500x20'  # above from 1m
+      - series: 'queuelens_dlq_messages{job="queuelens", instance="queuelens:8000", queue="billing.dlq"}'
+        values: '1000x21'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: DLQAboveThreshold
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: DLQAboveThreshold
+        exp_alerts:
+          - exp_labels: {severity: warning, job: queuelens, instance: "queuelens:8000", queue: orders.dlq}
+            exp_annotations:
+              summary: DLQ orders.dlq holds more than 1000 messages
+              description: orders.dlq has 1500 dead letters.
+
+  # 290 dead letters at once fires on the next evaluation (no `for:`) and clears once the
+  # jump leaves the 30m window; a steady 3/min (~90 per 30m) never fires.
+  - interval: 1m
+    input_series:
+      - series: 'queuelens_dlq_messages{job="queuelens", instance="queuelens:8000", queue="orders.dlq"}'
+        values: '40x40 330x40'  # jumps at 41m
+      - series: 'queuelens_dlq_messages{job="queuelens", instance="queuelens:8000", queue="billing.dlq"}'
+        values: '0+3x80'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: DLQGrowing
+        exp_alerts: []
+      - eval_time: 41m
+        alertname: DLQGrowing
+        exp_alerts:
+          - exp_labels: {severity: warning, job: queuelens, instance: "queuelens:8000", queue: orders.dlq}
+            exp_annotations:
+              summary: DLQ orders.dlq is growing fast
+              # delta() extrapolates to the whole window: 290 over 29m of samples reads 300
+              description: orders.dlq grew by 300 messages in 30 minutes.
+      - eval_time: 71m
+        alertname: DLQGrowing
+        exp_alerts: []
+
+  # 14 failed replays fire at once; 2 failed parks and any number of successes never do.
+  - interval: 1m
+    input_series:
+      - series: 'queuelens_actions_total{job="queuelens", instance="queuelens:8000", action="replay", result="failed"}'
+        values: '2x20 16x20'  # +14 at 21m
+      - series: 'queuelens_actions_total{job="queuelens", instance="queuelens:8000", action="park", result="failed"}'
+        values: '5x20 7x20'   # +2 at 21m
+      - series: 'queuelens_actions_total{job="queuelens", instance="queuelens:8000", action="replay", result="success"}'
+        values: '0+50x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: QueueLensActionFailures
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: QueueLensActionFailures
+        exp_alerts:
+          - exp_labels: {severity: warning, job: queuelens, instance: "queuelens:8000", action: replay, result: failed}
+            exp_annotations:
+              summary: QueueLens actions are failing
+              # increase() extrapolates too: 14 over 14m of samples reads 15
+              description: 15 failed actions in the last 15 minutes — check the audit log.
+      - eval_time: 36m
+        alertname: QueueLensActionFailures
+        exp_alerts: []

@@ -6,6 +6,12 @@ global:
 rule_files:
   - alerts.yml
 
+# Alertmanager delivers what the rules fire: deploy/alertmanager/, docs/ALERTING.md
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   - job_name: queuelens
     metrics_path: /metrics
