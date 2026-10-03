@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.14.0 — 2026-10-03
 
 ### Added
 - **SSO behind an authenticating proxy** (#2). Set `QUEUELENS_AUTH_PROXY_HEADER` and
@@ -29,6 +29,15 @@
 - The image's `queuelens` user is pinned to uid 999, which the Helm chart runs as.
 - Alert descriptions in `deploy/prometheus/alerts.yml` round their values: `increase()`
   and `delta()` extrapolate, which gave messages like "3.2142857142857144 failed actions".
+- `deploy/prometheus/prometheus.yml` sends its alerts to `alertmanager:9093`.
+
+### Upgrade notes
+- **If you set uvicorn's `FORWARDED_ALLOW_IPS`,** move the value to
+  `QUEUELENS_TRUSTED_PROXIES`, which takes IPs and CIDRs only.
+- **If you run uvicorn yourself and want SSO,** pass `--no-proxy-headers` as the image
+  does. Otherwise identity headers from a loopback proxy are ignored.
+- **SSO is off** until `QUEUELENS_AUTH_PROXY_HEADER` is set.
+- **If you copied `prometheus.yml` and run no Alertmanager,** drop its `alerting:` block.
 
 ## v0.13.0 — 2026-10-02
 
