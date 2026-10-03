@@ -10,9 +10,9 @@ QueueLens is designed as a **single-instance, internal-network operations tool**
   queue would lose its order), and snapshot pages would 404 when a request lands on the
   other replica. Bulk dry-run tokens and alert fired-state are kept in the database and
   are already safe to share; PostgreSQL alone doesn't lift this limit.
-- **TLS is mandatory and external.** Authentication is HTTP Basic — always
-  deploy behind a TLS-terminating reverse proxy (or a service mesh). Never
-  expose port 8000 directly to the internet.
+- **TLS is mandatory and external.** Authentication is HTTP Basic, or SSO through an
+  authenticating proxy ([docs/SSO.md](SSO.md)). Always deploy behind a TLS-terminating
+  reverse proxy (or a service mesh), and never expose port 8000 directly to the internet.
 - **Roles**: Viewer (read-only), Operator (replay/park/publish, alert rules,
   environment switching), Admin (delete, settings, users, environment
   management). Enforced server-side on every route.
@@ -65,14 +65,19 @@ Least privilege for the QueueLens AMQP user:
 
 ## Security posture
 
-**Run QueueLens inside a trusted private network.** Phase 1 has no payload masking — DLQ
-messages may contain tokens, emails, and customer data, and the UI shows them in full.
+**Run QueueLens inside a trusted private network.** Masking hides the configured JSON
+fields (`QUEUELENS_MASKED_FIELDS`), but DLQ messages may carry tokens, emails and customer
+data elsewhere, in text bodies for instance, and the UI shows those in full.
 
 - Change `QUEUELENS_ADMIN_PASSWORD` before anyone else can reach the instance.
 - Basic Auth sends credentials per request — terminate **TLS** in front (reverse proxy or
   ingress); the app itself serves plain HTTP.
-- One shared admin account is the Phase-1 model; the audit log records the username, so a
-  shared account also means a shared audit identity. RBAC is on the roadmap.
+- Give people their own identity: invite them (Users page), or put QueueLens behind your
+  SSO with an authenticating proxy ([docs/SSO.md](SSO.md)). A shared account means a
+  shared audit identity.
+- `X-Forwarded-For` / `-Proto` are believed only from `QUEUELENS_TRUSTED_PROXIES`
+  (default loopback). The image runs uvicorn with `--no-proxy-headers`, so uvicorn's
+  `FORWARDED_ALLOW_IPS` doesn't apply.
 - The app makes no outbound calls except to the configured broker and its Management API.
 
 ## Health probes

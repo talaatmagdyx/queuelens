@@ -1,4 +1,5 @@
-"""HTTP Basic auth with role resolution and failed-attempt rate limiting."""
+"""HTTP Basic auth with role resolution and failed-attempt rate limiting; in front of it,
+optionally, the user an authenticating proxy vouches for (app/auth/proxy.py)."""
 
 import time
 from collections import defaultdict, deque
@@ -8,6 +9,7 @@ from hmac import compare_digest
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
+from app.auth.proxy import proxy_user
 from app.infrastructure.persistence.audit_repository import ACTING_ROLE
 
 security = HTTPBasic(auto_error=False)
@@ -83,6 +85,10 @@ async def _authenticate(
     settings = request.app.state.settings
     if not settings.auth_enabled:
         return CurrentUser(username="local", role="Admin")
+    if settings.auth_proxy_header:
+        vouched = await proxy_user(request)
+        if vouched is not None:
+            return CurrentUser(username=vouched[0], role=vouched[1])
     ip = _client_ip(request)
     _check_rate_limit(ip, credentials.username if credentials else "")
     if credentials is None:

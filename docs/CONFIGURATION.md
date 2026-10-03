@@ -52,6 +52,11 @@ Practical consequences:
 |---|---|---|
 | `QUEUELENS_AUTH_ENABLED` | `true` | HTTP Basic Auth on every page and API route (except `/health`, `/ready`, `/login`). Set `false` only for local single-user use |
 | `QUEUELENS_ADMIN_USERNAME` | `admin` | Basic Auth username |
+| `QUEUELENS_AUTH_PROXY_HEADER` | *(empty: off)* | SSO: header in which an authenticating proxy names the user, e.g. `X-Forwarded-Email` ([docs/SSO.md](SSO.md)) |
+| `QUEUELENS_AUTH_PROXY_GROUPS_HEADER` | *(empty)* | SSO: header with the user's comma-separated groups |
+| `QUEUELENS_AUTH_PROXY_ROLES_JSON` | `{}` | SSO: group → role, e.g. `{"platform-admins": "Admin", "sre": "Operator"}` |
+| `QUEUELENS_AUTH_PROXY_DEFAULT_ROLE` | `Viewer` | SSO: role for users in no mapped group; empty refuses them |
+| `QUEUELENS_TRUSTED_PROXIES` | `127.0.0.1,::1` | IPs/CIDRs whose identity headers, `X-Forwarded-For` and `X-Forwarded-Proto` are believed |
 | `QUEUELENS_ADMIN_PASSWORD` | `change-me` | Basic Auth password — **change it** anywhere shared |
 
 ## RabbitMQ
