@@ -21,7 +21,7 @@ COPY --from=frontend /build/static ./app/web/static
 RUN pip install --no-cache-dir . \
     && python scripts/build_ds_bundle.py \
     && mkdir -p /app/data \
-    && useradd --system --no-create-home queuelens \
+    && useradd --system --uid 999 --no-create-home queuelens \
     && chown -R queuelens /app/data
 
 USER queuelens
