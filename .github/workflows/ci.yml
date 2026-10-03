@@ -224,3 +224,12 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  alerting:
+    # deploy/ examples (docs/ALERTING.md): promtool rule tests, amtool routing, and a real
+    # Alertmanager delivering to a local Slack/webhook sink — stdlib Python + Docker, < 1 min
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rules, routing and delivery
+        run: python3 scripts/test_alerting.py

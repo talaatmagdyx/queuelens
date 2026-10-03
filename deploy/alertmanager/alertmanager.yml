@@ -1,0 +1,36 @@
+# Example Alertmanager config for the QueueLens rules in ../prometheus/alerts.yml
+# (docs/ALERTING.md). Checked with prom/alertmanager:v0.34.1 by scripts/test_alerting.py.
+#
+# No secrets in here: both URLs are read from files mounted next to this config.
+#   /etc/alertmanager/slack-webhook-url  your Slack incoming-webhook URL
+#   /etc/alertmanager/webhook-url        any endpoint that accepts Alertmanager's JSON
+#
+# critical -> webhook and Slack; warning (and anything without a severity) -> Slack.
+
+route:
+  receiver: slack
+  group_by: [alertname, queue]  # one thread per rule and DLQ
+  group_wait: 30s               # collect what fires together into the first message
+  group_interval: 5m            # at most one update per group every 5 minutes
+  repeat_interval: 4h           # remind while it is still firing
+  routes:
+    - matchers: ['severity="critical"']
+      receiver: webhook
+      continue: true            # ... and on to Slack below
+    - receiver: slack
+
+receivers:
+  - name: slack
+    slack_configs:
+      - api_url_file: /etc/alertmanager/slack-webhook-url
+        send_resolved: true
+        color: '{{ if eq .Status "resolved" }}good{{ else if eq .CommonLabels.severity "critical" }}danger{{ else }}warning{{ end }}'
+        title: '[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ with .CommonAnnotations.summary }}{{ . }}{{ else }}{{ .CommonLabels.alertname }}{{ end }}'
+        text: |-
+          {{ range .Alerts }}{{ if eq .Status "resolved" }}Resolved: {{ end }}{{ .Annotations.description }}
+          {{ end }}
+
+  - name: webhook
+    webhook_configs:
+      - url_file: /etc/alertmanager/webhook-url
+        send_resolved: true
