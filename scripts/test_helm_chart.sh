@@ -163,6 +163,8 @@ kind_cleanup() {
     kubectl get pods -A -o wide || true
     kubectl -n "$NS" describe pods || true
     kubectl -n "$NS" logs -l "$SELECTOR" --tail=100 || true
+    kubectl -n "$NS" logs deploy/rabbitmq --tail=60 || true
+    kubectl -n "$NS" logs deploy/rabbitmq --previous --tail=60 || true
   fi
   say "deleting kind cluster $CLUSTER"
   kind delete cluster --name "$CLUSTER" --kubeconfig "$KUBECONFIG" || true
@@ -216,11 +218,12 @@ spec:
           ports:
             - {name: amqp, containerPort: 5672}
             - {name: management, containerPort: 15672}
+          # a TCP check, not rabbitmq-diagnostics: the CLI runs as root, and when it beats
+          # the broker to /var/lib/rabbitmq/.erlang.cookie it creates the cookie root-owned
+          # and the broker exits on eacces (seen in CI as a CrashLoopBackOff)
           readinessProbe:
-            exec:
-              command: [rabbitmq-diagnostics, -q, check_port_connectivity]
+            tcpSocket: {port: amqp}
             periodSeconds: 5
-            timeoutSeconds: 10
 ---
 apiVersion: v1
 kind: Service
