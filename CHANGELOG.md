@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.15.0 — 2026-10-03
 
 ### Added
 - **More than one replica, on PostgreSQL.**
@@ -25,6 +25,14 @@
   (the login cache). The cache now checks the stored password hash on every request.
 - **The bundled DLQ alerts fired once per replica, and action failures weren't added up
   across replicas.** The rules take `max by (queue)` and `sum by (action)`.
+
+### Upgrade notes
+- **No breaking changes** for one replica, on SQLite or PostgreSQL. The login limiter
+  uses a new `login_failures` table, created at startup.
+- **More than one replica** needs PostgreSQL, `replicaCount` with
+  `persistence.enabled: false`, and sticky sessions at the ingress.
+- **If you copied the bundled alert rules,** take the new expressions. Their alerts lose
+  the `instance` and `job` labels (and `result` for action failures).
 
 ## v0.14.0 — 2026-10-03
 

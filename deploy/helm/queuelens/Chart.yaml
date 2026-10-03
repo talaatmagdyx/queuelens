@@ -2,8 +2,8 @@ apiVersion: v2
 name: queuelens
 description: RabbitMQ dead-letter queue console — browse, replay, park and delete dead-lettered messages safely
 type: application
-version: 0.1.0
-appVersion: "0.14.0"
+version: 0.2.0
+appVersion: "0.15.0"
 kubeVersion: ">=1.25.0-0"
 home: https://github.com/talaatmagdyx/queuelens
 sources:
