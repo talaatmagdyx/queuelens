@@ -62,8 +62,10 @@ deliveries are browsable at all. A quorum queue also stamps `x-delivery-count` o
 redelivery; that header is left out of fingerprints, so a message keeps its identity
 across looks.
 
-Scans of one queue are serialized in-process (`QueueLocks`): a scan holds messages unacked
-until it requeues them, so two at once would each see part of the queue.
+Scans of one queue are serialized (`QueueLocks`): a scan holds messages unacked until it
+requeues them, so two at once would each see part of the queue. On PostgreSQL the lock is
+a transaction-level advisory lock that spans every replica. It's keyed by broker, vhost
+and queue, and it ends with its transaction, so no failure path can leave one held.
 
 *Deep browsing works from a snapshot.*
 - One scan down to the browse depth (default 5000), or until it has read 64 MiB of bodies,

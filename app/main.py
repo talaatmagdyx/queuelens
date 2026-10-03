@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -17,10 +18,12 @@ from app.application.snapshots import SnapshotStore
 from app.auth.proxy import KeepPeer
 from app.config import Settings, get_settings
 from app.infrastructure.persistence.audit_repository import REQUEST_CONTEXT, AuditRepository
+from app.infrastructure.persistence.coordination import Coordinator
 from app.infrastructure.persistence.database import Database
 from app.infrastructure.persistence.store import (
     AlertRuleRepository,
     BulkBatchRepository,
+    LoginFailureRepository,
     NotificationRepository,
     SettingsRepository,
     UserRepository,
@@ -30,6 +33,8 @@ from app.infrastructure.rabbitmq.management_client import (
     RabbitMQManagementError,
 )
 from app.web import routes as web
+
+logger = logging.getLogger(__name__)
 
 
 def _error_response(request: Request, status_code: int, detail: str) -> Response:
@@ -87,6 +92,39 @@ async def _retention_loop(app: FastAPI) -> None:
         await asyncio.sleep(3600)
 
 
+async def _init_database(app: FastAPI) -> None:
+    """Tables, then the seeded accounts and channels. Replicas starting together on an
+    empty PostgreSQL take turns: the schema under its own lock, the seeding under this one."""
+    await app.state.database.start()
+    async with app.state.coordinator.lock("startup"):
+        await _seed_defaults(app)
+
+
+SYNC_SECONDS = 5.0
+
+
+async def _sync_settings(app: FastAPI) -> None:
+    """Settings this replica keeps in memory, as another replica may have changed them:
+    runtime environments (a removed one stops working everywhere) and the audit stream."""
+    store = app.state.settings_store
+    await app.state.environment_manager.sync_custom(
+        await store.get("custom_environments", {}) or {}
+    )
+    stored_ui = await store.get("ui", {}) or {}
+    app.state.audit_repository.stream_to_log = bool(stored_ui.get("syslog"))
+
+
+async def _sync_loop(app: FastAPI) -> None:
+    import asyncio
+
+    while True:
+        await asyncio.sleep(SYNC_SECONDS)
+        try:
+            await _sync_settings(app)
+        except Exception:  # noqa: BLE001 - a database hiccup must not stop the loop
+            logger.warning("settings sync failed", exc_info=True)
+
+
 async def _seed_defaults(app: FastAPI) -> None:
     settings = app.state.settings
     await app.state.users.seed_env_users(settings.users, settings.admin_username)
@@ -109,26 +147,26 @@ async def _seed_defaults(app: FastAPI) -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     import asyncio
 
-    retention_task: asyncio.Task[None] | None = None  # so a failed startup reports its real cause
+    # None until started, so a failed startup reports its real cause
+    retention_task: asyncio.Task[None] | None = None
+    sync_task: asyncio.Task[None] | None = None
     try:
-        await app.state.database.start()
-        await _seed_defaults(app)
-        app.state.environment_manager.apply_custom(
-            await app.state.settings_store.get("custom_environments", {}) or {}
-        )
-        stored_ui = await app.state.settings_store.get("ui", {}) or {}
-        app.state.audit_repository.stream_to_log = bool(stored_ui.get("syslog"))
+        await _init_database(app)
+        await _sync_settings(app)
         await app.state.environment_manager.start_default()
         app.state.alert_engine.start()
         retention_task = asyncio.get_running_loop().create_task(_retention_loop(app))
+        sync_task = asyncio.get_running_loop().create_task(_sync_loop(app))
         app.state.ready = True
         yield
     finally:
         app.state.ready = False
-        if retention_task is not None:
-            retention_task.cancel()
+        for task in (retention_task, sync_task):
+            if task is not None:
+                task.cancel()
         await app.state.alert_engine.stop()
         await app.state.environment_manager.stop_all()
+        await app.state.coordinator.close()
         await app.state.database.close()
 
 
@@ -150,9 +188,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.alert_rules = AlertRuleRepository(database)
     app.state.notifications = NotificationRepository(database)
     app.state.users = UserRepository(database)
+    app.state.login_failures = LoginFailureRepository(database)
+    app.state.coordinator = Coordinator(database)
     app.state.bulk_batches = BulkBatchRepository(database)
     app.state.snapshots = SnapshotStore()
-    manager = EnvironmentManager(app.state, app.state.settings, app.state.bulk_batches)
+    manager = EnvironmentManager(
+        app.state, app.state.settings, app.state.bulk_batches, app.state.coordinator
+    )
     app.state.environment_manager = manager
     manager.attach_default()  # services exist pre-lifespan so tests can override them
     app.state.alert_engine = AlertEngine(
@@ -161,6 +203,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings_store=app.state.settings_store,
         get_queue_service=lambda: app.state.queue_service,
         interval_seconds=app.state.settings.alert_interval_seconds,
+        is_leader=app.state.coordinator.is_leader,
     )
     # base.html renders the environment badge and sidebar identity on every page
     web.templates.env.globals["app_environment"] = app.state.settings.environment

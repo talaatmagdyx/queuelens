@@ -1,8 +1,8 @@
-import asyncio
 import base64
 import dataclasses
 import json
 import zlib
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -12,19 +12,23 @@ from app.domain.errors import UnsafeToBrowse
 from app.domain.fingerprint import message_fingerprint
 from app.domain.models import MessageRecord
 from app.domain.xdeath import parse_x_death
+from app.infrastructure.persistence.coordination import Coordinator
 from app.infrastructure.rabbitmq.connection import RabbitMQConnection
 
 
 class QueueLocks:
     """One lock per queue. A scan holds messages unacked until it requeues them, so two
     concurrent scans each see part of the queue (and an action can miss its target).
-    ponytail: per process — fine for the documented single-replica deployment."""
+    Keyed by the broker (its Management URL) and vhost as well, so environments that
+    name one broker twice share it; on PostgreSQL the lock spans every replica."""
 
-    def __init__(self) -> None:
-        self._locks: dict[str, asyncio.Lock] = {}
+    def __init__(self, coordinator: Coordinator | None = None, broker: str = "",
+                 vhost: str = "/") -> None:
+        self._coordinator = coordinator or Coordinator()
+        self._scope = (broker, vhost)
 
-    def __call__(self, queue: str) -> asyncio.Lock:
-        return self._locks.setdefault(queue, asyncio.Lock())
+    def __call__(self, queue: str) -> AbstractAsyncContextManager[None]:
+        return self._coordinator.lock("queue", *self._scope, queue)
 
 
 # Bodies one scan may hold (every message read stays unacked until the scan requeues it).

@@ -90,3 +90,13 @@ class BulkBatchModel(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class LoginFailureModel(Base):
+    """Failed logins in the last minute, for the limiter every replica shares."""
+
+    __tablename__ = "login_failures"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(64), index=True)  # sha256 of (ip, user) or ip
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

@@ -7,12 +7,13 @@ import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import delete, desc, select, update
+from sqlalchemy import delete, desc, func, select, update
 
 from app.infrastructure.persistence.database import Database
 from app.infrastructure.persistence.models import (
     AlertRuleModel,
     AppSettingModel,
+    LoginFailureModel,
     NotificationModel,
     UserModel,
 )
@@ -251,16 +252,41 @@ _TIMING_DECOY = hash_password(secrets.token_hex(16))
 
 # A successful Basic-auth check is remembered briefly: every request carries the
 # password, and PBKDF2 (~30 ms) on each one adds up. Only successes are cached, keyed
-# by an HMAC under a random per-process key (never the password, never a plain hash),
-# and dropped on password change.
-# ponytail: in-process cache — per replica, fine for the documented single instance.
+# by an HMAC under a random per-process key (never the password, never a plain hash).
+# Each request still reads the user's row, and a hit counts only while the stored hash
+# is the one it was verified against: a password changed or an account deactivated on
+# any replica takes effect at once on all of them.
 VERIFIED_FOR_SECONDS = 60.0
+
+
+class LoginFailureRepository:
+    """Failed logins, in the database so the limit holds however many replicas run."""
+
+    def __init__(self, database: Database) -> None:
+        self._database = database
+
+    async def counts(self, keys: list[str], since: datetime) -> dict[str, int]:
+        async with self._database.session() as session:
+            rows = await session.execute(
+                select(LoginFailureModel.key, func.count())
+                .where(LoginFailureModel.key.in_(keys), LoginFailureModel.at > since)
+                .group_by(LoginFailureModel.key)
+            )
+            return {key: int(count) for key, count in rows.all()}
+
+    async def add(self, keys: list[str], at: datetime, forget_before: datetime) -> None:
+        async with self._database.session() as session:
+            session.add_all(LoginFailureModel(key=key, at=at) for key in keys)
+            await session.execute(
+                delete(LoginFailureModel).where(LoginFailureModel.at < forget_before)
+            )
+            await session.commit()
 
 
 class UserRepository:
     def __init__(self, database: Database) -> None:
         self._database = database
-        self._verified: dict[tuple[str, bytes], float] = {}
+        self._verified: dict[tuple[str, bytes], tuple[str, float]] = {}
         self._cache_key = secrets.token_bytes(32)
 
     def _key(self, username: str, password: str) -> tuple[str, bytes]:
@@ -336,22 +362,21 @@ class UserRepository:
             row.password_hash = hash_password(new)
             row.must_change_password = False
             await session.commit()
-        for key in [k for k in self._verified if k[0] == username]:
-            del self._verified[key]  # the old password stops working now, not in 60s
         return True
 
     async def verify(self, username: str, password: str) -> bool:
-        key = self._key(username, password)
-        if self._verified.get(key, 0.0) > time.monotonic():
-            return True
         async with self._database.session() as session:
             row = await session.get(UserModel, username)
-            if row is None or not row.active:
-                verify_password(password, _TIMING_DECOY)
-                return False
-            ok = verify_password(password, row.password_hash)
+        if row is None or not row.active:
+            verify_password(password, _TIMING_DECOY)
+            return False
+        key = self._key(username, password)
+        verified_hash, until = self._verified.get(key, ("", 0.0))
+        if verified_hash == row.password_hash and until > time.monotonic():
+            return True
+        ok = verify_password(password, row.password_hash)
         if ok:
-            self._verified[key] = time.monotonic() + VERIFIED_FOR_SECONDS
+            self._verified[key] = (row.password_hash, time.monotonic() + VERIFIED_FOR_SECONDS)
         return ok
 
 

@@ -72,6 +72,7 @@ render() {
   render_case postgres -f "$CHART/ci/postgres-values.yaml"
   render_case ingress-servicemonitor -f "$CHART/ci/ingress-servicemonitor-values.yaml"
   render_case sidecar -f "$CHART/ci/sidecar-values.yaml"
+  render_case replicas -f "$CHART/ci/replicas-values.yaml"
 
   say "rendered manifests"
   for name in defaults existing-secret postgres ingress-servicemonitor sidecar; do
@@ -102,6 +103,12 @@ render() {
   has sidecar 'name: oauth2-proxy'
   has sidecar 'mountPath: /etc/ssl/internal'
   has sidecar 'name: QUEUELENS_USERS_JSON'
+  lacks sidecar 'sessionAffinity'
+  has replicas '^  replicas: 3$'
+  has replicas 'type: RollingUpdate'
+  has replicas 'maxUnavailable: 0'
+  has replicas 'sessionAffinity: ClientIP'
+  lacks replicas '^kind: PersistentVolumeClaim$'
   ok "one replica, Recreate, non-root, read-only root, /ready probe; each case renders what it should"
 
   say "refused value sets"
@@ -115,6 +122,8 @@ render() {
     --set existingSecret=queuelens-credentials --set-string "env.QUEUELENS_ADMIN_PASSWORD=$(gen)"
   refuses "a ServiceMonitor without scrape credentials" "serviceMonitor.basicAuth.secretName is required" \
     --set existingSecret=queuelens-credentials --set serviceMonitor.enabled=true
+  refuses "several replicas on one SQLite volume" "replicaCount above 1 needs PostgreSQL" \
+    --set existingSecret=queuelens-credentials --set replicaCount=2
 
   for version in $KUBE_VERSIONS; do
     say "kubeconform, Kubernetes $version"

@@ -116,7 +116,7 @@ deliberately lazy toward RabbitMQ:
 | Alertmanager example (Slack / webhook), tested in CI | ✅ Stable |
 | Helm chart | 🧪 Experimental |
 | PostgreSQL datastore | 🧪 Experimental |
-| Multiple replicas | 🗺️ Roadmap |
+| Multiple replicas (PostgreSQL, sticky sessions) | 🧪 Experimental |
 | SSO behind an authenticating proxy | 🧪 Experimental |
 
 ## Features
@@ -310,7 +310,7 @@ The short version (the full checklist lives in [docs/OPERATIONS.md](docs/OPERATI
 - [ ] Run behind a VPN or authenticating reverse proxy with TLS — never expose it publicly
 - [ ] Use a least-privilege broker user (read DLQs, write replay targets, configure only `*.parking`)
 - [ ] Persist `/app/data` on a volume and back it up if audit history matters
-- [ ] **Run a single replica** (also on PostgreSQL) — per-queue locks, browse snapshots and broker connections are single-process by design
+- [ ] **One replica on SQLite**; more need PostgreSQL and sticky sessions ([why](docs/OPERATIONS.md#deployment-model--constraints-read-this-first))
 - [ ] Scrape `/metrics` and load the bundled Prometheus alert rules
 
 ## Documentation
@@ -324,7 +324,7 @@ The short version (the full checklist lives in [docs/OPERATIONS.md](docs/OPERATI
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | Deployment model & constraints, security posture, backups, troubleshooting |
 | [docs/SSO.md](docs/SSO.md) | SSO behind oauth2-proxy, Authelia or an SSO ingress: identity headers, group → role mapping, trusted proxies |
 | [docs/ALERTING.md](docs/ALERTING.md) | Prometheus rules → Alertmanager → Slack / webhook: wiring, secret files, tests, tuning, in-app alerts vs Alertmanager |
-| [docs/KUBERNETES.md](docs/KUBERNETES.md) | Helm chart: install, required secrets, PostgreSQL, ingress/TLS, ServiceMonitor, sidecar proxy, why one replica, upgrades |
+| [docs/KUBERNETES.md](docs/KUBERNETES.md) | Helm chart: install, required secrets, PostgreSQL, ingress/TLS, ServiceMonitor, sidecar proxy, more than one replica, upgrades |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Local setup, test strategy, front-end pipeline, release checklist |
 
 ## Development
@@ -342,9 +342,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) to get started; good first issues are lab
 
 ## Honest limitations
 
-- Single replica by design: per-queue locks and browse snapshots live in the process, so
-  this holds on PostgreSQL too (which brings central storage and `pg_dump` backups, not
-  more replicas). Environments are already chosen per request (per tab).
+- One replica on SQLite. On PostgreSQL several can run, but browse snapshots stay on the
+  replica that took them, so they need sticky sessions; without them paging rescans.
 - Filter-based bulk operations act on the scan window (up to `QUEUELENS_MAX_BULK_SIZE` from
   the head of the queue). Messages picked from a snapshot can be reached down to the browse
   depth (default 5000)

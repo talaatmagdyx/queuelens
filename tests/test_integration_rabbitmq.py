@@ -611,3 +611,49 @@ async def test_demo_seed_dead_letters_for_real(tmp_path) -> None:
                 with contextlib.suppress(Exception):
                     await cleanup.exchange_delete(prefix + exchange)
         await connection.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not os.environ.get("QUEUELENS_TEST_POSTGRES_URL"),
+                    reason="needs a throwaway PostgreSQL (QUEUELENS_TEST_POSTGRES_URL)")
+async def test_two_replicas_take_turns_scanning_one_queue(tmp_path) -> None:
+    """Two replicas on one PostgreSQL scan the same queue at the same moment. A scan holds
+    what it reads unacked, so side by side each would see only what the other isn't
+    holding; the cross-replica lock makes them take turns, and both see all of it."""
+    import asyncio
+
+    from app.infrastructure.persistence.database import Database
+    from app.infrastructure.persistence.models import Base
+
+    postgres = os.environ["QUEUELENS_TEST_POSTGRES_URL"]
+    database = Database(postgres)
+    async with database.engine.begin() as connection:
+        await connection.run_sync(Base.metadata.drop_all)
+    await database.close()
+
+    queue = f"it.replicas.{uuid.uuid4().hex[:8]}"
+    auth = (_amqp.username or "guest", _amqp.password or "guest")
+    connection = await aio_pika.connect_robust(AMQP_URL)
+    try:
+        async with connection.channel() as channel:
+            await channel.declare_queue(queue, durable=True)
+            for i in range(300):
+                await channel.default_exchange.publish(
+                    aio_pika.Message(f'{{"n": {i}}}'.encode(), message_id=f"m{i}"), queue)
+        settings = _settings(tmp_path).model_copy(update={"database_url": postgres})
+        apps = [create_app(settings), create_app(settings)]
+        async with apps[0].router.lifespan_context(apps[0]), \
+                apps[1].router.lifespan_context(apps[1]):
+            clients = [httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                         base_url="http://test", timeout=60) for app in apps]
+            scans = await asyncio.gather(*(
+                client.get(f"/api/queues/{queue}/messages", params={"snapshot": "new"})
+                for client in clients))
+            for client in clients:
+                await client.aclose()
+        assert [scan.status_code for scan in scans] == [200, 200]
+        assert [scan.json()["snapshot"]["scanned"] for scan in scans] == [300, 300]
+    finally:
+        await connection.close()
+        async with httpx.AsyncClient(base_url=MANAGEMENT_URL, auth=auth, timeout=10) as mgmt:
+            await mgmt.delete(f"/api/queues/%2F/{queue}")
