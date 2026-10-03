@@ -23,6 +23,12 @@ their role can come from their groups.
 3. **Basic Auth keeps working.** The admin account stays a break-glass login, and scripts
    and Prometheus (`/metrics`) can reach QueueLens directly.
 
+**Locking someone out.** Remove them in your identity provider, or deactivate their local
+account on the Users page (`PATCH /api/users/{name}` with `{"active": false}`): an
+inactive account is refused through the proxy too. An SSO user with no local account can
+be blocked by inviting that name and deactivating it. Deleting a local account doesn't
+lock anyone out; they get their group's role again.
+
 Local accounts and SSO names share one namespace. If your identity provider can issue the
 name `admin`, either rename the local admin (`QUEUELENS_ADMIN_USERNAME`) or use the email
 header.

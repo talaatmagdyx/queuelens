@@ -295,6 +295,72 @@ async def invite_user(
     }
 
 
+class UserChange(BaseModel):
+    role: Literal["Admin", "Operator", "Viewer"] | None = None
+    active: bool | None = None
+
+
+def _changeable(request: Request, admin: CurrentUser, username: str) -> None:
+    if username == admin.username:
+        # an Admin can't lock themselves out, or take away the rights that undo it
+        raise HTTPException(status_code=400, detail="You can't change or remove your own account")
+    if username in request.app.state.settings.users:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{username} is set by environment variables (QUEUELENS_ADMIN_USERNAME / "
+            "QUEUELENS_USERS_JSON): change it there",
+        )
+
+
+async def _audit_user_change(
+    request: Request, admin: CurrentUser, action: str, metadata: dict[str, Any]
+) -> None:
+    from datetime import UTC, datetime
+
+    from app.domain.models import AuditEntry
+
+    await request.app.state.audit_repository.record(AuditEntry(
+        username=admin.username, action=action, timestamp=datetime.now(UTC),
+        result="success", metadata=metadata,
+    ))
+
+
+@router.patch("/users/{username}")
+async def update_user(
+    request: Request,
+    username: str,
+    body: UserChange,
+    admin: CurrentUser = Depends(require_admin),
+) -> dict[str, Any]:
+    """Change an account's role, or deactivate / reactivate it. Takes effect on its next
+    request, on every replica. A deactivated account is refused through SSO as well."""
+    _changeable(request, admin, username)
+    changes = body.model_dump(exclude_none=True)
+    if not changes:
+        raise HTTPException(status_code=400, detail="Nothing to change: send role and/or active")
+    if not await request.app.state.users.update(username, **changes):
+        raise HTTPException(status_code=404, detail=f"No local account named {username}")
+    # `role` on every audit row is the acting Admin's, so the new one is `new_role`
+    audit = {"user": username, **{"new_role" if k == "role" else k: v for k, v in changes.items()}}
+    await _audit_user_change(request, admin, "update_user", audit)
+    return {"username": username, **changes}
+
+
+@router.delete("/users/{username}")
+async def delete_user(
+    request: Request,
+    username: str,
+    admin: CurrentUser = Depends(require_admin),
+) -> dict[str, Any]:
+    """Remove a local account. Someone signing in through SSO still gets their group's
+    role afterwards: deactivate them instead to keep them out."""
+    _changeable(request, admin, username)
+    if not await request.app.state.users.delete(username):
+        raise HTTPException(status_code=404, detail=f"No local account named {username}")
+    await _audit_user_change(request, admin, "delete_user", {"user": username})
+    return {"deleted": username}
+
+
 class PasswordChange(BaseModel):
     current_password: str = Field(min_length=1, max_length=255)
     new_password: str = Field(min_length=10, max_length=255)

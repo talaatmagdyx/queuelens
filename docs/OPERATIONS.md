@@ -83,6 +83,9 @@ data elsewhere, in text bodies for instance, and the UI shows those in full.
 - Give people their own identity: invite them (Users page), or put QueueLens behind your
   SSO with an authenticating proxy ([docs/SSO.md](SSO.md)). A shared account means a
   shared audit identity.
+- When someone leaves, deactivate or remove their account on the Users page. It takes
+  effect on their next request, on every replica. Accounts set by environment variables
+  are removed there.
 - `X-Forwarded-For` / `-Proto` are believed only from `QUEUELENS_TRUSTED_PROXIES`
   (default loopback). The image runs uvicorn with `--no-proxy-headers`, so uvicorn's
   `FORWARDED_ALLOW_IPS` doesn't apply.

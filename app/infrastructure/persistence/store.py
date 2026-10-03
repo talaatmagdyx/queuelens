@@ -354,6 +354,30 @@ class UserRepository:
             await session.commit()
             return True
 
+    async def update(
+        self, username: str, *, role: str | None = None, active: bool | None = None
+    ) -> bool:
+        """An Admin's change; every replica sees it on the account's next request."""
+        async with self._database.session() as session:
+            row = await session.get(UserModel, username)
+            if row is None:
+                return False
+            if role is not None:
+                row.role = role
+            if active is not None:
+                row.active = active
+            await session.commit()
+            return True
+
+    async def delete(self, username: str) -> bool:
+        async with self._database.session() as session:
+            row = await session.get(UserModel, username)
+            if row is None:
+                return False
+            await session.delete(row)
+            await session.commit()
+            return True
+
     async def change_password(self, username: str, current: str, new: str) -> bool:
         async with self._database.session() as session:
             row = await session.get(UserModel, username)

@@ -59,6 +59,9 @@ async def users(
                         "email": u["email"],
                         "invited_by": u["invited_by"],
                         "active": u["active"],
+                        "must_change_password": u["must_change_password"],
+                        # env-var accounts are changed there, not through the API
+                        "managed": "env" if u["username"] in settings.users else "local",
                     }
                     for u in stored
                 ]
