@@ -233,3 +233,21 @@ jobs:
       - uses: actions/checkout@v7
       - name: Rules, routing and delivery
         run: python3 scripts/test_alerting.py
+
+  helm:
+    # deploy/helm/queuelens: lint, render the ci/ value sets, refuse bad ones, validate with
+    # kubeconform, then install it next to a throwaway RabbitMQ in a kind cluster
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.0.4
+      - uses: helm/kind-action@v1
+        with:
+          version: v0.31.0
+          install_only: true  # the script creates (and deletes) its own cluster
+      - name: Lint, render, validate
+        run: scripts/test_helm_chart.sh render
+      - name: Install in kind
+        run: scripts/test_helm_chart.sh kind

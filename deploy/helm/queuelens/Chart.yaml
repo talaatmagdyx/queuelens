@@ -1,0 +1,17 @@
+apiVersion: v2
+name: queuelens
+description: RabbitMQ dead-letter queue console — browse, replay, park and delete dead-lettered messages safely
+type: application
+version: 0.1.0
+appVersion: "0.13.0"
+kubeVersion: ">=1.25.0-0"
+home: https://github.com/talaatmagdyx/queuelens
+sources:
+  - https://github.com/talaatmagdyx/queuelens
+keywords:
+  - rabbitmq
+  - dead-letter-queue
+  - dlq
+maintainers:
+  - name: talaatmagdyx
+    url: https://github.com/talaatmagdyx

@@ -52,7 +52,7 @@ app image and point `QUEUELENS_RABBITMQ_URL` / `QUEUELENS_RABBITMQ_MANAGEMENT_UR
 see [CONFIGURATION.md](CONFIGURATION.md).
 
 The image is plain `uvicorn app.main:app --host 0.0.0.0 --port 8000`; any container platform
-works. Kubernetes manifests are intentionally not shipped in Phase 1.
+works. On Kubernetes, use the Helm chart in `deploy/helm/queuelens`: [KUBERNETES.md](KUBERNETES.md).
 
 ### Broker permissions
 

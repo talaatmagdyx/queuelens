@@ -8,12 +8,27 @@
   records real people, and roles come from local accounts, then from groups
   (`QUEUELENS_AUTH_PROXY_ROLES_JSON`), then a default. The header counts only from
   `QUEUELENS_TRUSTED_PROXIES`, and Basic Auth keeps working. See docs/SSO.md.
+- **Helm chart** (#5): `deploy/helm/queuelens` runs QueueLens on Kubernetes. It runs one
+  replica (`Recreate`), keeps `/app/data` on a PVC, and puts readiness on `/ready`; an
+  Ingress and a ServiceMonitor are optional. Credentials come from an existing or a
+  chart-created Secret with no defaults, so an install without them fails. Hooks let a
+  sidecar such as oauth2-proxy sit in front. CI lints the chart, validates it with
+  kubeconform and installs it in kind. See docs/KUBERNETES.md.
+- **Alertmanager example for the bundled rules** (#6). `deploy/alertmanager/alertmanager.yml`
+  sends critical alerts to a webhook and Slack, and warnings to Slack: one message per
+  rule and DLQ, resolved ones included. Both URLs are read from files, and
+  `deploy/prometheus/prometheus.yml` now points at it. `scripts/test_alerting.py` (CI job
+  `alerting`) tests the rules with promtool, the routing with amtool, and delivery
+  through a real Alertmanager. See docs/ALERTING.md.
 
 ### Changed
 - `X-Forwarded-For` / `-Proto` are applied by QueueLens from `QUEUELENS_TRUSTED_PROXIES`
   (default `127.0.0.1,::1`, as before), and the image runs uvicorn with
   `--no-proxy-headers`. If you set uvicorn's `FORWARDED_ALLOW_IPS`, move the value to
   `QUEUELENS_TRUSTED_PROXIES` (`*` is no longer accepted).
+- The image's `queuelens` user is pinned to uid 999, which the Helm chart runs as.
+- Alert descriptions in `deploy/prometheus/alerts.yml` round their values: `increase()`
+  and `delta()` extrapolate, which gave messages like "3.2142857142857144 failed actions".
 
 ## v0.13.0 — 2026-10-02
 

@@ -113,6 +113,8 @@ deliberately lazy toward RabbitMQ:
 | Alerts — in-app notifications | ✅ Stable |
 | Alerts — external delivery (email / Slack / PagerDuty / webhook) | 🧪 Experimental |
 | Prometheus metrics + bundled rules | ✅ Stable |
+| Alertmanager example (Slack / webhook), tested in CI | ✅ Stable |
+| Helm chart | 🧪 Experimental |
 | PostgreSQL datastore | 🧪 Experimental |
 | Multiple replicas | 🗺️ Roadmap |
 | SSO behind an authenticating proxy | 🧪 Experimental |
@@ -321,6 +323,8 @@ The short version (the full checklist lives in [docs/OPERATIONS.md](docs/OPERATI
 | [docs/SAFETY.md](docs/SAFETY.md) | The safety model: every guarantee, its enforcement, the failure matrix |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | Deployment model & constraints, security posture, backups, troubleshooting |
 | [docs/SSO.md](docs/SSO.md) | SSO behind oauth2-proxy, Authelia or an SSO ingress: identity headers, group → role mapping, trusted proxies |
+| [docs/ALERTING.md](docs/ALERTING.md) | Prometheus rules → Alertmanager → Slack / webhook: wiring, secret files, tests, tuning, in-app alerts vs Alertmanager |
+| [docs/KUBERNETES.md](docs/KUBERNETES.md) | Helm chart: install, required secrets, PostgreSQL, ingress/TLS, ServiceMonitor, sidecar proxy, why one replica, upgrades |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Local setup, test strategy, front-end pipeline, release checklist |
 
 ## Development
