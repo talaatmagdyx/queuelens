@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Admins can change roles, deactivate, reactivate and remove accounts.** Until now
+  nothing could take away an invited user's access short of editing the database.
+  - Users page: a role menu, Deactivate / Reactivate and Remove on every local account.
+  - API: `PATCH /api/users/{username}` (`role`, `active`) and `DELETE /api/users/{username}`.
+  - Each change is audited (`update_user` with `new_role` / `active`, and `delete_user`)
+    and applies on the account's next request, on every replica.
+  - A deactivated account is refused through SSO too.
+  - Your own account and accounts set by environment variables can't be changed this way.
+- `GET /api/users` reports `managed` (`env` or `local`) and `must_change_password`.
+
+### Fixed
+- The Users page marked an account "Invited" only when it was inactive, which never
+  happened. Now "Invited" means the one-time password hasn't been replaced yet, and
+  "Deactivated" means switched off.
+- The Users page's row menu button did nothing; it's replaced by the actions above.
+
 ## v0.15.0 — 2026-10-03
 
 ### Added

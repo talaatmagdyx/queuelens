@@ -5,7 +5,7 @@
   const D = window.QL.data;
 
   const ROLE_TONE = { Admin: 'park', Operator: 'info', Viewer: 'neutral' };
-  const STATUS_TONE = { Active: 'success', Invited: 'warning', Service: 'neutral' };
+  const STATUS_TONE = { Active: 'success', Invited: 'warning', Deactivated: 'danger', Service: 'neutral' };
   const CAPS = [
     { label: 'Browse queues & messages', viewer: true, operator: true, admin: true },
     { label: 'Replay messages', viewer: false, operator: true, admin: true },
@@ -36,7 +36,9 @@
         role: a.role === 'Administrator' ? 'Admin' : a.role,
         envs: [(window.QL.broker || {}).environment || 'development'],
         last: a.invited_by ? 'invited by ' + a.invited_by : '\u2014',
-        status: a.active === false ? 'Invited' : 'Active',
+        managed: a.managed || 'local',
+        active: a.active !== false,
+        status: a.active === false ? 'Deactivated' : a.must_change_password ? 'Invited' : 'Active',
       };
     });
   }
@@ -78,6 +80,29 @@
     const [result, setResult] = React.useState(null);
     const [error, setError] = React.useState(null);
     const { Input, Select, Alert, CodeBlock } = window.__NS;
+    const me = window.QL.me || {};
+    const isAdmin = me.role === 'Admin';
+    const userPath = (name) => '/api/users/' + encodeURIComponent(name);
+    // takes effect on the account's next request, on every replica
+    const change = async (name, body) => {
+      setError(null);
+      try {
+        await window.QL.requestJson('PATCH', userPath(name), body);
+        setUsers(mapAccounts());
+      } catch (e) { setError(e.message); }
+    };
+    const remove = async (r) => {
+      if (!window.confirm(`Remove ${r.name}? They can no longer sign in with a password. ` +
+        'Someone who signs in through SSO still gets their group\'s role: deactivate them instead to keep them out.')) return;
+      setError(null);
+      try {
+        await window.QL.requestJson('DELETE', userPath(r.name));
+        setUsers(mapAccounts());
+      } catch (e) { setError(e.message); }
+    };
+    const muted = { fontSize: 12, color: 'var(--slate-400)' };
+    // env-var accounts are changed there; your own account would lock you out
+    const changeable = (r) => isAdmin && r.managed !== 'env' && r.name !== me.username;
     const invite = async () => {
       setError(null);
       try {
@@ -129,14 +154,23 @@
                       <span style={{ display: 'block', fontSize: 12, color: 'var(--slate-500)' }}>{r.email}</span>
                     </span>
                   </span>) },
-                { key: 'role', label: 'Role', render: (r) => <StatusPill tone={ROLE_TONE[r.role]}>{r.role}</StatusPill> },
+                { key: 'role', label: 'Role', render: (r) => changeable(r)
+                  ? <Select options={['Viewer', 'Operator', 'Admin']} value={r.role} onChange={(v) => change(r.name, { role: v })} style={{ width: 112 }} />
+                  : <StatusPill tone={ROLE_TONE[r.role]}>{r.role}</StatusPill> },
                 { key: 'envs', label: 'Environments', render: (r) => (
                   <span style={{ display: 'inline-flex', gap: 5 }}>
                     {r.envs.map((e) => <span key={e} style={{ padding: '2px 7px', borderRadius: 6, background: 'var(--slate-100)', color: 'var(--slate-600)', fontSize: 11.5, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{e}</span>)}
                   </span>) },
                 { key: 'last', label: 'Last Active' },
                 { key: 'status', label: 'Status', render: (r) => <StatusPill tone={STATUS_TONE[r.status]}>{r.status}</StatusPill> },
-                { key: 'a', label: '', align: 'right', render: () => <IconButton icon="ellipsis-vertical" size={28} /> },
+                { key: 'a', label: '', align: 'right', render: (r) => !isAdmin ? null
+                  : r.managed === 'env' ? <span style={muted} title="Set by QUEUELENS_ADMIN_USERNAME / QUEUELENS_USERS_JSON: change it there">set by env vars</span>
+                  : r.name === me.username ? <span style={muted}>you</span>
+                  : (
+                    <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', whiteSpace: 'nowrap' }}>
+                      <Button size="sm" variant="secondary" onClick={() => change(r.name, { active: !r.active })}>{r.active ? 'Deactivate' : 'Reactivate'}</Button>
+                      <IconButton icon="trash-2" size={30} title={`Remove ${r.name}`} onClick={() => remove(r)} />
+                    </span>) },
               ]}
               rows={users} footer={`${users.length} users`} />
           </Card>
