@@ -57,8 +57,9 @@ proxy are ignored. That fails closed, but SSO won't work.
 ## oauth2-proxy as a sidecar (Kubernetes)
 
 Run oauth2-proxy in the QueueLens pod with `--upstream=http://127.0.0.1:8000` and point
-the Service at its port (4180), so nothing else reaches QueueLens. Loopback is trusted
-by default:
+the Service at its port (4180), so nothing else reaches QueueLens. The Helm chart has
+this as an example ([KUBERNETES.md](KUBERNETES.md#a-sidecar-in-front)). Loopback is
+trusted by default:
 
 ```
 QUEUELENS_AUTH_PROXY_HEADER=X-Forwarded-Email

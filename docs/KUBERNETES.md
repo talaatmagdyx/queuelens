@@ -195,6 +195,12 @@ QueueLens on `127.0.0.1:8000`:
 ```yaml
 service:
   targetPort: proxy        # the sidecar's port name; anything but "http"
+env:                       # QueueLens takes the user from the proxy (docs/SSO.md)
+  QUEUELENS_AUTH_PROXY_HEADER: X-Forwarded-Email
+  QUEUELENS_AUTH_PROXY_GROUPS_HEADER: X-Forwarded-Groups
+  QUEUELENS_AUTH_PROXY_ROLES_JSON:
+    platform-admins: Admin
+    sre: Operator
 extraContainers:
   - name: oauth2-proxy
     image: quay.io/oauth2-proxy/oauth2-proxy:v7.13.0
@@ -220,9 +226,12 @@ extraContainers:
       capabilities: {drop: [ALL]}
 ```
 
-The probes and the ServiceMonitor still go to QueueLens's own port. QueueLens keeps its
-Basic Auth behind the proxy, and its port stays reachable on the pod's IP from inside the
-cluster: add a NetworkPolicy if only the proxy should reach it.
+The probes and the ServiceMonitor still go to QueueLens's own port. The proxy connects
+from loopback, which QueueLens trusts by default (`QUEUELENS_TRUSTED_PROXIES`), so the
+signed-in user and their groups reach the audit log ([SSO.md](SSO.md)). The same
+headers from any other address are ignored, and Basic Auth still works for scripts and
+the admin. QueueLens's port stays reachable on the pod's IP from inside the cluster: add a
+NetworkPolicy if only the proxy should reach it.
 
 ## Why one replica
 
