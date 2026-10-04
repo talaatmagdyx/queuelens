@@ -110,6 +110,10 @@ class ReplayPolicyModel(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128))
     queue: Mapped[str] = mapped_column(String(255))
+    # where it runs: the environment and vhost it was created in (set at startup for
+    # policies from before 0.18, which ran in the default ones)
+    environment: Mapped[str | None] = mapped_column(String(128))
+    vhost: Mapped[str | None] = mapped_column(String(255))
     max_deaths: Mapped[int] = mapped_column(Integer, default=3)  # at this many: park
     backoff_minutes: Mapped[int] = mapped_column(Integer, default=5)  # x 2^(deaths - 1)
     interval_minutes: Mapped[int] = mapped_column(Integer, default=10)

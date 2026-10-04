@@ -89,11 +89,8 @@ class FakeBulk:
         return batch, {"summary": summary, "results": results}
 
 
-def _app(tmp_path, records, consumers: dict[str, int]):
-    app = create_app(Settings(auth_enabled=True, admin_password=PW["admin"],
-                              users_json=f'{{"ops": "{PW["ops"]}"}}',
-                              database_url=f"sqlite+aiosqlite:///{tmp_path}/p.db"))
-
+def _services(records, consumers: dict[str, int]) -> SimpleNamespace:
+    """One broker's services, faked: its DLQ holds `records`, its queues have `consumers`."""
     class Messages:
         async def snapshot(self, queue: str, depth: int) -> Scan:
             return Scan(records, len(records), None)
@@ -104,9 +101,19 @@ def _app(tmp_path, records, consumers: dict[str, int]):
                 raise LookupError(name)
             return SimpleNamespace(consumers=consumers[name])
 
-    app.state.message_service = Messages()
-    app.state.queue_service = Queues()
-    app.state.bulk_service = FakeBulk()
+    return SimpleNamespace(message_service=Messages(), queue_service=Queues(),
+                           bulk_service=FakeBulk(), started=True)
+
+
+def _app(tmp_path, records, consumers: dict[str, int]):
+    app = create_app(Settings(auth_enabled=True, admin_password=PW["admin"],
+                              users_json=f'{{"ops": "{PW["ops"]}"}}',
+                              environments_json='{"staging": {"vhosts": ["/", "ql-staging"]}}',
+                              database_url=f"sqlite+aiosqlite:///{tmp_path}/p.db"))
+    services = _services(records, consumers)
+    app.state.message_service = services.message_service
+    app.state.queue_service = services.queue_service
+    app.state.bulk_service = services.bulk_service
     app.state.alert_engine.dispatch = _no_delivery
     app.state.policy_runner = PolicyRunner(app.state, clock=lambda: NOW)
     return app
@@ -249,3 +256,67 @@ def test_deaths_counts_across_replays_on_rabbitmq_3_and_4() -> None:
     assert deaths(died, {DEATHS_HEADER: 2}) == 3
     assert deaths([{"count": 3}], {DEATHS_HEADER: 2}) == 3
     assert deaths(died, {DEATHS_HEADER: "nonsense"}) == 1  # a producer's header, ignored
+
+
+@pytest.mark.asyncio
+async def test_a_policy_runs_in_the_environment_and_vhost_it_was_created_in(tmp_path) -> None:
+    app = _app(tmp_path, [_dead(1, 1, 60)], {"orders": 1, "q.dlq": 0})
+    staging = _services([_dead(2, 1, 60)], {"orders": 1, "q.dlq": 0})
+    staging.settings = app.state.settings
+    app.state.environment_manager._bundles[("staging", "ql-staging")] = staging
+    await app.state.database.start()
+    admin = ("admin", PW["admin"])
+    in_staging = {"X-QueueLens-Environment": "staging", "X-QueueLens-Vhost": "ql-staging"}
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+            created = (await http.post("/api/policies", auth=admin, headers=in_staging,
+                                       json={"name": "orders", "queue": "q.dlq"})).json()
+            assert (created["environment"], created["vhost"]) == ("staging", "ql-staging")
+            # run from a tab on the default environment: it still acts in staging only
+            ran = await http.post(f"/api/policies/{created['id']}/run", auth=admin)
+        assert ran.json()["replayed"] == 1
+        assert staging.bulk_service.calls == [("replay", "orders", [f"{2:064d}"])]
+        assert app.state.bulk_service.calls == []
+        run_row = (await app.state.audit_repository.list(action="run_replay_policy"))[0]
+        assert (run_row["metadata"]["environment"], run_row["metadata"]["vhost"]) == (
+            "staging", "ql-staging")
+    finally:
+        await app.state.database.close()
+
+
+@pytest.mark.asyncio
+async def test_a_policy_whose_environment_was_removed_fails_and_pauses(tmp_path) -> None:
+    app = _app(tmp_path, [_dead(1, 1, 60)], {"orders": 1, "q.dlq": 0})
+    await app.state.database.start()
+    try:
+        policy = await _policy(app, environment="gone", vhost="/")
+        for _ in range(3):  # a replica may not have synced a new environment yet: not at once
+            result = await app.state.policy_runner.run(policy)
+        assert result["errors"] == ["Unknown environment: gone"]
+        stored = await app.state.replay_policies.get(policy["id"])
+        assert (stored["enabled"], stored["consecutive_failures"]) == (False, 3)
+        assert (await app.state.notifications.list())[0]["title"] == "Replay policy paused: orders"
+        assert app.state.bulk_service.calls == []
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+            edit = await http.put(f"/api/policies/{policy['id']}", auth=("admin", PW["admin"]),
+                                  json={"name": "orders", "queue": "q.dlq"})
+        assert edit.status_code == 409
+    finally:
+        await app.state.database.close()
+
+
+@pytest.mark.asyncio
+async def test_policies_from_before_scopes_keep_the_default_one(tmp_path) -> None:
+    from app.main import _init_database
+
+    app = _app(tmp_path, [], {})
+    await app.state.database.start()
+    try:
+        old = await _policy(app)  # no environment: created by 0.17
+        await _init_database(app)
+        stored = await app.state.replay_policies.get(old["id"])
+        assert (stored["environment"], stored["vhost"]) == app.state.environment_manager.default_key
+    finally:
+        await app.state.database.close()

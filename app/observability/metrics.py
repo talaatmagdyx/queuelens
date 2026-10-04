@@ -40,7 +40,7 @@ ALERT_DELIVERIES = Counter(
 
 POLICY_RUNS = Counter(
     "queuelens_policy_runs_total",
-    "Replay policy runs by policy and result (idle | success | partial)",
+    "Replay policy runs by policy and result (idle | success | partial | failed)",
     ["policy", "result"],
 )
 
