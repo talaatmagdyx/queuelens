@@ -350,6 +350,39 @@ existing parking queue declared with other arguments; the detail carries RabbitM
 reason), `502` broker failure before anything moved. A refusal or lost connection *during*
 the batch is not an error response. The batch stops, and the results report what moved.
 
+## Users
+
+Accounts come from two places. Accounts set by environment variables
+(`QUEUELENS_ADMIN_USERNAME`, `QUEUELENS_USERS_JSON`) are changed there. Local accounts are
+invited and managed here. A change applies on the account's next request, on every
+replica.
+
+### `GET /api/me`
+The signed-in user: `username`, `role`, `must_change_password`.
+
+### `GET /api/users`
+Every account: `username`, `role`, `email`, `invited_by`, `active`,
+`must_change_password`, and `managed` (`env` or `local`).
+
+### `POST /api/users/invite` (Admin)
+`{"username", "role": "Admin" | "Operator" | "Viewer", "email"?}`. The response
+carries a one-time `password`, shown once; it must be replaced before anything else answers.
+
+### `PATCH /api/users/{username}` (Admin)
+`{"role"?, "active"?}`: change a local account's role, or deactivate / reactivate it.
+A deactivated account gets `401` with its password and `403` through SSO.
+Audited as `update_user`.
+
+### `DELETE /api/users/{username}` (Admin)
+Removes a local account; audited as `delete_user`. Someone who signs in through SSO
+still gets their group's role afterwards, so deactivate them instead to keep them out.
+
+Both return `400` for your own account or one set by environment variables, and `404`
+for an unknown name.
+
+### `POST /api/users/me/password`
+`{"current_password", "new_password"}` (10+ characters), for local accounts.
+
 ## Audit
 
 ### `GET /api/audit`
