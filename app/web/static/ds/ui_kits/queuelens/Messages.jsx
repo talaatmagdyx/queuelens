@@ -65,6 +65,7 @@
     const [panelOpen, setPanelOpen] = React.useState(true);
     const [tab, setTab] = React.useState('payload');
     const [checked, setChecked] = React.useState([]);
+    const [allMatching, setAllMatching] = React.useState(false); // every match in the snapshot
     const [confirmDelete, setConfirmDelete] = React.useState(false);
     const [view, setView] = React.useState(null);
     const [deletedNote, setDeletedNote] = React.useState(0);
@@ -83,7 +84,7 @@
       setLoading(true); setLoadError(null);
       return window.QL.fetchSnapshotPage(queue, { snapshot: snapshotId, offset: (pageNo - 1) * PAGE, limit: PAGE, ...f })
         .then((r) => {
-          setSnap(r.snapshot); setRows(r.rows); setTotal(r.total); setPage(pageNo); setChecked([]);
+          setSnap(r.snapshot); setRows(r.rows); setTotal(r.total); setPage(pageNo); setChecked([]); setAllMatching(false);
           const linked = fingerprint && r.rows.find((x) => x.fingerprint === fingerprint);
           setSelected((cur) => (linked ? linked.id : r.rows.some((x) => x.id === cur) ? cur : r.rows[0] ? r.rows[0].id : null));
         })
@@ -103,31 +104,45 @@
     const QUEUE_TONE = { DLQ: 'danger', PARKING: 'success', NORMAL: 'info' };
     const msg = rows.find((m) => m.id === selected) || rows[0] || {};
     const allChecked = rows.length > 0 && checked.length === rows.length;
-    const toggle = (id) => { setConfirmDelete(false); setChecked((c) => c.includes(id) ? c.filter((x) => x !== id) : [...c, id]); };
-    const toggleAll = () => { setConfirmDelete(false); setChecked(allChecked ? [] : rows.map((r) => r.id)); };
-    const clearSel = () => { setChecked([]); setConfirmDelete(false); };
+    const toggle = (id) => { setConfirmDelete(false); setAllMatching(false); setChecked((c) => c.includes(id) ? c.filter((x) => x !== id) : [...c, id]); };
+    const toggleAll = () => { setConfirmDelete(false); setAllMatching(false); setChecked(allChecked ? [] : rows.map((r) => r.id)); };
+    const clearSel = () => { setChecked([]); setAllMatching(false); setConfirmDelete(false); };
+    // "Select all matching": the server picks them from the snapshot with these filters
+    const match = { contains: filters.contains, payload_format: filters.format, min_deaths: filters.minDeaths };
+    const maxBulk = ((window.QL.serverSettings || {}).limits || {}).max_bulk_size || (window.QL.config || {}).max_bulk_size || 500;
+    const selectedCount = allMatching ? total : checked.length;
+    const overLimit = allMatching && total > maxBulk;
+    const selection = () => (allMatching
+      ? { match, snapshot: snap && snap.id }
+      : { fingerprints: rows.filter((r) => checked.includes(r.id)).map((r) => r.fingerprint), snapshot: snap && snap.id });
     const bulkNav = (mode) => nav('replay', {
-      msg: rows.find((r) => r.id === checked[0]) || msg, mode, count: checked.length,
-      fingerprints: rows.filter((r) => checked.includes(r.id)).map((r) => r.fingerprint),
+      msg: rows.find((r) => r.id === checked[0]) || msg, mode, count: selectedCount,
+      fingerprints: allMatching ? null : selection().fingerprints, match: allMatching ? selection() : null,
     });
+    const exportAs = (format) => window.QL.download(
+      '/api/queues/' + encodeURIComponent(queue) + '/snapshots/' + encodeURIComponent(snap.id) + '/export?'
+        + new URLSearchParams(Object.entries({ format, ...match }).filter(([, v]) => v !== undefined)).toString(),
+      queue + '-snapshot.' + format,
+    ).catch((e) => window.alert('Export failed: ' + e.message));
     const api = window.QL.postJson;
     // Type-to-confirm, like the replay wizard — delete is the one action with no undo.
     const typedConfirm = (text) => window.prompt(text + '\n\nType the queue name to confirm:') === queue;
     const doDelete = async () => {
       // Real deletion through the bulk API: dry-run on exactly the selected
       // fingerprints, show what the server will actually delete, then execute.
-      const fingerprints = rows.filter((r) => checked.includes(r.id)).map((r) => r.fingerprint);
+      const chosen = selection();
       setDeleting(true);
       try {
         const preview = await api('/api/messages/bulk/dry-run',
-          { source_queue: queue, action: 'delete', fingerprints, snapshot: snap && snap.id });
+          { source_queue: queue, action: 'delete', ...chosen });
         const skipped = (preview.duplicate_fingerprints || 0) + (preview.selected_not_seen || 0);
-        if (!typedConfirm('Dry run: ' + preview.message_count + ' of ' + fingerprints.length + ' selected messages will be deleted from ' + queue
+        if (!typedConfirm('Dry run: ' + preview.message_count + ' of ' + selectedCount + ' selected messages will be deleted from ' + queue
           + (skipped ? ' (' + skipped + ' skipped: duplicates or no longer in the queue)' : '') + '. This cannot be undone.')) return;
         await api('/api/messages/bulk/execute', { batch_id: preview.batch_id, confirm: true });
+        setDeletedNote(preview.message_count);
+        if (allMatching) { clearSel(); rescan(); return; } // the snapshot no longer holds them
         setRows((rs) => rs.filter((r) => !checked.includes(r.id)));
-        setTotal((t) => Math.max(0, t - fingerprints.length));
-        setDeletedNote(fingerprints.length);
+        setTotal((t) => Math.max(0, t - chosen.fingerprints.length));
         clearSel();
       } catch (error) {
         window.alert('Delete failed: ' + error.message);
@@ -188,6 +203,8 @@
             <div style={{ width: 170 }}><Select options={['All Payload Types', 'JSON', 'TEXT', 'BASE64']} value={typeFilter} onChange={setTypeFilter} /></div>
             <Button variant="ghost" onClick={() => { setSearch(''); setTypeFilter('All Payload Types'); setView(null); }}>Clear Filters</Button>
             <Button icon="refresh-cw" onClick={rescan} disabled={loading}>{loading ? 'Scanning…' : 'Rescan'}</Button>
+            {snap && <div style={{ width: 128 }}><Select options={['Export…', 'JSON', 'CSV']} value="Export…"
+              onChange={(v) => v !== 'Export…' && exportAs(v.toLowerCase())} /></div>}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
@@ -215,22 +232,30 @@
                 {confirmDelete ? (
                   <React.Fragment>
                     <Icon name="alert-triangle" size={16} color="var(--red-600)" />
-                    <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--red-700)' }}>Delete {checked.length} {checked.length === 1 ? 'message' : 'messages'} from {queue}?</span>
+                    <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--red-700)' }}>Delete {selectedCount} {selectedCount === 1 ? 'message' : 'messages'} from {queue}?</span>
                     <span style={{ fontSize: 12.5, color: 'var(--slate-600)' }}>This cannot be undone.{preferPark && rows.some((r) => checked.includes(r.id) && r.xdeath >= 3) ? ' Some selected messages died 3+ times — parking keeps them recoverable.' : ''}</span>
                     {preferPark && <Button size="sm" variant="park" icon="flag" onClick={() => bulkNav('park')}>Park Instead</Button>}
                     <div style={{ flex: 1 }} />
                     <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(false)}>Cancel</Button>
-                    <Button variant="dangerSolid" size="sm" icon="trash-2" onClick={doDelete} disabled={deleting}>{deleting ? 'Deleting…' : 'Delete ' + checked.length}</Button>
+                    <Button variant="dangerSolid" size="sm" icon="trash-2" onClick={doDelete} disabled={deleting}>{deleting ? 'Deleting…' : 'Delete ' + selectedCount}</Button>
                   </React.Fragment>
                 ) : (
                   <React.Fragment>
-                    <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--blue-700)' }}>{checked.length} selected</span>
+                    <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--blue-700)' }}>
+                      {allMatching ? `All ${total}${filtered ? ' matching' : ''} in the snapshot selected` : `${checked.length} selected`}
+                    </span>
+                    {allChecked && !allMatching && total > rows.length && (
+                      <a href="#" onClick={(e) => { e.preventDefault(); setAllMatching(true); }} style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-link)', textDecoration: 'none' }}>
+                        Select all {total}{filtered ? ' matching' : ''}
+                      </a>
+                    )}
                     <a href="#" onClick={(e) => { e.preventDefault(); clearSel(); }} style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-link)', textDecoration: 'none' }}>Clear</a>
+                    {overLimit && <span style={{ fontSize: 12.5, color: 'var(--amber-700)' }}>One bulk run takes at most {maxBulk}: narrow the filter.</span>}
                     <div style={{ flex: 1 }} />
-                    <Button size="sm" icon="play" disabled={!canAct} onClick={() => bulkNav('move')}>Replay (Move)</Button>
-                    <Button size="sm" variant="secondary" icon="copy" disabled={!canAct} onClick={() => bulkNav('copy')} style={{ color: 'var(--text-link)' }}>Replay (Copy)</Button>
-                    <Button size="sm" variant="park" icon="flag" disabled={!canAct} onClick={() => bulkNav('park')}>Park</Button>
-                    <Button size="sm" variant="danger" icon="trash-2" disabled={!canDelete} onClick={() => setConfirmDelete(true)}>{canDelete ? 'Delete' : 'Delete (Admin only)'}</Button>
+                    <Button size="sm" icon="play" disabled={!canAct || overLimit} onClick={() => bulkNav('move')}>Replay (Move)</Button>
+                    <Button size="sm" variant="secondary" icon="copy" disabled={!canAct || overLimit} onClick={() => bulkNav('copy')} style={{ color: 'var(--text-link)' }}>Replay (Copy)</Button>
+                    <Button size="sm" variant="park" icon="flag" disabled={!canAct || overLimit} onClick={() => bulkNav('park')}>Park</Button>
+                    <Button size="sm" variant="danger" icon="trash-2" disabled={!canDelete || overLimit} onClick={() => setConfirmDelete(true)}>{canDelete ? 'Delete' : 'Delete (Admin only)'}</Button>
                   </React.Fragment>
                 )}
               </div>

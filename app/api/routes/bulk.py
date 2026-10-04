@@ -22,6 +22,14 @@ router = APIRouter(
 )
 
 
+class SnapshotMatch(BaseModel):
+    """The filters of a snapshot's pages: every message of the snapshot they match."""
+
+    contains: str | None = Field(default=None, max_length=256)
+    payload_format: Literal["json", "text", "base64"] | None = None
+    min_deaths: int | None = Field(default=None, ge=1)
+
+
 class BulkDryRunRequest(BaseModel):
     source_queue: str = Field(min_length=1)
     action: Literal["replay", "park", "delete"]
@@ -30,6 +38,7 @@ class BulkDryRunRequest(BaseModel):
     payload_contains: str | None = None
     fingerprints: list[str] | None = Field(default=None, max_length=1000)
     snapshot: str | None = Field(default=None, max_length=64)  # where they were picked
+    match: SnapshotMatch | None = None  # instead of fingerprints: all that match in `snapshot`
 
 
 class BulkExecuteRequest(BaseModel):
@@ -51,17 +60,33 @@ async def dry_run(
         raise HTTPException(status_code=403, detail="Deleting messages requires the Admin role")
     username = user.username
     max_bulk = await effective_limit(request, "max_bulk_size")
-    if body.fingerprints is not None and len(body.fingerprints) > max_bulk:
+    fingerprints = body.fingerprints
+    if body.match is not None:  # "select all matching": the snapshot picks them
+        if fingerprints is not None or not body.snapshot:
+            raise HTTPException(
+                status_code=400, detail="`match` picks from a snapshot: send it with "
+                "`snapshot` and without `fingerprints`",
+            )
+        found = request.app.state.snapshots.get(
+            body.snapshot, request.state.scope, body.source_queue
+        )
+        if found is None:
+            raise HTTPException(
+                status_code=404, detail="Snapshot expired or unknown — scan the queue again"
+            )
+        records = found.matching(**body.match.model_dump())
+        fingerprints = list(dict.fromkeys(record.fingerprint for record in records))
+    if fingerprints is not None and len(fingerprints) > max_bulk:
         raise HTTPException(
             status_code=400,
-            detail=f"{len(body.fingerprints)} messages selected; one bulk run acts on at most "
+            detail=f"{len(fingerprints)} messages selected; one bulk run acts on at most "
             f"{max_bulk}",
         )
     scan_limit = None
-    if body.fingerprints and body.snapshot:  # reach the deepest selected message
+    if fingerprints and body.snapshot:  # reach the deepest selected message
         scan_limit = max(
             max_bulk,
-            await scan_depth(request, body.source_queue, body.fingerprints, body.snapshot),
+            await scan_depth(request, body.source_queue, fingerprints, body.snapshot),
         )
     try:
         return await _service(request).dry_run(
@@ -71,7 +96,7 @@ async def dry_run(
             target=body.target.to_domain() if body.target else None,
             payload_contains=body.payload_contains,
             selected_fingerprints=(
-                frozenset(body.fingerprints) if body.fingerprints is not None else None
+                frozenset(fingerprints) if fingerprints is not None else None
             ),
             max_bulk=max_bulk,
             scan_limit=scan_limit,

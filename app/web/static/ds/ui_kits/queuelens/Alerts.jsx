@@ -36,10 +36,13 @@
   function ChannelChip({ id, config }) {
     const m = CHANNEL_META[id];
     const c = config[id] || {};
-    const label = id === 'email' ? (c.to || 'Email') : ((c.url || c.routing_key) ? m.name : m.name + ' (unconfigured)');
+    // short chips, details in the tooltip: the table has to fit its card
+    const ready = id === 'email' ? !!c.smtp_host : !!(c.url || c.routing_key);
+    const title = ready ? (id === 'email' ? 'Email to ' + (c.to || '—') : m.name)
+      : m.name + " isn't configured: set it up under Channels";
     return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 8px', borderRadius: 6, background: 'var(--slate-100)', color: 'var(--slate-600)', fontSize: 11.5, fontWeight: 600 }}>
-        <Icon name={m.icon} size={12} />{label}
+      <span title={title} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 8px', borderRadius: 6, whiteSpace: 'nowrap', background: ready ? 'var(--slate-100)' : 'var(--amber-50)', color: ready ? 'var(--slate-600)' : 'var(--amber-700)', fontSize: 11.5, fontWeight: 600 }}>
+        <Icon name={ready ? m.icon : 'alert-triangle'} size={12} />{m.name}
       </span>
     );
   }
@@ -210,10 +213,10 @@
             <Card pad={false}>
               <DataTable rowKey="id"
                 columns={[
-                  { key: 'name', label: 'Rule', render: (r) => <span style={{ fontWeight: 600, color: 'var(--slate-900)' }}>{r.name}</span> },
-                  { key: 'cond', label: 'Condition', render: (r) => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--slate-600)' }}>{r.pattern} · {r.metric} {r.operator} {r.threshold}{r.duration_seconds ? ` for ${Math.round(r.duration_seconds / 60)}m` : ''}</span> },
+                  { key: 'name', label: 'Rule', render: (r) => <span style={{ fontWeight: 600, color: 'var(--slate-900)', whiteSpace: 'normal' }}>{r.name}</span> },
+                  { key: 'cond', label: 'Condition', render: (r) => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--slate-600)', whiteSpace: 'normal' }}>{r.pattern} · {r.metric} {r.operator} {r.threshold}{r.duration_seconds ? ` for ${Math.round(r.duration_seconds / 60)}m` : ''}</span> },
                   { key: 'severity', label: 'Severity', render: (r) => <StatusPill tone={SEV_TONE[r.severity]}>{r.severity}</StatusPill> },
-                  { key: 'channels', label: 'Channels', render: (r) => <span style={{ display: 'inline-flex', gap: 5 }}>{r.channels.length ? r.channels.map((c) => <ChannelChip key={c} id={c} config={channels} />) : <span style={{ fontSize: 12, color: 'var(--slate-400)' }}>in-app only</span>}</span> },
+                  { key: 'channels', label: 'Channels', render: (r) => <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 5 }}>{r.channels.length ? r.channels.map((c) => <ChannelChip key={c} id={c} config={channels} />) : <span style={{ fontSize: 12, color: 'var(--slate-400)' }}>in-app only</span>}</span> },
                   { key: 'last', label: 'Last Triggered', render: (r) => rel(r.last_fired_at) },
                   { key: 'on', label: 'Enabled', align: 'right', render: (r) => <span onClick={(e) => e.stopPropagation()}><Switch checked={r.enabled} onChange={() => toggleRule(r)} /></span> },
                   { key: 'a', label: '', align: 'right', render: (r) => <IconButton icon="trash-2" size={28} onClick={() => deleteRule(r)} /> },

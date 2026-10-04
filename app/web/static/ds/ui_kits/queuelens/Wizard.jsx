@@ -28,7 +28,7 @@
 
   const postJson = window.QL.postJson;
 
-  function Wizard({ nav, msg = D.messages[0], mode = 'move', count = 1, fingerprints = null }) {
+  function Wizard({ nav, msg = D.messages[0], mode = 'move', count = 1, fingerprints = null, match = null }) {
     const many = count > 1;
     const noun = many ? `${count} messages` : 'this message';
     const srcQueue = (msg && msg.queue) || window.QL.defaultQueue;
@@ -68,20 +68,20 @@
           : (exchange
             ? { type: 'exchange', exchange: exchange, routing_key: routingKey.trim() }
             : { type: 'queue', queue: routingKey.trim() });
-        if (many && fingerprints && fingerprints.length > 1) {
+        if (many && (match || (fingerprints && fingerprints.length > 1))) {
           const preview = await postJson('/api/messages/bulk/dry-run', {
             source_queue: srcQueue,
             action: isPark ? 'park' : 'replay',
             mode: isPark ? undefined : action,
             target: target || undefined,
-            fingerprints: fingerprints,
-            snapshot: msg && msg.snapshot, // reach messages deep in the snapshot they came from
+            // every match in the snapshot, or the picked ones (reached deep in their snapshot)
+            ...(match || { fingerprints: fingerprints, snapshot: msg && msg.snapshot }),
           });
           // the server's dry run is the source of truth — show it before anything runs
           const notes = [];
           if (preview.duplicate_fingerprints) notes.push(preview.duplicate_fingerprints + ' duplicate(s) will be skipped');
           if (preview.selected_not_seen) notes.push(preview.selected_not_seen + ' no longer in the queue');
-          if (!window.confirm('Dry run: ' + preview.message_count + ' of ' + fingerprints.length + ' selected messages will be '
+          if (!window.confirm('Dry run: ' + preview.message_count + ' of ' + count + ' selected messages will be '
             + (isPark ? 'parked' : 'replayed') + (notes.length ? ' (' + notes.join(', ') + ')' : '') + '. Continue?')) {
             setStage('review');
             return;

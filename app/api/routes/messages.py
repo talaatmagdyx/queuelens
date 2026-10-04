@@ -1,13 +1,18 @@
-from typing import cast
+import json
+import re
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi.responses import StreamingResponse
 
 from app.api.scope import broker, broker_scope
 from app.application.message_service import MessageService, message_to_dict
 from app.application.queue_service import UnsafeToBrowse
 from app.application.snapshots import Snapshot
 from app.auth.basic import get_current_username
-from app.domain.models import MessageRecord
+from app.domain.models import AuditEntry, MessageRecord
 from app.observability.metrics import PREVIEW_REQUESTS
 
 router = APIRouter(
@@ -142,3 +147,65 @@ async def get_message(
             masked_fields=settings.masked_field_names,
         )
     }
+
+
+EXPORT_COLUMNS = ("fingerprint", "message_id", "correlation_id", "timestamp", "exchange",
+                  "routing_key", "deaths", "payload_format", "payload", "headers")
+
+
+@router.get("/{queue_name}/snapshots/{snapshot_id}/export")
+async def export_snapshot(
+    request: Request,
+    queue_name: str,
+    snapshot_id: str = Path(max_length=64),
+    username: str = Depends(get_current_username),
+    format: Literal["json", "csv"] = Query(default="json"),
+    contains: str | None = Query(default=None, max_length=256),
+    payload_format: str | None = Query(default=None, pattern="^(json|text|base64)$"),
+    min_deaths: int | None = Query(default=None, ge=1),
+) -> StreamingResponse:
+    """Download a snapshot's messages (the same filters as its pages), rendered and masked
+    as the console shows them. Nothing more is read from the broker; the export is
+    audited, since it hands over message bodies in bulk."""
+    from app.api.routes.audit import csv_cell
+
+    settings = request.app.state.settings
+    found = _snapshot(request, snapshot_id, queue_name)
+    matches = found.matching(contains, payload_format, min_deaths)
+    await request.app.state.audit_repository.record(AuditEntry(
+        username=username, action="export_snapshot", timestamp=datetime.now(UTC),
+        source_queue=queue_name, result="success",
+        metadata={"snapshot": snapshot_id, "messages": len(matches), "format": format},
+    ))
+
+    def rendered() -> Iterator[dict[str, object]]:
+        for record in matches:
+            yield message_to_dict(
+                record, settings.max_message_size_bytes, masked_fields=settings.masked_field_names
+            )
+
+    def as_json() -> Iterator[str]:
+        yield "["
+        for index, message in enumerate(rendered()):
+            yield ("," if index else "") + json.dumps(message, default=str)
+        yield "]"
+
+    def as_csv() -> Iterator[str]:
+        yield ",".join(EXPORT_COLUMNS) + "\n"
+        for message in rendered():
+            payload = message["payload"]
+            row = {
+                **message,
+                "deaths": sum(int(entry.get("count") or 0)
+                              for entry in cast(list[dict[str, Any]], message["x_death"])),
+                "payload": payload if isinstance(payload, str) else json.dumps(payload),
+                "headers": json.dumps(message["headers"], default=str),
+            }
+            yield ",".join(csv_cell(row.get(column)) for column in EXPORT_COLUMNS) + "\n"
+
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", queue_name)  # a queue name is user data
+    return StreamingResponse(
+        as_json() if format == "json" else as_csv(),
+        media_type="application/json" if format == "json" else "text/csv",
+        headers={"Content-Disposition": f"attachment; filename={name}-snapshot.{format}"},
+    )

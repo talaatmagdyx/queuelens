@@ -31,7 +31,7 @@ async def list_audit_events(
 
 
 
-def _csv_cell(value: object) -> str:
+def csv_cell(value: object) -> str:
     text = "" if value is None else str(value)
     if text[:1] in ("=", "+", "-", "@", "\t", "\r"):
         text = "'" + text  # queue names are user data — never let a cell run as a formula
@@ -58,7 +58,7 @@ async def export_audit(
                 event.get("action"), event.get("source_queue"), event.get("target_queue"),
                 event.get("target_exchange"), event.get("result"), event.get("error_message"),
             ]
-            yield ",".join(_csv_cell(value) for value in fields) + "\n"
+            yield ",".join(csv_cell(value) for value in fields) + "\n"
 
     async def json_stream() -> AsyncIterator[str]:
         yield "["
