@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **The Audit Log showed every action it didn't know as "Replay (Move)".** Removing a
+  user, changing a role, exporting a snapshot and adding, removing or switching an
+  environment all read as message replays. Each action now has its own label and icon,
+  an unknown one shows its own name, and the action filter has Publish, Export, Users and
+  Environments. The target column says which account or environment changed.
+- **Inviting a user and changing your password weren't audited.** They now write
+  `invite_user` (with the role) and `change_password` rows, never the password.
+- **The Audit Log's details panel claimed "Published First"** for actions that move no
+  message, and offered "View Message" without one.
+- **The Audit Log table overflowed its card** by about 130 px; times, actions and queue
+  names now wrap, queue names at their dots.
+- The README and landing-page screenshots are fresh from this release.
+
 ## v0.16.0 — 2026-10-04
 
 ### Added

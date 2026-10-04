@@ -1,10 +1,19 @@
 // Audit Log screen with Action Details panel — fully wired to live audit data.
 (function () {
   const { Icon, Badge, StatusPill, StatCard, Button, IconButton, DataTable, Select, SearchInput, Input, Pagination, KeyValue, CodeBlock } = window.__NS;
-  const { PageHeader, Card, XDeathTable, ACTION_META, RESULT_TONE } = window.QL;
+  const { PageHeader, Card, XDeathTable, actionMeta, RESULT_TONE } = window.QL;
   const D = window.QL.data;
 
-  const ACTION_FILTER = { 'Replay (Move)': 'replay_move', 'Replay (Copy)': 'replay_copy', Park: 'park', Delete: 'delete' };
+  const ACTION_FILTER = {
+    'Replay (Move)': ['replay_move'], 'Replay (Copy)': ['replay_copy'], Park: ['park'], Delete: ['delete'],
+    Publish: ['publish'], Export: ['export_snapshot'],
+    Users: ['invite_user', 'update_user', 'delete_user', 'change_password'],
+    Environments: ['add_environment', 'remove_environment', 'switch_environment'],
+  };
+  // replay / park publish the message before acking it; nothing else moves a message
+  const MOVES_MESSAGES = ['replay_move', 'replay_copy', 'park', 'publish'];
+  // queue names wrap at their dots ("orders." / "created.dlq"), not mid-word
+  const atDots = (s) => String(s).split('.').flatMap((part, i, all) => (i < all.length - 1 ? [part + '.', <wbr key={i} />] : [part]));
   const pct = (n, total) => (total ? ((n / total) * 100).toFixed(1) + '%' : '—');
 
   function AuditLog({ nav }) {
@@ -21,7 +30,7 @@
 
     const rows = React.useMemo(() => audit.filter((r) => {
       if (q && !(r.queue + ' ' + r.user + ' ' + r.action + ' ' + r.target).toLowerCase().includes(q.toLowerCase())) return false;
-      if (actionF !== 'All Actions' && r.action !== ACTION_FILTER[actionF]) return false;
+      if (actionF !== 'All Actions' && !ACTION_FILTER[actionF].includes(r.action)) return false;
       if (resultF !== 'All Results' && r.result !== resultF) return false;
       if (from && r.time.slice(0, 10) < from) return false;
       if (to && r.time.slice(0, 10) > to) return false;
@@ -66,7 +75,7 @@
 
           <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
             <div style={{ flex: 1 }}><SearchInput placeholder="Search by queue, user, action…" value={q} onChange={(v) => { setQ(v); setPage(1); }} /></div>
-            <div style={{ width: 140 }}><Select value={actionF} onChange={(v) => { setActionF(v); setPage(1); }} options={['All Actions', 'Replay (Move)', 'Replay (Copy)', 'Park', 'Delete']} /></div>
+            <div style={{ width: 140 }}><Select value={actionF} onChange={(v) => { setActionF(v); setPage(1); }} options={['All Actions', ...Object.keys(ACTION_FILTER)]} /></div>
             <div style={{ width: 130 }}><Select value={resultF} onChange={(v) => { setResultF(v); setPage(1); }} options={['All Results', 'Success', 'Failed']} /></div>
             <div style={{ width: 145 }}><Input type="date" value={from} onChange={(v) => { setFrom(v); setPage(1); }} /></div>
             <div style={{ width: 145 }}><Input type="date" value={to} onChange={(v) => { setTo(v); setPage(1); }} /></div>
@@ -80,14 +89,15 @@
           <Card pad={false}>
             <DataTable rowKey="key" sortKey="time" onRowClick={setSel} selectedKey={sel && sel.key}
               columns={[
-                { key: 'time', label: 'Time' },
+                // date over time, and long names wrap: the table has to fit its card
+                { key: 'time', label: 'Time', render: (r) => <span style={{ whiteSpace: 'normal', display: 'inline-block', width: 84 }}>{r.time}</span> },
                 { key: 'user', label: 'User' },
-                { key: 'action', label: 'Action', render: (r) => { const m = ACTION_META[r.action]; return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: m.color, fontWeight: 600 }}><Icon name={m.icon} size={14} />{m.label}</span>; } },
-                { key: 'queue', label: 'Queue' },
-                { key: 'target', label: 'Target / Destination', render: (r) => <span style={{ whiteSpace: 'normal', display: 'inline-block', maxWidth: 200 }}>{r.target}</span> },
+                { key: 'action', label: 'Action', render: (r) => { const m = actionMeta(r.action); return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: m.color, fontWeight: 600, whiteSpace: 'normal' }}><Icon name={m.icon} size={14} />{m.label}</span>; } },
+                { key: 'queue', label: 'Queue', render: (r) => <span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', display: 'inline-block', maxWidth: 150 }}>{atDots(r.queue)}</span> },
+                { key: 'target', label: 'Target / Destination', render: (r) => <span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', display: 'inline-block', maxWidth: 170 }}>{atDots(r.target)}</span> },
                 { key: 'result', label: 'Result', render: (r) => <StatusPill tone={RESULT_TONE[r.result]}>{r.result}</StatusPill> },
                 { key: 'duration', label: 'Duration' },
-                { key: 'd', label: 'Details', align: 'right', render: (r) => <IconButton icon="eye" size={28} onClick={() => setSel(r)} /> },
+                { key: 'd', label: '', align: 'right', render: (r) => <IconButton icon="eye" size={28} onClick={() => setSel(r)} /> },
               ]}
               rows={pageRows} />
             <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderTop: '1px solid var(--slate-100)' }}>
@@ -114,14 +124,14 @@
             <StatusPill tone={RESULT_TONE[sel.result]}>{sel.result}</StatusPill>
             <div style={{ marginTop: 14 }}>
               <KeyValue gap={12} items={[
-                { label: 'Action', value: (() => { const m = ACTION_META[sel.action]; return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: m.color, fontWeight: 600 }}><Icon name={m.icon} size={14} />{m.label}</span>; })() },
+                { label: 'Action', value: (() => { const m = actionMeta(sel.action); return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: m.color, fontWeight: 600 }}><Icon name={m.icon} size={14} />{m.label}</span>; })() },
                 sel.fingerprint ? { label: 'Fingerprint', value: sel.fingerprint.slice(0, 24) + '…', mono: true, copy: true } : null,
                 { label: 'Source Queue', value: <Badge tone="danger" uppercase={false}>{sel.queue}</Badge> },
                 { label: 'Target', value: <Badge tone="info" uppercase={false}>{sel.target}</Badge> },
                 { label: 'User', value: sel.user },
                 { label: 'Time', value: sel.time },
                 { label: 'Duration', value: sel.duration },
-                sel.action !== 'delete' ? { label: 'Published First', value: 'Yes (publish-before-ack)' } : null,
+                MOVES_MESSAGES.includes(sel.action) ? { label: 'Published First', value: 'Yes (publish-before-ack)' } : null,
               ].filter(Boolean)} />
             </div>
             {sel.error && (
@@ -142,7 +152,7 @@
                 <XDeathTable rows={sel.xdeathList} />
               </div>
             )}
-            <Button variant="secondary" icon="eye" size="sm" style={{ marginTop: 16, color: 'var(--text-link)' }} onClick={() => nav('messages', { queue: sel.queue !== '\u2014' ? sel.queue : undefined, fingerprint: sel.fingerprint || undefined })}>View Message</Button>
+            {sel.fingerprint && <Button variant="secondary" icon="eye" size="sm" style={{ marginTop: 16, color: 'var(--text-link)' }} onClick={() => nav('messages', { queue: sel.queue !== '\u2014' ? sel.queue : undefined, fingerprint: sel.fingerprint })}>View Message</Button>}
           </aside>
         )}
       </div>
