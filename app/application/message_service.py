@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Any
 
 from app.domain.models import MessageRecord
+from app.domain.xdeath import deaths
 from app.infrastructure.rabbitmq.message_browser import (
     SCAN_BYTES_BUDGET,
     MessageBrowser,
@@ -99,6 +100,7 @@ def message_to_dict(
         "properties": _jsonable(message.properties, masked),
         "redelivered": message.redelivered,
         "x_death": _jsonable(message.x_death),
+        "deaths": deaths(message.x_death, message.headers),
     }
 
 

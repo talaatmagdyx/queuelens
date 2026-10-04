@@ -12,6 +12,7 @@ from aiormq.exceptions import (
 )
 
 from app.domain.models import MessageRecord, ReplayTarget
+from app.domain.xdeath import DEATHS_HEADER, deaths
 from app.infrastructure.rabbitmq.connection import RabbitMQConnection
 from app.infrastructure.rabbitmq.message_browser import (
     MessageBrowser,
@@ -83,6 +84,7 @@ class MessageOperator:
         action: str,
         target: ReplayTarget | None = None,
         replay_headers: dict[str, Any] | None = None,
+        stamp_deaths: bool = True,  # off for annotate=false: no x-queuelens-* at all
         max_scan: int = 100,
         whole: bool = False,
     ) -> dict[str, object]:
@@ -107,7 +109,8 @@ class MessageOperator:
                     if target is None:
                         raise ValueError("A publish target is required")
                     await self._ensure_target(channel, target, create=action == "park")
-                    await self._publish(channel, target_record, target, replay_headers or {})
+                    await self._publish(channel, target_record, target, replay_headers or {},
+                                        stamp_deaths=stamp_deaths and action != "park")
 
                 if action in {"move", "park", "delete"}:
                     await target_message.ack()
@@ -187,7 +190,8 @@ class MessageOperator:
                                 "x-queuelens-original-fingerprint": record.fingerprint,
                             }
                             await self._publish(
-                                channel, record, cast(ReplayTarget, target), headers
+                                channel, record, cast(ReplayTarget, target), headers,
+                                stamp_deaths=action != "park",
                             )
                             published = True
                         if action == "copy":
@@ -257,12 +261,17 @@ class MessageOperator:
         record: MessageRecord,
         target: ReplayTarget,
         replay_headers: dict[str, Any],
+        *,
+        stamp_deaths: bool,
     ) -> None:
         properties = record.properties
+        headers = {**record.headers, **replay_headers}
+        if stamp_deaths:  # RabbitMQ 4.x restarts x-death for a republished message
+            headers[DEATHS_HEADER] = deaths(record.x_death, record.headers)
         outgoing = _Replay(
             record.body,
             expiration_ms=_milliseconds(properties.get("expiration")),
-            headers={**record.headers, **replay_headers},
+            headers=headers,
             content_type=record.content_type,
             content_encoding=properties.get("content_encoding"),
             delivery_mode=properties.get("delivery_mode"),

@@ -22,14 +22,11 @@ from typing import Any
 from app.application.action_service import configured_target
 from app.application.bulk_runs import execute_audited
 from app.domain.models import AuditEntry, MessageRecord, ReplayTarget
+from app.domain.xdeath import deaths
 from app.observability.metrics import POLICY_MESSAGES, POLICY_RUNS
 
 logger = logging.getLogger(__name__)
 PAUSE_AFTER_FAILED_RUNS = 3
-
-
-def deaths(record: MessageRecord) -> int:
-    return sum(int(entry.get("count") or 0) for entry in record.x_death)
 
 
 def _last_death(record: MessageRecord) -> tuple[datetime | None, str | None]:
@@ -60,7 +57,7 @@ def plan(records: list[MessageRecord], *, dlq: str, now: datetime, max_deaths: i
     out = Plan()
     acted = 0
     for record in records:  # queue order: the oldest first
-        died = deaths(record)
+        died = deaths(record.x_death, record.headers)
         if died == 0:
             out.no_history += 1
             continue

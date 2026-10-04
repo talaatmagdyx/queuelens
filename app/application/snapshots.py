@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.domain.models import MessageRecord
+from app.domain.xdeath import deaths
 
 SNAPSHOT_TTL = timedelta(minutes=5)
 # ponytail: in process, LRU — per replica like the rest of QueueLens's state; each holds at
@@ -66,16 +67,12 @@ class Snapshot:
         for record in self.records:
             if payload_format and record.payload_format != payload_format:
                 continue
-            if min_deaths and _deaths(record) < min_deaths:
+            if min_deaths and deaths(record.x_death, record.headers) < min_deaths:
                 continue
             if needle and needle not in _haystack(record):
                 continue
             out.append(record)
         return out
-
-
-def _deaths(record: MessageRecord) -> int:
-    return sum(int(entry.get("count") or 0) for entry in record.x_death)
 
 
 def _haystack(record: MessageRecord) -> str:

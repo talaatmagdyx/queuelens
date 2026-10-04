@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **On RabbitMQ 4.x, replay policies never parked a message that kept failing.**
+  - **The cause:** RabbitMQ 4.x starts x-death again at 1 when a client republishes a
+    message. So every time a policy replayed a failing message and it died again, it
+    looked like its first death.
+  - **The effect:** the message never reached `max_deaths`, and its backoff never grew.
+    It was replayed every `backoff_minutes`, without end.
+  - **The fix:** every replay now stamps the death count so far in a new
+    `x-queuelens-deaths` header. The count combines that header with x-death.
+  - **`"annotate": false`:** a replay sent this way still adds no `x-queuelens-*`
+    header at all, including this one. So on 4.x, its death count starts again.
+- **The same count is used everywhere:** the console's x-death column, the `min_deaths`
+  filter, "select all matching", the CSV export, and the new `deaths` field on API
+  messages.
+- **A new integration test** sends a message to a consumer that rejects it every time,
+  on RabbitMQ 3.13 and 4.1, and checks that the policy parks it at the third death.
+
 ## v0.17.1 — 2026-10-04
 
 ### Added
