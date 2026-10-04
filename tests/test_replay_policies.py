@@ -12,6 +12,7 @@ from app.application.bulk_service import BulkBatch
 from app.application.replay_policies import PolicyRunner, plan
 from app.config import Settings
 from app.domain.models import ReplayTarget
+from app.domain.xdeath import DEATHS_HEADER, deaths
 from app.infrastructure.rabbitmq.message_browser import Scan
 from app.main import create_app
 from tests import cred
@@ -238,3 +239,13 @@ async def test_metrics_count_what_policies_did_and_flag_a_paused_one(tmp_path) -
         assert 'queuelens_policy_messages_total{outcome="failed",policy="metered"} 3.0' in text
     finally:
         await app.state.database.close()
+
+
+def test_deaths_counts_across_replays_on_rabbitmq_3_and_4() -> None:
+    died = [{"queue": "work", "reason": "rejected", "count": 1}]
+    assert deaths(died, {}) == 1
+    assert deaths([{"count": 2}, {"count": 3}], {}) == 5  # one entry per queue and reason
+    # replayed with 2 deaths, died again: 4.x restarted x-death, 3.x kept counting
+    assert deaths(died, {DEATHS_HEADER: 2}) == 3
+    assert deaths([{"count": 3}], {DEATHS_HEADER: 2}) == 3
+    assert deaths(died, {DEATHS_HEADER: "nonsense"}) == 1  # a producer's header, ignored

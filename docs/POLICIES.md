@@ -19,6 +19,11 @@ first:
 With `backoff_minutes` 5 and `max_deaths` 3, a message is retried 5 minutes after its
 first death and 10 minutes after its second, then parked at its third.
 
+**Counting deaths.** RabbitMQ 3.x keeps adding to the x-death of a message that QueueLens
+replays, but 4.x starts it again at 1. So every replay stamps the count so far in
+`x-queuelens-deaths`, and a message that comes back with it has died at least once more.
+That's how a message that keeps failing on 4.x still reaches `max_deaths` and is parked.
+
 ## Guard rails
 
 - **At most `cap` messages per run**, never above the bulk limit. A big backlog drains

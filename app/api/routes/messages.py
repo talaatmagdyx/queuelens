@@ -2,7 +2,7 @@ import json
 import re
 from collections.abc import Iterator
 from datetime import UTC, datetime
-from typing import Any, Literal, cast
+from typing import Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import StreamingResponse
@@ -196,8 +196,6 @@ async def export_snapshot(
             payload = message["payload"]
             row = {
                 **message,
-                "deaths": sum(int(entry.get("count") or 0)
-                              for entry in cast(list[dict[str, Any]], message["x_death"])),
                 "payload": payload if isinstance(payload, str) else json.dumps(payload),
                 "headers": json.dumps(message["headers"], default=str),
             }

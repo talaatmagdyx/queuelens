@@ -145,8 +145,8 @@ window.QL.screens = window.QL.screens || {};
       at: m.timestamp ? m.timestamp.slice(0, 19).replace('T', ' ') : '—',
       type: (m.payload_format || 'json').toUpperCase(),
       size: human(m.payload_size),
-      // deaths, not x-death entries: one entry per queue+reason carries its own count
-      xdeath: (m.x_death || []).reduce(function (n, d) { return n + (Number(d.count) || 1); }, 0),
+      // deaths, counted by the server: x-death alone restarts on RabbitMQ 4.x after a replay
+      xdeath: m.deaths,
       preview: JSON.stringify(m.payload).slice(0, 30) + '…',
       payloadText: typeof m.payload === 'string' ? m.payload : JSON.stringify(m.payload, null, 2),
       headersText: Object.keys(m.headers || {}).length ? JSON.stringify(m.headers, null, 2) : '(no headers)',

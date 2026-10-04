@@ -110,7 +110,7 @@ nothing is consumed (the broker's `redelivered` flag will be set).
 | `offset` | int ≥ 0 | 0 | First message of the page, within the snapshot (after filters) |
 | `contains` | string | — | Case-insensitive substring of the raw body, message id, fingerprint, or headers. A compressed body is searched as stored |
 | `payload_format` | `json` / `text` / `base64` | — | Only messages of that format |
-| `min_deaths` | int ≥ 1 | — | Only messages dead-lettered at least this many times (summed over x-death) |
+| `min_deaths` | int ≥ 1 | — | Only messages that died at least this many times (`deaths`, below) |
 
 The cap is the stored *Limits* override if set, else `QUEUELENS_MAX_PREVIEW_MESSAGES`.
 
@@ -165,11 +165,17 @@ actions, and bulk dry runs / executions on that queue. See [SAFETY.md](SAFETY.md
           "routing-keys": ["orders.processing"],
           "time": "2026-07-10T00:26:23+00:00"
         }
-      ]
+      ],
+      "deaths": 1
     }
   ]
 }
 ```
+
+`deaths` is how many times the message has died. It's the sum of its x-death counts,
+unless a QueueLens replay stamped a higher number in `x-queuelens-deaths`. RabbitMQ 4.x
+restarts x-death for a message that a client republishes, so without that header a message
+QueueLens replayed would look like a first death each time it came back.
 
 - `payload_format` is `json`, `text`, or `base64` (auto-detected).
 - Payloads larger than `QUEUELENS_MAX_MESSAGE_SIZE_BYTES` are replaced with a truncation
@@ -226,8 +232,9 @@ the delivery guarantees.
 Replayed messages keep their body and properties and gain provenance headers:
 `x-queuelens-replayed`, `x-queuelens-action` (`replay_copy`/`replay_move`),
 `x-queuelens-replayed-at`, `x-queuelens-replayed-by`, `x-queuelens-source-queue`,
-`x-queuelens-original-fingerprint` — plus the admin-configured custom headers. Bulk replay
-stamps the same set. A message that had no `message_id` gains a random one on replay (the
+`x-queuelens-original-fingerprint`, `x-queuelens-deaths` (how many times it had died, see
+`deaths` above) — plus the admin-configured custom headers. Bulk replay stamps the same
+set. A message that had no `message_id` gains a random one on replay (the
 client library needs it to match a broker return to its publish).
 
 ### `POST /api/messages/park`

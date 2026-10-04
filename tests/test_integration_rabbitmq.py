@@ -741,3 +741,68 @@ async def test_a_replay_policy_against_real_dead_letters(tmp_path) -> None:
         async with httpx.AsyncClient(base_url=MANAGEMENT_URL, auth=auth, timeout=10) as mgmt:
             for queue in (work, dlq, f"{dlq}.parking"):
                 await mgmt.delete(f"/api/queues/%2F/{queue}")
+
+
+@pytest.mark.asyncio
+async def test_a_message_that_keeps_failing_is_parked_on_every_broker(tmp_path) -> None:
+    """A consumer that rejects every replay: the policy replays the message twice, then
+    parks it. RabbitMQ 4.x restarts x-death at 1 for a republished message, so without
+    QueueLens' own death count it would look like a first death every time, never parked."""
+    import asyncio
+    from datetime import UTC, datetime, timedelta
+
+    from app.application.replay_policies import PolicyRunner
+
+    suffix = uuid.uuid4().hex[:8]
+    work, dlq = f"it.poison.{suffix}", f"it.poison.{suffix}.dlq"
+    auth = (_amqp.username or "guest", _amqp.password or "guest")
+    connection = await aio_pika.connect_robust(AMQP_URL)
+
+    async def lands_in_dlq() -> None:
+        async with connection.channel() as channel:
+            for _ in range(100):
+                queue = await channel.declare_queue(dlq, passive=True)
+                if queue.declaration_result.message_count == 1:
+                    return
+                await asyncio.sleep(0.05)
+        raise AssertionError("the message never came back to the DLQ")
+
+    try:
+        channel = await connection.channel()
+        await channel.declare_queue(dlq, durable=True)
+        work_queue = await channel.declare_queue(work, durable=True, arguments={
+            "x-dead-letter-exchange": "", "x-dead-letter-routing-key": dlq})
+
+        async def poison(message: aio_pika.abc.AbstractIncomingMessage) -> None:
+            await message.reject(requeue=False)  # fails every time: the broker dead-letters it
+
+        await work_queue.consume(poison)
+        await channel.default_exchange.publish(aio_pika.Message(b'{"n": 1}'), work)
+        await lands_in_dlq()
+        async with httpx.AsyncClient(base_url=MANAGEMENT_URL, auth=auth, timeout=10) as mgmt:
+            for _ in range(60):  # the Management API reports consumers a few seconds late
+                if (await mgmt.get(f"/api/queues/%2F/{work}")).json().get("consumers") == 1:
+                    break
+                await asyncio.sleep(0.5)
+
+        app = create_app(_settings(tmp_path))
+        async with app.router.lifespan_context(app):
+            policy = dict(await app.state.replay_policies.create(
+                "admin", name="poison", queue=dlq, max_deaths=3, backoff_minutes=1,
+                interval_minutes=10, cap=100, enabled=True))
+            runs = []
+            for hours in (1, 2, 3):  # always past the backoff
+                runner = PolicyRunner(
+                    app.state, clock=lambda h=hours: datetime.now(UTC) + timedelta(hours=h))
+                result = await runner.run(policy)
+                runs.append((result["replayed"], result["parked"]))
+                if result["replayed"]:
+                    await lands_in_dlq()
+            assert runs == [(1, 0), (1, 0), (0, 1)]
+            parked = await app.state.message_service.snapshot(f"{dlq}.parking", 10)
+            assert [record.headers.get("x-queuelens-deaths") for record in parked.records] == [2]
+    finally:
+        await connection.close()
+        async with httpx.AsyncClient(base_url=MANAGEMENT_URL, auth=auth, timeout=10) as mgmt:
+            for queue in (work, dlq, f"{dlq}.parking"):
+                await mgmt.delete(f"/api/queues/%2F/{queue}")
