@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **A replay policy's history.** **History** on the Replay Policies screen opens the Audit
+  Log showing only that policy's actions: each run with its counts, and every message it
+  replayed or parked.
+- **The Audit Log can show one account's actions.** It fetches them from the server, so
+  they aren't limited to the latest 500 actions of everyone. **Clear Filters** goes back
+  to all accounts.
+
 ## v0.18.0 — 2026-10-04
 
 ### Fixed

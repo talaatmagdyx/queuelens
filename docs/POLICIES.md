@@ -42,6 +42,12 @@ per-queue lock (on PostgreSQL, across every replica), and an audit row per messa
 the user `policy:<name>`, plus a `run_replay_policy` row whenever a run moved anything.
 Creating, changing, pausing and deleting a policy are audited too.
 
+That's the policy's history. **History** on the Replay Policies screen opens the Audit Log
+showing only `policy:<name>`'s actions: each run with its counts, and every message it
+replayed or parked. The API equivalent is `GET /api/audit?username=policy:<name>`. Runs
+that moved nothing (all waiting, or held back for lack of consumers) aren't recorded;
+the **Last Run** column shows the latest one.
+
 ## Where policies run
 
 A policy belongs to the **environment and vhost it was created in**: the ones the console
