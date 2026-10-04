@@ -1609,11 +1609,22 @@ async def final():
     db_ok = await timed(USERS["viewer1"])
     check(12, "DB-user requests don't re-run PBKDF2 each time (verified-login cache)", db_ok < 0.015,
           f"env user {env_ok * 1000:.0f} ms vs DB user {db_ok * 1000:.0f} ms per request (median of 3; PBKDF2 alone is ~30 ms)")
-    missing = await timed(("no-such-user", token_urlsafe(6)), 3)
-    wrongpw = await timed(("oper1", token_urlsafe(6)), 3)
+    async def interleaved(a, b, n=7):
+        """Median request times for two credentials, sampled alternately: a load spike on
+        a shared CI runner then hits both alike instead of one of them (14 failed logins,
+        well under the per-IP limit the next check relies on)."""
+        times = ([], [])
+        for _ in range(n):
+            for auth, ts in zip((a, b), times, strict=True):
+                t0 = time.perf_counter()
+                await api("GET", "/api/me", auth=auth)
+                ts.append(time.perf_counter() - t0)
+        return tuple(sorted(ts)[n // 2] for ts in times)
+
+    missing, wrongpw = await interleaved(("no-such-user", token_urlsafe(6)), ("oper1", token_urlsafe(6)))
     check(12, "Failed logins take the same time for unknown vs known usernames",
           abs(wrongpw - missing) < 0.03, f"unknown user {missing * 1000:.0f} ms vs known user {wrongpw * 1000:.0f} ms "
-          "→ username enumeration by timing", bad="FAIL")
+          "(median of 7, interleaved) → username enumeration by timing", bad="FAIL")
 
     # rate limit last — it locks this IP out for 60s
     codes = []
