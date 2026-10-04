@@ -272,6 +272,8 @@ class ReplayPolicyRepository:
     def _to_dict(row: ReplayPolicyModel) -> dict[str, Any]:
         return {
             **{field: getattr(row, field) for field in ("id", *POLICY_FIELDS)},
+            "environment": row.environment,
+            "vhost": row.vhost,
             "created_by": row.created_by,
             "last_run_at": _as_utc(row.last_run_at).isoformat() if row.last_run_at else None,
             "last_result": row.last_result or {},
@@ -308,6 +310,16 @@ class ReplayPolicyRepository:
             await session.commit()
             await session.refresh(row)
             return self._to_dict(row)
+
+    async def adopt_unscoped(self, environment: str, vhost: str) -> None:
+        """Policies from before 0.18 have no scope: they ran in the default one, so they
+        keep running there."""
+        async with self._database.session() as session:
+            await session.execute(
+                update(ReplayPolicyModel).where(ReplayPolicyModel.environment.is_(None))
+                .values(environment=environment, vhost=vhost)
+            )
+            await session.commit()
 
     async def delete(self, policy_id: int) -> bool:
         async with self._database.session() as session:

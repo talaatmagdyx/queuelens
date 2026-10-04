@@ -25,6 +25,8 @@ class Database:
     MIGRATIONS = (
         "ALTER TABLE alert_rules ADD COLUMN fired BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE replay_policies ADD COLUMN environment VARCHAR(128)",
+        "ALTER TABLE replay_policies ADD COLUMN vhost VARCHAR(255)",
     )
 
     async def start(self) -> None:

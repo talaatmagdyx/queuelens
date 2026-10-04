@@ -286,8 +286,8 @@ async def drain(name, conn=None) -> list:
     return out
 
 
-async def deadletter(work_queue, n):
-    async with CONN.channel() as ch:
+async def deadletter(work_queue, n, conn=None):
+    async with (conn or CONN).channel() as ch:
         q = await ch.declare_queue(work_queue, passive=True)
         for _ in range(n):
             m = await q.get(no_ack=False, fail=False)
@@ -1624,6 +1624,29 @@ async def g30():
           'queuelens_policy_messages_total{outcome="replayed",policy="t30 work"} 3.0' in metrics
           and 'queuelens_policy_paused{policy="t30 work"} 0.0' in metrics,
           [line for line in metrics.splitlines() if "policy" in line and not line.startswith("#")][:6])
+
+    # the same queue names in two vhosts: a policy made in staging acts there only
+    stg = await aio_pika.connect_robust(amqp_url("ql-staging"))
+    try:
+        for conn in (stg, CONN):
+            await decl("t30.scoped.dlq", conn=conn)
+            await decl("t30.scoped.work", {"x-dead-letter-exchange": "",
+                                           "x-dead-letter-routing-key": "t30.scoped.dlq"}, conn=conn)
+            await pub("t30.scoped.work", {"scoped": True}, conn=conn)
+            await deadletter("t30.scoped.work", 1, conn=conn)
+            await until(lambda conn=conn: _eq(count("t30.scoped.dlq", conn=conn), 1), 10)
+        staged = {"X-QueueLens-Environment": "staging", "X-QueueLens-Vhost": "ql-staging"}
+        made = (await api("POST", "/api/policies", headers=staged, json={
+            "name": "t30 scoped", "queue": "t30.scoped.dlq", "max_deaths": 1, "backoff_minutes": 1,
+            "interval_minutes": 60, "cap": 100, "enabled": False})).json()
+        ran = (await api("POST", f"/api/policies/{made.get('id')}/run")).json()  # from the default scope
+        check(30, "A policy acts only in the environment and vhost it was created in",
+              (made.get("environment"), made.get("vhost")) == ("staging", "ql-staging")
+              and ran.get("parked") == 1 and await count("t30.scoped.dlq.parking", conn=stg) == 1
+              and await count("t30.scoped.dlq") == 1 and await count("t30.scoped.dlq.parking") is None,
+              (made.get("environment"), made.get("vhost"), ran))
+    finally:
+        await stg.close()
 
 
 async def _consumers(mgmt, queue, want):

@@ -1,6 +1,7 @@
 """Replay policies (app/application/replay_policies.py). They move messages with no person
 in the loop, so only Admins create, change, run or re-enable one; Operators can see them,
-preview a run, and pause one."""
+preview a run, and pause one. A policy belongs to the environment and vhost of the request
+that created it, and always runs there, whichever scope a later request names."""
 
 from datetime import datetime, timedelta
 from typing import Any
@@ -9,10 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.api.routes.platform import _audit_change
+from app.api.scope import broker, broker_scope
 from app.application.queue_service import UnsafeToBrowse
 from app.auth.basic import CurrentUser, get_current_username, require_admin, require_operator
 
-router = APIRouter(prefix="/api/policies", tags=["policies"])
+router = APIRouter(prefix="/api/policies", tags=["policies"],
+                   dependencies=[Depends(broker_scope)])
 
 
 class PolicyBody(BaseModel):
@@ -44,11 +47,24 @@ async def _found(request: Request, policy_id: int) -> dict[str, Any]:
     return dict(policy)
 
 
-async def _queue_exists(request: Request, queue: str) -> None:
+async def _policy_broker(request: Request, policy: dict[str, Any]) -> Any:
     try:
-        await request.app.state.queue_service.get_queue(queue)
+        return await request.app.state.environment_manager.resolve(
+            policy["environment"], policy["vhost"])
+    except KeyError as error:
+        raise HTTPException(status_code=409, detail=str(error.args[0])) from error
+
+
+async def _queue_exists(services: Any, queue: str) -> None:
+    try:
+        await services.queue_service.get_queue(queue)
     except Exception as error:
         raise HTTPException(status_code=404, detail=f"No queue named {queue}") from error
+
+
+def _where(policy: dict[str, Any]) -> dict[str, Any]:
+    """Audit a change against the policy's own scope, not the one the request named."""
+    return {"environment": policy["environment"], "vhost": policy["vhost"]}
 
 
 @router.get("")
@@ -62,10 +78,13 @@ async def list_policies(
 async def create_policy(
     request: Request, body: PolicyBody, admin: CurrentUser = Depends(require_admin)
 ) -> dict[str, Any]:
-    await _queue_exists(request, body.queue)
-    policy = await request.app.state.replay_policies.create(admin.username, **body.model_dump())
+    await _queue_exists(broker(request), body.queue)
+    environment, vhost = request.state.scope
+    policy = await request.app.state.replay_policies.create(
+        admin.username, environment=environment, vhost=vhost, **body.model_dump())
     await _audit_change(request, admin, "create_replay_policy",
-                        {"policy": policy["id"], "name": body.name, "queue": body.queue})
+                        {"policy": policy["id"], "name": body.name, "queue": body.queue,
+                         **_where(policy)})
     return _with_next_run(policy)
 
 
@@ -74,11 +93,12 @@ async def update_policy(
     request: Request, policy_id: int, body: PolicyBody,
     admin: CurrentUser = Depends(require_admin),
 ) -> dict[str, Any]:
-    await _found(request, policy_id)
-    await _queue_exists(request, body.queue)
+    current = await _found(request, policy_id)
+    await _queue_exists(await _policy_broker(request, current), body.queue)
     policy = await request.app.state.replay_policies.update(policy_id, **body.model_dump())
     await _audit_change(request, admin, "update_replay_policy",
-                        {"policy": policy_id, "name": body.name, "queue": body.queue})
+                        {"policy": policy_id, "name": body.name, "queue": body.queue,
+                         **_where(current)})
     return _with_next_run(dict(policy or {}))
 
 
@@ -95,7 +115,8 @@ async def toggle_policy(
     current = await _found(request, policy_id)
     policy = await request.app.state.replay_policies.update(policy_id, enabled=body.enabled)
     await _audit_change(request, user, "update_replay_policy",
-                        {"policy": policy_id, "name": current["name"], "enabled": body.enabled})
+                        {"policy": policy_id, "name": current["name"], "enabled": body.enabled,
+                         **_where(current)})
     return _with_next_run(dict(policy or {}))
 
 
@@ -106,7 +127,7 @@ async def delete_policy(
     current = await _found(request, policy_id)
     await request.app.state.replay_policies.delete(policy_id)
     await _audit_change(request, admin, "delete_replay_policy",
-                        {"policy": policy_id, "name": current["name"]})
+                        {"policy": policy_id, "name": current["name"], **_where(current)})
     return {"deleted": policy_id}
 
 

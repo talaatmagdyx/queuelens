@@ -54,7 +54,7 @@ There is no instance-wide "active" environment. Every request names its environm
 vhost in `X-QueueLens-Environment` / `X-QueueLens-Vhost` (the console sends its tab's
 choice). `EnvironmentManager` keeps one bundle of services per (environment, vhost),
 started on first use. The default bundle is also exposed on `app.state`, which is what
-alert rules, replay policies and tests use.
+alert rules and tests use. A replay policy runs in the scope it was created in.
 
 ### Connection management (`RabbitMQConnection`)
 
@@ -156,9 +156,13 @@ On SQLite there is one replica. On PostgreSQL there can be several:
 
 `plan()` is pure. It sorts a snapshot's messages into park (died `max_deaths` times), replay
 (dead for `backoff × 2^(deaths − 1)`, grouped by the origin queue from x-death), wait, or
-skip, oldest first and up to the cap. `PolicyRunner.run` checks each target's consumers,
-then acts through bulk dry runs and `execute_audited` as user `policy:<name>`, records the
-run, and pauses the policy after three failed runs.
+skip, oldest first and up to the cap. `PolicyRunner.run` resolves the policy's own
+environment and vhost through `EnvironmentManager`, checks each target's consumers, then
+acts through bulk dry runs and `execute_audited` as user `policy:<name>`, records the run,
+and pauses the policy after three failed runs. A removed environment counts as a failed
+run rather than an immediate pause, since another replica's new environment can take up
+to 5 s to sync. The death count also reads `x-queuelens-deaths`, because RabbitMQ 4.x
+restarts x-death for a republished message (`domain/xdeath.py`).
 
 ### DLQ detection (`QueueService`)
 

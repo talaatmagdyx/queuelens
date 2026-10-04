@@ -30,9 +30,9 @@ That's how a message that keeps failing on 4.x still reaches `max_deaths` and is
   over several runs.
 - **No consumers, no replay.** A target queue with 0 consumers is held back: the message
   would only die again. The run notes it, and it isn't counted as a failure.
-- **Pause after failures.** Three runs in a row with failed publishes disable the policy
-  and send an Alert through the configured alert channels, as well as an in-app
-  notification.
+- **Pause after failures.** Three failed runs in a row disable the policy and send an
+  Alert through the configured alert channels, as well as an in-app notification. A run
+  fails when publishes fail, or when the policy's environment or vhost has been removed.
 - **Admin-only.** Only Admins create, change, run or re-enable a policy, since it moves
   messages with no person in the loop. Operators can see policies, preview a run, and
   pause one.
@@ -44,16 +44,21 @@ Creating, changing, pausing and deleting a policy are audited too.
 
 ## Where policies run
 
+A policy belongs to the **environment and vhost it was created in**: the ones the console
+tab (or the `X-QueueLens-Environment` / `X-QueueLens-Vhost` headers) named. It always
+runs there, and its queue is checked there when it's changed, whichever tab you're
+looking from. The list shows it under **Runs In**. Policies from before 0.18 belong to the
+default environment and vhost, where they always ran.
+
 Only the replica that leads the alert engine runs policies (with one replica, that's
-the one), and only against the **default environment**, the same as alert rules.
-Policies are checked every 30 seconds. **Preview** reads the DLQ and shows what a run
+the one). Policies are checked every 30 seconds. **Preview** reads the DLQ and shows what a run
 would do, moving nothing; **Run now** runs one immediately.
 
 ## Metrics
 
 | Metric | |
 |---|---|
-| `queuelens_policy_runs_total{policy, result}` | runs: `idle` (nothing due), `success`, `partial` (some publishes failed) |
+| `queuelens_policy_runs_total{policy, result}` | runs: `idle` (nothing due), `success`, `partial` (some publishes failed), `failed` (its environment or vhost is gone) |
 | `queuelens_policy_messages_total{policy, outcome}` | messages `replayed`, `parked`, `failed`, or `held` (no consumers) |
 | `queuelens_policy_paused{policy}` | 1 while a policy has paused itself; read from the database, so every replica reports it |
 
@@ -65,8 +70,8 @@ The bundled rules alert on a paused policy (`ReplayPolicyPaused`,
 | Method | Path | Who | |
 |---|---|---|---|
 | `GET` | `/api/policies` | anyone | policies with `last_run_at`, `last_result`, `next_run_at` |
-| `POST` | `/api/policies` | Admin | `{"name", "queue", "max_deaths", "backoff_minutes", "interval_minutes", "cap", "enabled"}`; `404` for an unknown queue |
-| `PUT` | `/api/policies/{id}` | Admin | the same body |
+| `POST` | `/api/policies` | Admin | `{"name", "queue", "max_deaths", "backoff_minutes", "interval_minutes", "cap", "enabled"}`, in the request's environment and vhost; `404` for an unknown queue there |
+| `PUT` | `/api/policies/{id}` | Admin | the same body; the queue is checked in the policy's own scope, `409` if that is gone |
 | `PATCH` | `/api/policies/{id}` | Operator to pause, Admin to enable | `{"enabled"}` |
 | `DELETE` | `/api/policies/{id}` | Admin | messages stay where they are |
 | `POST` | `/api/policies/{id}/preview` | Operator | what a run would do now; moves nothing |

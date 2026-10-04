@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **A replay policy could act on the wrong broker.**
+  - **The problem:** the Policies screen offered the DLQs of the tab's environment and
+    vhost. The server checked the queue, and later ran the policy, against the default
+    ones. So a policy created while looking at `staging` moved messages in the default
+    environment's queue of the same name. Preview and Run now did the same.
+
+### Changed
+- **A replay policy belongs to the environment and vhost it was created in.**
+  - **Where it runs:** always in that environment and vhost, from any tab. Its audit rows
+    name them, and the list shows them under **Runs In**.
+  - **Editing:** checks the queue in the policy's own environment and vhost.
+  - **Existing policies:** they belong to the default environment and vhost, where they
+    always ran.
+- **A removed environment or vhost counts as a failed run.** After three, the policy
+  pauses and notifies. A new `failed` value of `queuelens_policy_runs_total{result}`
+  counts these runs.
+- **One policy that can't run no longer stops the others in the same pass.**
+
 ## v0.17.2 — 2026-10-04
 
 ### Fixed

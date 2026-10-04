@@ -8,8 +8,9 @@ A run reads the DLQ once and sorts its messages, oldest first:
 At most `cap` messages are acted on per run. A replay target with no consumers is skipped:
 the message would only die again. Everything goes through the bulk path a person uses
 (dry run, publish-before-ack, the per-queue lock, the audit trail) as user
-`policy:<name>`. Only the replica that leads the alert engine runs policies, for the
-default environment. Three runs in a row with failed publishes pause the policy and notify.
+`policy:<name>`, in the environment and vhost the policy was created in. Only the replica
+that leads the alert engine runs policies. Three failed runs in a row (failed publishes, or
+an environment that was removed) pause the policy and notify.
 """
 
 import asyncio
@@ -23,6 +24,7 @@ from app.application.action_service import configured_target
 from app.application.bulk_runs import execute_audited
 from app.domain.models import AuditEntry, MessageRecord, ReplayTarget
 from app.domain.xdeath import deaths
+from app.infrastructure.persistence.audit_repository import BROKER_SCOPE
 from app.observability.metrics import POLICY_MESSAGES, POLICY_RUNS
 
 logger = logging.getLogger(__name__)
@@ -93,7 +95,7 @@ class PolicyRunner:
 
     def __init__(self, state: Any, *, is_leader: Callable[[], Awaitable[bool]] | None = None,
                  clock: Callable[[], datetime] = lambda: datetime.now(UTC)) -> None:
-        self._state = state  # app.state: the default environment's services
+        self._state = state  # app.state; each policy's broker comes from environment_manager
         self._is_leader = is_leader
         self._clock = clock
         self._task: asyncio.Task[None] | None = None
@@ -127,7 +129,10 @@ class PolicyRunner:
             if policy["enabled"] and (
                 not last or now - last >= timedelta(minutes=policy["interval_minutes"])
             ):
-                await self.run(policy)
+                try:
+                    await self.run(policy)
+                except Exception:  # noqa: BLE001 - a broker that is down stops only its policy
+                    logger.exception("replay policy %s failed to run", policy["name"])
 
     async def _limit(self, key: str, ceiling: int) -> int:
         stored = await self._state.settings_store.get_safe("limits", {}) or {}
@@ -135,27 +140,40 @@ class PolicyRunner:
 
     async def run(self, policy: dict[str, Any], *, preview: bool = False) -> dict[str, Any]:
         """One run, or with `preview` only what a run would do now (nothing moves)."""
-        state = self._state
+        manager = self._state.environment_manager
+        username = f"policy:{policy['name']}"
+        try:
+            scope = manager.scope(policy["environment"], policy["vhost"])
+            broker = await manager.resolve(*scope)
+        except KeyError as error:  # its environment or vhost was removed
+            result = _empty(self._clock(), errors=[str(error.args[0])])
+            if not preview:
+                await self._finish(policy, result, username, unreachable=True)
+            return result
+        token = BROKER_SCOPE.set(scope)  # the run's audit rows name its broker
+        try:
+            return await self._run(policy, broker, username, preview)
+        finally:
+            BROKER_SCOPE.reset(token)
+
+    async def _run(self, policy: dict[str, Any], broker: Any, username: str,
+                   preview: bool) -> dict[str, Any]:
         queue = policy["queue"]
         depth = await self._limit("max_browse_depth", 50_000)
         cap = min(policy["cap"], await self._limit("max_bulk_size", 1000))
         now = self._clock()
-        scan = await state.message_service.snapshot(queue, depth)
+        scan = await broker.message_service.snapshot(queue, depth)
         sorted_ = plan(scan.records, dlq=queue, now=now, max_deaths=policy["max_deaths"],
                        backoff_minutes=policy["backoff_minutes"], cap=cap,
-                       fallback=configured_target(state.settings, queue))
-        result: dict[str, Any] = {
-            "at": now.isoformat(), "scanned": len(scan.records),
-            "waiting": sorted_.waiting, "no_history": sorted_.no_history,
-            "no_target": sorted_.no_target, "capped": sorted_.capped,
-            "replayed": 0, "parked": 0, "failed": 0, "skipped_no_consumers": 0,
-            "targets": {}, "errors": [],
-        }
+                       fallback=configured_target(broker.settings, queue))
+        result = _empty(now, scanned=len(scan.records), waiting=sorted_.waiting,
+                        no_history=sorted_.no_history, no_target=sorted_.no_target,
+                        capped=sorted_.capped)
         consumers: dict[ReplayTarget, int | None] = {}
         for target in sorted_.replay:
             if target.type == "queue" and target.queue:
                 try:
-                    info = await state.queue_service.get_queue(target.queue)
+                    info = await broker.queue_service.get_queue(target.queue)
                     consumers[target] = info.consumers
                 except Exception as error:  # noqa: BLE001 - a missing target is a skip, noted
                     consumers[target] = 0
@@ -168,29 +186,29 @@ class PolicyRunner:
             result["to_park"] = len(sorted_.park)
             return result
 
-        username = f"policy:{policy['name']}"
-        headers = await _custom_headers(state)
+        headers = await _custom_headers(self._state)
         for target, fingerprints in sorted_.replay.items():
             name = _target_name(target)
             if consumers[target] == 0:
                 result["skipped_no_consumers"] += len(fingerprints)
                 result["targets"][name] = {"skipped": "no consumers", "due": len(fingerprints)}
                 continue
-            summary = await self._bulk(policy, "replay", fingerprints, target, depth,
+            summary = await self._bulk(broker, policy, "replay", fingerprints, target, depth,
                                        username, headers, result)
             result["replayed"] += summary.get("succeeded", 0)
             result["targets"][name] = summary
         if sorted_.park:
-            summary = await self._bulk(policy, "park", sorted_.park, None, depth, username,
-                                       headers, result)
+            summary = await self._bulk(broker, policy, "park", sorted_.park, None, depth,
+                                       username, headers, result)
             result["parked"] += summary.get("succeeded", 0)
         await self._finish(policy, result, username)
         return result
 
-    async def _bulk(self, policy: dict[str, Any], action: str, fingerprints: list[str],
-                    target: ReplayTarget | None, depth: int, username: str,
-                    headers: dict[str, object], result: dict[str, Any]) -> dict[str, int]:
-        service = self._state.bulk_service
+    async def _bulk(self, broker: Any, policy: dict[str, Any], action: str,
+                    fingerprints: list[str], target: ReplayTarget | None, depth: int,
+                    username: str, headers: dict[str, object],
+                    result: dict[str, Any]) -> dict[str, int]:
+        service = broker.bulk_service
         try:
             preview = await service.dry_run(
                 source_queue=policy["queue"], action=action, mode="move", target=target,
@@ -209,13 +227,14 @@ class PolicyRunner:
         result["failed"] += summary.get("failed", 0)
         return summary
 
-    async def _finish(self, policy: dict[str, Any], result: dict[str, Any],
-                      username: str) -> None:
+    async def _finish(self, policy: dict[str, Any], result: dict[str, Any], username: str,
+                      *, unreachable: bool = False) -> None:
         state = self._state
-        failed_run = result["failed"] > 0
+        failed_run = unreachable or result["failed"] > 0
         moved = result["replayed"] or result["parked"]
-        POLICY_RUNS.labels(policy=policy["name"],
-                           result="partial" if failed_run else "success" if moved else "idle").inc()
+        outcome_of_run = ("failed" if unreachable else "partial" if failed_run
+                          else "success" if moved else "idle")
+        POLICY_RUNS.labels(policy=policy["name"], result=outcome_of_run).inc()
         for outcome, key in (("replayed", "replayed"), ("parked", "parked"),
                              ("failed", "failed"), ("held", "skipped_no_consumers")):
             if result[key]:
@@ -225,7 +244,9 @@ class PolicyRunner:
         if moved or failed_run:
             await state.audit_repository.record(AuditEntry(
                 username=username, action="run_replay_policy", timestamp=self._clock(),
-                source_queue=policy["queue"], result="partial" if failed_run else "success",
+                source_queue=policy["queue"],
+                result=outcome_of_run if failed_run else "success",
+                error_message="; ".join(result["errors"]) if unreachable else None,
                 metadata={"policy": policy["id"], **{k: result[k] for k in (
                     "replayed", "parked", "failed", "waiting", "skipped_no_consumers",
                     "capped")}},
@@ -238,7 +259,9 @@ class PolicyRunner:
                              failed_runs: int, username: str) -> None:
         state = self._state
         title = f"Replay policy paused: {policy['name']}"
-        message = (f"{failed_runs} runs in a row failed to publish from {policy['queue']}; "
+        message = (f"{failed_runs} runs in a row failed for {policy['queue']} in "
+                   f"{policy['environment'] or 'the default environment'} / "
+                   f"{policy['vhost'] or 'its default vhost'}; "
                    f"the policy is disabled until an Admin enables it again. "
                    f"Last errors: {'; '.join(result['errors'][-3:]) or 'see the audit log'}")
         await state.audit_repository.record(AuditEntry(
@@ -253,6 +276,13 @@ class PolicyRunner:
         delivery = await state.alert_engine.dispatch(channels, title, message, severity="Alert")
         await state.notifications.add(level="Alert", title=title, message=message,
                                       source="Replay policy", delivery=delivery)
+
+
+def _empty(at: datetime, **counts: Any) -> dict[str, Any]:
+    """A run's result before anything is acted on."""
+    return {"at": at.isoformat(), "scanned": 0, "waiting": 0, "no_history": 0, "no_target": 0,
+            "capped": 0, "replayed": 0, "parked": 0, "failed": 0, "skipped_no_consumers": 0,
+            "targets": {}, "errors": [], **counts}
 
 
 async def _custom_headers(state: Any) -> dict[str, object]:

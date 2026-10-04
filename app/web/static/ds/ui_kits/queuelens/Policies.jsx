@@ -1,5 +1,6 @@
 // Replay Policies screen: DLQs QueueLens retries by itself (/api/policies). A run replays
 // due messages to the queue they died in, with backoff, and parks the exhausted ones.
+// A policy runs in the environment and vhost it was created in, whatever this tab shows.
 (function () {
   const { Icon, StatusPill, Button, IconButton, DataTable, Input, Select, Switch, Alert } = window.__NS;
   const { PageHeader, Card } = window.QL;
@@ -46,7 +47,12 @@
     const [draft, setDraft] = React.useState(EMPTY);
     const [error, setError] = React.useState(null);
     const [note, setNote] = React.useState(null);
-    const dlqs = D.queues.filter((q) => q.type === 'DLQ').map((q) => q.name);
+    const here = window.QL.broker || {};
+    const where = (p) => p.environment + ' · ' + p.vhost;
+    const current = policies.find((p) => p.id === editing);
+    // this tab's DLQs only belong to a policy of this tab's scope
+    const sameScope = !current || (current.environment === here.environment && current.vhost === here.vhost);
+    const dlqs = sameScope ? D.queues.filter((q) => q.type === 'DLQ').map((q) => q.name) : [];
     const reload = () => setPolicies(fetchPolicies());
     const call = async (method, path, body) => {
       setError(null);
@@ -87,7 +93,7 @@
         {error && <Alert tone="danger" style={{ marginBottom: 14 }}>{error}</Alert>}
         {note && <Alert tone={note.tone} title={note.title} style={{ marginBottom: 14 }}>{note.text}</Alert>}
         {editing && (
-          <Card title={editing === 'new' ? 'New Replay Policy' : 'Edit Replay Policy'} subtitle="Runs only on the replica that leads the alert engine, for the default environment." style={{ marginBottom: 18 }}>
+          <Card title={editing === 'new' ? 'New Replay Policy' : 'Edit Replay Policy'} subtitle={'Runs in ' + (current ? where(current) : where(here)) + (current ? '' : ' (this tab)') + ', on the replica that leads the alert engine.'} style={{ marginBottom: 18 }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, marginTop: 4 }}>
               {field('name', 'Name')}
               <Select label="Dead-letter queue" options={dlqs.length ? dlqs : [draft.queue]} value={draft.queue} onChange={(v) => setDraft({ ...draft, queue: v })} />
@@ -106,7 +112,8 @@
           <DataTable rowKey="id"
             columns={[
               { key: 'name', label: 'Policy', render: (p) => <span style={{ fontWeight: 600, color: 'var(--slate-900)', whiteSpace: 'normal' }}>{p.name}</span> },
-              { key: 'queue', label: 'DLQ', render: (p) => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{p.queue}</span> },
+              { key: 'queue', label: 'DLQ', render: (p) => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, whiteSpace: 'normal', overflowWrap: 'break-word' }}>{p.queue}</span> },
+              { key: 'where', label: 'Runs In', render: (p) => <span style={{ fontSize: 12.5, color: 'var(--slate-600)', whiteSpace: 'normal' }}>{where(p)}</span> },
               { key: 'rule', label: 'Rule', render: (p) => <span style={{ fontSize: 12.5, color: 'var(--slate-600)', whiteSpace: 'normal' }}>backoff {p.backoff_minutes}m × 2ⁿ⁻¹ · park at {p.max_deaths} · every {p.interval_minutes}m · ≤ {p.cap}</span> },
               { key: 'last', label: 'Last Run', render: (p) => <span style={{ fontSize: 12.5, whiteSpace: 'normal' }}>{lastRun(p)}{p.consecutive_failures ? <StatusPill tone="danger" style={{ marginLeft: 6 }}>{p.consecutive_failures} failed in a row</StatusPill> : null}</span> },
               { key: 'on', label: 'Enabled', align: 'right', render: (p) => <span onClick={(e) => e.stopPropagation()} title={!isAdmin && !p.enabled ? 'Only an Admin can turn a policy back on' : ''}><Switch checked={p.enabled} onChange={() => (canAct && (p.enabled || isAdmin)) && toggle(p)} /></span> },
@@ -123,8 +130,8 @@
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 16, padding: '10px 12px', background: 'var(--blue-50)', border: '1px solid var(--blue-200)', borderRadius: 'var(--radius-md)' }}>
           <Icon name="shield-check" size={15} color="var(--blue-600)" style={{ marginTop: 1 }} />
           <span style={{ fontSize: 12.5, color: 'var(--slate-600)', lineHeight: 1.5 }}>
-            A run goes through the same path as a bulk action: dry run, publish before ack, and an audit row per message as <code>policy:&lt;name&gt;</code>.
-            It holds back a replay when the target queue has no consumers, and pauses the policy after 3 runs in a row with failed publishes, notifying the alert channels.
+            A policy runs in the environment and vhost it was created in. A run goes through the same path as a bulk action: dry run, publish before ack, and an audit row per message as <code>policy:&lt;name&gt;</code>.
+            It holds back a replay when the target queue has no consumers, and pauses the policy after 3 failed runs in a row, notifying the alert channels.
           </span>
         </div>
       </div>
