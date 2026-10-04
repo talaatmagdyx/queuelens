@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.17.0 — 2026-10-04
 
 ### Added
 - **Replay policies: QueueLens retries a DLQ by itself** (docs/POLICIES.md).
@@ -16,6 +16,14 @@
   - **Where it runs:** only on the replica that leads the alert engine, against the
     default environment.
   - **Console:** a Replay Policies screen with Preview and Run now.
+
+### Upgrade notes
+- **No breaking changes.** Replay policies are opt-in: nothing moves until an Admin
+  creates one. They use a new `replay_policies` table, created at startup.
+- **Helm chart 0.4.0** deploys QueueLens 0.17.0.
+- **New audit actions:** `create_replay_policy`, `update_replay_policy`,
+  `delete_replay_policy`, `run_replay_policy`, `pause_replay_policy`. Runs act as the
+  user `policy:<name>`.
 
 ## v0.16.1 — 2026-10-04
 
