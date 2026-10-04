@@ -302,8 +302,8 @@ window.QL.screens = window.QL.screens || {};
     return sample;
   }
 
-  window.QL.fetchAudit = function () {
-    var raw = (getJson('/api/audit?limit=500') || {}).events || [];
+  window.QL.fetchAudit = function (user) {  // user: only that account's actions, e.g. a policy's
+    var raw = (getJson('/api/audit?limit=500' + (user ? '&username=' + encodeURIComponent(user) : '')) || {}).events || [];
     return raw.filter(function (e) { return e.result !== 'started'; }).map(function (e, i) {
       var meta = e.metadata || {};
       return {

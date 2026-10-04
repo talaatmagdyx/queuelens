@@ -179,7 +179,7 @@ function App() {
   else if (route.id === 'composer') screen = <S.Composer nav={nav} />;
   else if (route.id === 'alerts') screen = <S.Alerts nav={nav} />;
   else if (route.id === 'policies') screen = <S.Policies nav={nav} />;
-  else if (route.id === 'audit') screen = <S.AuditLog nav={nav} />;
+  else if (route.id === 'audit') screen = <S.AuditLog nav={nav} user={route.params.user || ''} />;
   else if (route.id === 'metrics') screen = <S.Metrics nav={nav} />;
   else if (route.id === 'config') screen = <S.Configuration nav={nav} envs={ENVS} activeEnv={envId} vhost={vhost} onEnvChange={switchEnv} />;
   else if (route.id === 'notifications') screen = <S.Notifications nav={nav} />;

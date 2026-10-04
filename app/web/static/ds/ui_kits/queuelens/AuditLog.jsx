@@ -18,9 +18,10 @@
   const atDots = (s) => String(s).split('.').flatMap((part, i, all) => (i < all.length - 1 ? [part + '.', <wbr key={i} />] : [part]));
   const pct = (n, total) => (total ? ((n / total) * 100).toFixed(1) + '%' : '—');
 
-  function AuditLog({ nav }) {
+  function AuditLog({ nav, user = '' }) {
     // Refetch on every mount so actions executed this session show up immediately.
-    const audit = React.useMemo(() => window.QL.fetchAudit(), []);
+    const [userF, setUserF] = React.useState(user);  // one account's actions, read server-side
+    const audit = React.useMemo(() => window.QL.fetchAudit(userF), [userF]);
     const [sel, setSel] = React.useState(audit[0] || null);
     const [page, setPage] = React.useState(1);
     const [pageSize, setPageSize] = React.useState(10);
@@ -48,7 +49,7 @@
     const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
     const safePage = Math.min(page, pageCount);
     const pageRows = rows.slice((safePage - 1) * pageSize, safePage * pageSize);
-    const filtersOn = q || from || to || actionF !== 'All Actions' || resultF !== 'All Results';
+    const filtersOn = userF || q || from || to || actionF !== 'All Actions' || resultF !== 'All Results';
 
     const exportFormat = ((((window.QL.serverSettings || {}).ui) || {}).export_format || 'CSV');
     // server-side streaming export: the COMPLETE history, not just the loaded page
@@ -59,7 +60,7 @@
       a.click();
     };
 
-    const clearFilters = () => { setQ(''); setActionF('All Actions'); setResultF('All Results'); setFrom(''); setTo(''); setPage(1); };
+    const clearFilters = () => { setUserF(''); setQ(''); setActionF('All Actions'); setResultF('All Results'); setFrom(''); setTo(''); setPage(1); };
 
     return (
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
@@ -83,7 +84,8 @@
             <div style={{ width: 145 }}><Input type="date" value={to} onChange={(v) => { setTo(v); setPage(1); }} /></div>
           </div>
           {filtersOn && (
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginBottom: 18 }}>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', alignItems: 'center', marginBottom: 18 }}>
+              {userF && <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Only actions by <b>{userF}</b></span>}
               <Button variant="ghost" onClick={clearFilters}>Clear Filters</Button>
             </div>
           )}

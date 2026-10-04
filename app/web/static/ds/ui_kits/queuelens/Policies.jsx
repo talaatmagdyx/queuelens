@@ -38,7 +38,7 @@
 
   const EMPTY = { name: '', queue: '', max_deaths: '3', backoff_minutes: '5', interval_minutes: '10', cap: '100' };
 
-  function Policies() {
+  function Policies({ nav }) {
     const me = window.QL.me || {};
     const isAdmin = me.role === 'Admin';
     const canAct = me.role !== 'Viewer';
@@ -119,6 +119,7 @@
               { key: 'on', label: 'Enabled', align: 'right', render: (p) => <span onClick={(e) => e.stopPropagation()} title={!isAdmin && !p.enabled ? 'Only an Admin can turn a policy back on' : ''}><Switch checked={p.enabled} onChange={() => (canAct && (p.enabled || isAdmin)) && toggle(p)} /></span> },
               { key: 'a', label: '', align: 'right', render: (p) => (
                 <span style={{ display: 'inline-flex', gap: 6, whiteSpace: 'nowrap' }}>
+                  <IconButton icon="history" size={28} title="History: this policy's runs and moves, in the Audit Log" onClick={() => nav('audit', { user: 'policy:' + p.name })} />
                   {canAct && <IconButton icon="eye" size={28} title="Preview: what a run would do now" onClick={() => preview(p)} />}
                   {isAdmin && <IconButton icon="play" size={28} title="Run now" onClick={() => runNow(p)} />}
                   {isAdmin && <IconButton icon="pencil" size={28} title="Edit" onClick={() => open(p)} />}
