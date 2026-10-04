@@ -83,6 +83,9 @@ data elsewhere, in text bodies for instance, and the UI shows those in full.
 - Give people their own identity: invite them (Users page), or put QueueLens behind your
   SSO with an authenticating proxy ([docs/SSO.md](SSO.md)). A shared account means a
   shared audit identity.
+- Account changes (invites, roles, deactivation, password changes) and configuration
+  changes (settings keys, alert rules) are audited next to broker actions; a setting's
+  value is recorded only for retention and limits, never for channels or headers.
 - When someone leaves, deactivate or remove their account on the Users page. It takes
   effect on their next request, on every replica. Accounts set by environment variables
   are removed there.

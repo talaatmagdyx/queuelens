@@ -10,6 +10,13 @@
   Environments. The target column says which account or environment changed.
 - **Inviting a user and changing your password weren't audited.** They now write
   `invite_user` (with the role) and `change_password` rows, never the password.
+- **Configuration changes weren't audited**, so an admin could shorten retention or
+  redirect alert delivery without a trace. Changing settings now writes `update_settings`
+  with the keys that changed. Values are recorded only for `retention` and `limits`;
+  channels and custom headers can carry credentials, so only their key is. Creating,
+  editing, toggling and deleting an alert rule writes `create_alert_rule` /
+  `update_alert_rule` / `delete_alert_rule`. The Audit Log labels them and filters them
+  as Configuration.
 - **The Audit Log's details panel claimed "Published First"** for actions that move no
   message, and offered "View Message" without one.
 - **The Audit Log table overflowed its card** by about 130 px; times, actions and queue

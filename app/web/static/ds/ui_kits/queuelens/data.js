@@ -58,6 +58,10 @@ window.QL.screens = window.QL.screens || {};
         .filter(Boolean).join(', ');
       return m.user + (change ? ' \u2192 ' + change : '');
     }
+    if (e.action === 'update_settings') return (m.keys || []).join(', ') || '\u2014';
+    if (/_alert_rule$/.test(e.action || '')) {
+      return (m.name || 'rule ' + m.rule) + (m.enabled === true ? ' \u2192 enabled' : m.enabled === false ? ' \u2192 disabled' : '');
+    }
     if (e.action === 'export_snapshot') return (m.messages != null ? m.messages + ' messages' : 'snapshot') + ' (' + (m.format || '') + ')';
     // add / remove name the environment changed; a switch names the one checked
     if (/_environment$/.test(e.action || '')) return m.name || ((m.environment || '\u2014') + (m.vhost ? ' / ' + m.vhost : ''));

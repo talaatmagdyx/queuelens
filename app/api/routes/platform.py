@@ -91,11 +91,16 @@ class SettingsUpdate(BaseModel):
     values: dict[str, Any]
 
 
+# audited with their new values; every other key only by name (channels and custom
+# headers can carry credentials)
+AUDITED_SETTING_VALUES = {"retention", "limits"}
+
+
 @router.put("/settings")
 async def put_settings_api(
     request: Request,
     body: SettingsUpdate,
-    _user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_admin),
 ) -> dict[str, Any]:
     unknown = set(body.values) - ALLOWED_SETTING_KEYS
     if unknown:
@@ -125,9 +130,15 @@ async def put_settings_api(
             for field in fields:
                 if config.get(field) == SECRET_SENTINEL:  # unchanged → keep the stored secret
                     config[field] = (stored.get(name) or {}).get(field, "")
-    return _redact_channels(
-        cast(dict[str, Any], await request.app.state.settings_store.put(values))
-    )
+    store = request.app.state.settings_store
+    changed = sorted([key for key in values if await store.get(key) != values[key]])
+    saved = cast(dict[str, Any], await store.put(values))
+    if changed:  # a shortened retention or a redirected channel leaves a trace
+        await _audit_change(request, user, "update_settings", {
+            "keys": changed,
+            **{key: values[key] for key in changed if key in AUDITED_SETTING_VALUES},
+        })
+    return _redact_channels(saved)
 
 
 # ---------------------------------------------------------------- alert rules
@@ -161,11 +172,11 @@ async def create_alert(
     body: AlertRuleBody,
     user: CurrentUser = Depends(require_operator),
 ) -> dict[str, Any]:
-    username = user.username
-    return cast(
-        dict[str, Any],
-        await request.app.state.alert_rules.create(created_by=username, **body.model_dump()),
+    rule = await request.app.state.alert_rules.create(
+        created_by=user.username, **body.model_dump()
     )
+    await _audit_change(request, user, "create_alert_rule", {"rule": rule["id"], "name": body.name})
+    return cast(dict[str, Any], rule)
 
 
 @router.put("/alerts/{rule_id}")
@@ -173,11 +184,12 @@ async def update_alert(
     request: Request,
     rule_id: int,
     body: AlertRuleBody,
-    _user: CurrentUser = Depends(require_operator),
+    user: CurrentUser = Depends(require_operator),
 ) -> dict[str, Any]:
     updated = await request.app.state.alert_rules.update(rule_id, **body.model_dump())
     if updated is None:
         raise HTTPException(status_code=404, detail="Alert rule not found")
+    await _audit_change(request, user, "update_alert_rule", {"rule": rule_id, "name": body.name})
     return cast(dict[str, Any], updated)
 
 
@@ -190,11 +202,13 @@ async def patch_alert(
     request: Request,
     rule_id: int,
     body: AlertPatch,
-    _user: CurrentUser = Depends(require_operator),
+    user: CurrentUser = Depends(require_operator),
 ) -> dict[str, Any]:
     updated = await request.app.state.alert_rules.update(rule_id, enabled=body.enabled)
     if updated is None:
         raise HTTPException(status_code=404, detail="Alert rule not found")
+    await _audit_change(request, user, "update_alert_rule",
+                        {"rule": rule_id, "name": updated["name"], "enabled": body.enabled})
     return cast(dict[str, Any], updated)
 
 
@@ -202,10 +216,13 @@ async def patch_alert(
 async def delete_alert(
     request: Request,
     rule_id: int,
-    _user: CurrentUser = Depends(require_operator),
+    user: CurrentUser = Depends(require_operator),
 ) -> dict[str, Any]:
+    rules = {rule["id"]: rule for rule in await request.app.state.alert_rules.list()}
     if not await request.app.state.alert_rules.delete(rule_id):
         raise HTTPException(status_code=404, detail="Alert rule not found")
+    await _audit_change(request, user, "delete_alert_rule",
+                        {"rule": rule_id, "name": rules.get(rule_id, {}).get("name")})
     return {"deleted": rule_id}
 
 
@@ -267,7 +284,7 @@ async def invite_user(
     )
     if not created:
         raise HTTPException(status_code=409, detail="User already exists")
-    await _audit_user_change(
+    await _audit_change(
         request, user, "invite_user", {"user": body.username, "new_role": body.role}
     )
     email_result: dict[str, Any] | None = None
@@ -315,10 +332,10 @@ def _changeable(request: Request, admin: CurrentUser, username: str) -> None:
         )
 
 
-async def _audit_user_change(
+async def _audit_change(
     request: Request, actor: CurrentUser, action: str, metadata: dict[str, Any]
 ) -> None:
-    """Account changes are audited like broker actions: who changed which account."""
+    """Account and configuration changes are audited like broker actions: who changed what."""
     from datetime import UTC, datetime
 
     from app.domain.models import AuditEntry
@@ -346,7 +363,7 @@ async def update_user(
         raise HTTPException(status_code=404, detail=f"No local account named {username}")
     # `role` on every audit row is the acting Admin's, so the new one is `new_role`
     audit = {"user": username, **{"new_role" if k == "role" else k: v for k, v in changes.items()}}
-    await _audit_user_change(request, admin, "update_user", audit)
+    await _audit_change(request, admin, "update_user", audit)
     return {"username": username, **changes}
 
 
@@ -361,7 +378,7 @@ async def delete_user(
     _changeable(request, admin, username)
     if not await request.app.state.users.delete(username):
         raise HTTPException(status_code=404, detail=f"No local account named {username}")
-    await _audit_user_change(request, admin, "delete_user", {"user": username})
+    await _audit_change(request, admin, "delete_user", {"user": username})
     return {"deleted": username}
 
 
@@ -390,7 +407,7 @@ async def change_my_password(
     )
     if not changed:
         raise HTTPException(status_code=403, detail="Current password is incorrect")
-    await _audit_user_change(request, user, "change_password", {"user": user.username})
+    await _audit_change(request, user, "change_password", {"user": user.username})
     return {"changed": True}
 
 
