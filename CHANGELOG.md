@@ -12,12 +12,23 @@
   - A deactivated account is refused through SSO too.
   - Your own account and accounts set by environment variables can't be changed this way.
 - `GET /api/users` reports `managed` (`env` or `local`) and `must_change_password`.
+- **Select all matching.** With a page fully selected, "Select all N matching" selects
+  every message in the snapshot that the current filters match. The bulk dry run takes
+  `match` (the filters) with `snapshot`, and the server picks the messages. More than the
+  bulk limit is refused, and the console says so before you try.
+- **Export a snapshot** as JSON or CSV (the Export menu, or
+  `GET /api/queues/{q}/snapshots/{id}/export`), with the page filters applied. Messages
+  are masked as the console shows them, CSV cells can't open as formulas, and every
+  export is audited.
 
 ### Fixed
 - The Users page marked an account "Invited" only when it was inactive, which never
   happened. Now "Invited" means the one-time password hasn't been replaced yet, and
   "Deactivated" means switched off.
 - The Users page's row menu button did nothing; it's replaced by the actions above.
+- **The Alerts table overflowed its card** by about 400 px. Channel chips now show just the
+  channel (unconfigured ones in amber, with the details in a tooltip), and the rule and
+  condition cells wrap.
 
 ## v0.15.0 — 2026-10-03
 

@@ -75,6 +75,10 @@ and queue, and it ends with its transaction, so no failure path can leave one he
   deliveries.
 - An action on a message picked from a snapshot scans down to the message's position. In a
   classic queue a message only ever moves up, so its position is an upper bound.
+- "Select all matching" sends the filter, not a list: the server picks the matches from
+  the snapshot, and the bulk limit and the dry run apply as for a hand-picked selection.
+- An export hands over a snapshot's messages masked as the console shows them, and is
+  audited with its message count.
 
 ### 2. Publish happens before ack — always
 For move, park, and copy (`MessageOperator.operate`), the outgoing publish completes
