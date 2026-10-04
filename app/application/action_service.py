@@ -64,6 +64,7 @@ class ActionService:
             action=mode,
             target=resolved_target,
             replay_headers=headers,
+            stamp_deaths=annotate,
             **await self._scan(source_queue, max_scan, depth),
         )
         result["headers_added"] = headers

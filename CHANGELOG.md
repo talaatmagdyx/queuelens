@@ -11,6 +11,8 @@
     It was replayed every `backoff_minutes`, without end.
   - **The fix:** every replay now stamps the death count so far in a new
     `x-queuelens-deaths` header. The count combines that header with x-death.
+  - **`"annotate": false`:** a replay sent this way still adds no `x-queuelens-*`
+    header at all, including this one. So on 4.x, its death count starts again.
 - **The same count is used everywhere:** the console's x-death column, the `min_deaths`
   filter, "select all matching", the CSV export, and the new `deaths` field on API
   messages.

@@ -84,6 +84,7 @@ class MessageOperator:
         action: str,
         target: ReplayTarget | None = None,
         replay_headers: dict[str, Any] | None = None,
+        stamp_deaths: bool = True,  # off for annotate=false: no x-queuelens-* at all
         max_scan: int = 100,
         whole: bool = False,
     ) -> dict[str, object]:
@@ -109,7 +110,7 @@ class MessageOperator:
                         raise ValueError("A publish target is required")
                     await self._ensure_target(channel, target, create=action == "park")
                     await self._publish(channel, target_record, target, replay_headers or {},
-                                        replay=action != "park")
+                                        stamp_deaths=stamp_deaths and action != "park")
 
                 if action in {"move", "park", "delete"}:
                     await target_message.ack()
@@ -190,7 +191,7 @@ class MessageOperator:
                             }
                             await self._publish(
                                 channel, record, cast(ReplayTarget, target), headers,
-                                replay=action != "park",
+                                stamp_deaths=action != "park",
                             )
                             published = True
                         if action == "copy":
@@ -261,11 +262,11 @@ class MessageOperator:
         target: ReplayTarget,
         replay_headers: dict[str, Any],
         *,
-        replay: bool,
+        stamp_deaths: bool,
     ) -> None:
         properties = record.properties
         headers = {**record.headers, **replay_headers}
-        if replay:  # RabbitMQ 4.x restarts x-death for a republished message
+        if stamp_deaths:  # RabbitMQ 4.x restarts x-death for a republished message
             headers[DEATHS_HEADER] = deaths(record.x_death, record.headers)
         outgoing = _Replay(
             record.body,

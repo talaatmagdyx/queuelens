@@ -234,7 +234,8 @@ Replayed messages keep their body and properties and gain provenance headers:
 `x-queuelens-replayed-at`, `x-queuelens-replayed-by`, `x-queuelens-source-queue`,
 `x-queuelens-original-fingerprint`, `x-queuelens-deaths` (how many times it had died, see
 `deaths` above) — plus the admin-configured custom headers. Bulk replay stamps the same
-set. A message that had no `message_id` gains a random one on replay (the
+set. `"annotate": false` sends the message with no `x-queuelens-*` header at all, so on
+RabbitMQ 4.x its death count starts again. A message that had no `message_id` gains a random one on replay (the
 client library needs it to match a broker return to its publish).
 
 ### `POST /api/messages/park`
