@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Replay policies: QueueLens retries a DLQ by itself** (docs/POLICIES.md).
+  - **What a run does:** each run replays the messages that are due back to the queue
+    they died in (read from their x-death, else the DLQ's configured target), and parks
+    the ones that died too often.
+  - **Backoff:** a message is due after `backoff_minutes × 2^(deaths − 1)`.
+  - **Guard rails:** a cap per run; no replay into a queue with no consumers; the policy
+    pauses after 3 failed runs and notifies the alert channels; only Admins may create,
+    change, run or re-enable a policy.
+  - **Same path as a person's bulk run:** dry run, publish-before-ack, the per-queue
+    lock, and a per-message audit trail as `policy:<name>`.
+  - **Where it runs:** only on the replica that leads the alert engine, against the
+    default environment.
+  - **Console:** a Replay Policies screen with Preview and Run now.
+
 ## v0.16.1 — 2026-10-04
 
 ### Fixed

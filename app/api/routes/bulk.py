@@ -1,6 +1,5 @@
-import time
 from datetime import UTC, datetime
-from typing import Any, Literal, cast
+from typing import Literal, cast
 
 from aiormq.exceptions import ChannelNotFoundEntity
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -9,13 +8,12 @@ from pydantic import BaseModel, Field
 from app.api.routes.actions import TargetRequest, _custom_headers
 from app.api.routes.messages import effective_limit, scan_depth
 from app.api.scope import broker, broker_scope
-from app.application.action_service import provenance_headers
+from app.application.bulk_runs import execute_audited
 from app.application.bulk_service import BulkActionService, UnknownBulkBatch
 from app.application.queue_service import UnsafeToBrowse
 from app.auth.basic import CurrentUser, require_operator
 from app.domain.models import AuditEntry
 from app.infrastructure.rabbitmq.message_operator import REFUSALS, error_text, refusal_text
-from app.observability.metrics import ACTIONS, OPERATION_SECONDS
 
 router = APIRouter(
     prefix="/api/messages/bulk", tags=["bulk"], dependencies=[Depends(broker_scope)]
@@ -143,122 +141,28 @@ async def execute(
         raise HTTPException(status_code=403, detail="Deleting messages requires the Admin role")
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Bulk execution confirmation is required")
-    audit = request.app.state.audit_repository
-    service = _service(request)
-    pending = pending_check  # batch context for the attempt + failure audits
-    replay_headers: dict[str, Any] = await _custom_headers(request)
-    if pending and pending.operator_action != "delete":
-        replay_headers.update(
-            provenance_headers(pending.operator_action, pending.source_queue, username)
-        )
-    if pending:
-        # the attempt is on record before the broker is touched — no audit, no action
-        await audit.record(
-            AuditEntry(
-                username=username,
-                action=f"bulk_{pending.action}",
-                timestamp=datetime.now(UTC),
-                source_queue=pending.source_queue,
-                target_type=pending.target.type if pending.target else None,
-                target_queue=pending.target.queue if pending.target else None,
-                target_exchange=pending.target.exchange if pending.target else None,
-                target_routing_key=pending.target.routing_key if pending.target else None,
-                result="started",
-                metadata={
-                    "batch_id": body.batch_id,
-                    "mode": pending.operator_action,
-                    "fingerprints": len(pending.fingerprints),
-                },
-            )
-        )
-    started_at = time.perf_counter()
     try:
-        batch, outcome = await service.execute(body.batch_id, replay_headers=replay_headers)
+        _batch, outcome = await execute_audited(
+            _service(request), request.app.state.audit_repository, body.batch_id, username,
+            await _custom_headers(request),
+        )
     except UnknownBulkBatch as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except UnsafeToBrowse as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ChannelNotFoundEntity as error:
+        raise HTTPException(
+            status_code=404,
+            detail="Queue not found; check the source queue and replay target",
+        ) from error
+    except REFUSALS as error:
+        # only raised before the first message is touched (target checks); a refusal
+        # mid-batch comes back as per-message results instead
+        raise HTTPException(
+            status_code=409, detail=f"{refusal_text(error)}. Nothing was moved."
+        ) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     except Exception as error:
-        await audit.record(
-            AuditEntry(
-                username=username,
-                action=f"bulk_{pending.action}" if pending else "bulk",
-                timestamp=datetime.now(UTC),
-                source_queue=pending.source_queue if pending else None,
-                target_type=pending.target.type if pending and pending.target else None,
-                target_queue=pending.target.queue if pending and pending.target else None,
-                target_exchange=pending.target.exchange if pending and pending.target else None,
-                target_routing_key=(
-                    pending.target.routing_key if pending and pending.target else None
-                ),
-                result="failed",
-                error_message=error_text(error),
-                metadata={
-                    "batch_id": body.batch_id,
-                    "mode": pending.operator_action if pending else None,
-                },
-            )
-        )
-        if isinstance(error, UnsafeToBrowse):
-            raise HTTPException(status_code=409, detail=str(error)) from error
-        if isinstance(error, ChannelNotFoundEntity):
-            raise HTTPException(
-                status_code=404,
-                detail="Queue not found; check the source queue and replay target",
-            ) from error
-        if isinstance(error, REFUSALS):
-            # only raised before the first message is touched (target checks); a refusal
-            # mid-batch comes back as per-message results instead
-            raise HTTPException(
-                status_code=409, detail=f"{refusal_text(error)}. Nothing was moved."
-            ) from error
-        if isinstance(error, ValueError):
-            raise HTTPException(status_code=400, detail=str(error)) from error
         raise HTTPException(status_code=502, detail="Bulk operation failed") from error
-
-    summary = cast(dict[str, int], outcome["summary"])
-    bulk_action = f"bulk_{batch.action}"
-    elapsed_ms = round((time.perf_counter() - started_at) * 1000)
-    OPERATION_SECONDS.labels(action=bulk_action).observe(time.perf_counter() - started_at)
-    envelope_result = "success" if summary["failed"] == 0 else "partial"
-    ACTIONS.labels(action=bulk_action, result=envelope_result).inc()
-    for label, count in (
-        ("success", summary["succeeded"]),
-        ("failed", summary["failed"]),
-        ("skipped_duplicate", summary["skipped_duplicates"]),
-        ("not_found", summary["not_found"]),
-        ("not_attempted", summary.get("not_attempted", 0)),
-    ):
-        if count:
-            ACTIONS.labels(action=batch.action, result=label).inc(count)
-    for result in cast(list[dict[str, Any]], outcome["results"]):
-        await audit.record(
-            AuditEntry(
-                username=username,
-                action=batch.action,
-                timestamp=datetime.now(UTC),
-                source_queue=batch.source_queue,
-                message_fingerprint=str(result["fingerprint"]),
-                result="success" if result["status"] == "success" else str(result["status"]),
-                error_message=cast(str | None, result.get("error")),
-                metadata={"batch_id": body.batch_id},
-            )
-        )
-    await audit.record(
-        AuditEntry(
-            username=username,
-            action=f"bulk_{batch.action}",
-            timestamp=datetime.now(UTC),
-            source_queue=batch.source_queue,
-            target_type=batch.target.type if batch.target else None,
-            target_queue=batch.target.queue if batch.target else None,
-            target_exchange=batch.target.exchange if batch.target else None,
-            target_routing_key=batch.target.routing_key if batch.target else None,
-            result="success" if summary["failed"] == 0 else "partial",
-            metadata={
-                "batch_id": body.batch_id,
-                "duration_ms": elapsed_ms,
-                "mode": batch.operator_action,
-                **summary,
-            },
-        )
-    )
     return outcome

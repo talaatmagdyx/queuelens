@@ -10,6 +10,7 @@
     Users: ['invite_user', 'update_user', 'delete_user', 'change_password'],
     Environments: ['add_environment', 'remove_environment', 'switch_environment'],
     Configuration: ['update_settings', 'create_alert_rule', 'update_alert_rule', 'delete_alert_rule'],
+    Policies: ['create_replay_policy', 'update_replay_policy', 'delete_replay_policy', 'run_replay_policy', 'pause_replay_policy'],
   };
   // replay / park publish the message before acking it; nothing else moves a message
   const MOVES_MESSAGES = ['replay_move', 'replay_copy', 'park', 'publish'];

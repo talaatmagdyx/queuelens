@@ -10,10 +10,21 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-from app.api.routes import actions, audit, bulk, health, messages, metrics, platform, queues
+from app.api.routes import (
+    actions,
+    audit,
+    bulk,
+    health,
+    messages,
+    metrics,
+    platform,
+    policies,
+    queues,
+)
 from app.application.alert_engine import AlertEngine
 from app.application.environments import EnvironmentManager
 from app.application.queue_service import UnsafeToBrowse
+from app.application.replay_policies import PolicyRunner
 from app.application.snapshots import SnapshotStore
 from app.auth.proxy import KeepPeer
 from app.config import Settings, get_settings
@@ -25,6 +36,7 @@ from app.infrastructure.persistence.store import (
     BulkBatchRepository,
     LoginFailureRepository,
     NotificationRepository,
+    ReplayPolicyRepository,
     SettingsRepository,
     UserRepository,
 )
@@ -155,6 +167,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await _sync_settings(app)
         await app.state.environment_manager.start_default()
         app.state.alert_engine.start()
+        app.state.policy_runner.start()
         retention_task = asyncio.get_running_loop().create_task(_retention_loop(app))
         sync_task = asyncio.get_running_loop().create_task(_sync_loop(app))
         app.state.ready = True
@@ -165,6 +178,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             if task is not None:
                 task.cancel()
         await app.state.alert_engine.stop()
+        await app.state.policy_runner.stop()
         await app.state.environment_manager.stop_all()
         await app.state.coordinator.close()
         await app.state.database.close()
@@ -189,6 +203,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.notifications = NotificationRepository(database)
     app.state.users = UserRepository(database)
     app.state.login_failures = LoginFailureRepository(database)
+    app.state.replay_policies = ReplayPolicyRepository(database)
     app.state.coordinator = Coordinator(database)
     app.state.bulk_batches = BulkBatchRepository(database)
     app.state.snapshots = SnapshotStore()
@@ -205,6 +220,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         interval_seconds=app.state.settings.alert_interval_seconds,
         is_leader=app.state.coordinator.is_leader,
     )
+    # the replica that evaluates alerts also runs replay policies
+    app.state.policy_runner = PolicyRunner(app.state, is_leader=app.state.coordinator.is_leader)
     # base.html renders the environment badge and sidebar identity on every page
     web.templates.env.globals["app_environment"] = app.state.settings.environment
     web.templates.env.globals["admin_username"] = app.state.settings.admin_username
@@ -252,6 +269,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(actions.router)
     app.include_router(bulk.router)
     app.include_router(platform.router)
+    app.include_router(policies.router)
     app.include_router(web.router)
     app.mount(
         "/static",

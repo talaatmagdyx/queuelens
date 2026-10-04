@@ -44,6 +44,7 @@ setInterval(function () {
 <script type="text/babel" src="/static/ds/ui_kits/queuelens/Metrics.jsx?v=0.16.1"></script>
 <script type="text/babel" src="/static/ds/ui_kits/queuelens/Composer.jsx?v=0.16.1"></script>
 <script type="text/babel" src="/static/ds/ui_kits/queuelens/Alerts.jsx?v=0.16.1"></script>
+<script type="text/babel" src="/static/ds/ui_kits/queuelens/Policies.jsx?v=0.16.1"></script>
 <script type="text/babel" src="/static/ds/ui_kits/queuelens/Notifications.jsx?v=0.16.1"></script>
 <script type="text/babel">
 const { SidebarNav, TopBar, Alert, Icon } = window.__NS;
@@ -69,7 +70,7 @@ window.QL.activateEnvironment = activateEnvironment;
 const PALETTE_SCREENS = [
   ['dashboard', 'Dashboard', 'layout-grid'], ['queues', 'Queues', 'list'],
   ['parking', 'Parking', 'flag'], ['topology', 'Topology', 'git-fork'], ['composer', 'Test Composer', 'send'],
-  ['audit', 'Audit Log', 'clipboard-list'], ['metrics', 'Metrics', 'activity'], ['alerts', 'Alerts', 'bell-ring'],
+  ['audit', 'Audit Log', 'clipboard-list'], ['metrics', 'Metrics', 'activity'], ['alerts', 'Alerts', 'bell-ring'], ['policies', 'Replay Policies', 'repeat'],
   ['config', 'Configuration', 'settings'], ['users', 'Users', 'users'], ['notifications', 'Notifications', 'bell'],
 ];
 
@@ -161,7 +162,7 @@ function App() {
   const screenLabelMap = {
     dashboard: 'Dashboard', queues: 'Queues', messages: 'Messages', replay: 'Replay',
     parking: 'Parking', queuedetail: 'Queue Detail', topology: 'Topology', composer: 'Composer',
-    audit: 'Audit Log', metrics: 'Metrics', alerts: 'Alerts', config: 'Configuration', users: 'Users', notifications: 'Notifications',
+    audit: 'Audit Log', metrics: 'Metrics', alerts: 'Alerts', policies: 'Replay Policies', config: 'Configuration', users: 'Users', notifications: 'Notifications',
   };
   // Messages and the Replay/Park wizard are contextual screens reached from a queue,
   // so they highlight their parent nav item instead of having sidebar entries.
@@ -177,6 +178,7 @@ function App() {
   else if (route.id === 'topology') screen = <S.Topology nav={nav} />;
   else if (route.id === 'composer') screen = <S.Composer nav={nav} />;
   else if (route.id === 'alerts') screen = <S.Alerts nav={nav} />;
+  else if (route.id === 'policies') screen = <S.Policies nav={nav} />;
   else if (route.id === 'audit') screen = <S.AuditLog nav={nav} />;
   else if (route.id === 'metrics') screen = <S.Metrics nav={nav} />;
   else if (route.id === 'config') screen = <S.Configuration nav={nav} envs={ENVS} activeEnv={envId} vhost={vhost} onEnvChange={switchEnv} />;
@@ -220,6 +222,7 @@ function App() {
             { id: 'metrics', label: 'Metrics', icon: 'activity' } ] },
           ...(((window.QL.me || {}).role) === 'Viewer' ? [] : [{ label: 'Settings', items: [
             { id: 'alerts', label: 'Alerts', icon: 'bell-ring' },
+            { id: 'policies', label: 'Replay Policies', icon: 'repeat' },
             { id: 'config', label: 'Configuration', icon: 'settings' },
             ...((window.QL.me || {}).role === 'Admin' ? [{ id: 'users', label: 'Users', icon: 'users' }] : []) ] }])]}
         broker={{ host: envObj.host, vhost: vhost, latency: B.latency || '—', offline: !brokerLive }}
