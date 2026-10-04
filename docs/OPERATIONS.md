@@ -27,7 +27,9 @@ QueueLens is an **internal-network operations tool**:
 - **Environments are chosen per request** (per console tab): switching re-points
   only that tab, so operators can work in different environments and vhosts at
   once. Audit rows record the environment and vhost of every broker action.
-- **Alert rules and `/metrics` evaluate the default environment only.**
+- **Monitoring covers every environment and vhost.** `/metrics` reports each one's DLQs.
+  An alert rule watches, and a replay policy runs in, the environment and vhost it was
+  created in.
 - Failed logins are rate-limited (10/minute per client IP, in-memory).
 
 ## Backups & data
@@ -120,8 +122,11 @@ scrape_configs:
       - targets: ["queuelens.internal:8000"]
 ```
 
-The two gauges (`queuelens_rabbitmq_ready`, `queuelens_dlq_messages{queue}`) are refreshed
-at scrape time from the live broker, so each scrape costs one Management API call. Counters
+The gauges (`queuelens_rabbitmq_ready`, `queuelens_management_up`, `queuelens_dlq_messages`)
+are refreshed at scrape time from the live brokers. Each scrape costs one Management API call
+per environment and vhost, made at once and given 5 seconds each. A scope that doesn't answer
+in time is reported down (`queuelens_management_up 0`), and the scrape doesn't wait for it.
+Monitoring reads only the Management API, so it opens no AMQP connection. Counters
 (`queuelens_actions_total`, `queuelens_preview_requests_total`) and the operation-duration
 histogram accumulate in process — they reset on restart, as Prometheus counters are
 expected to.

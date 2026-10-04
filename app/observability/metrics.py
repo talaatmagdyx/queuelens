@@ -5,13 +5,19 @@ from prometheus_client import Counter, Gauge, Histogram
 
 RABBITMQ_READY = Gauge(
     "queuelens_rabbitmq_ready",
-    "1 when the AMQP connection to RabbitMQ is live, 0 otherwise",
+    "1 when the AMQP connection to the default environment's RabbitMQ is live, 0 otherwise",
+)
+
+MANAGEMENT_UP = Gauge(
+    "queuelens_management_up",
+    "1 when the environment and vhost's queues could be read at this scrape, 0 otherwise",
+    ["environment", "vhost"],
 )
 
 DLQ_MESSAGES = Gauge(
     "queuelens_dlq_messages",
-    "Messages currently in each detected dead-letter queue",
-    ["queue"],
+    "Messages currently in each detected dead-letter queue, in every environment and vhost",
+    ["environment", "vhost", "queue"],
 )
 
 PREVIEW_REQUESTS = Counter(

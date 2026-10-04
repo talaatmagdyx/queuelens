@@ -1,7 +1,7 @@
 # Alerting with Prometheus and Alertmanager
 
 QueueLens exports metrics at `/metrics`, and
-[`deploy/prometheus/alerts.yml`](../deploy/prometheus/alerts.yml) turns them into five
+[`deploy/prometheus/alerts.yml`](../deploy/prometheus/alerts.yml) turns them into six
 alerts. Prometheus evaluates the rules and Alertmanager delivers them — QueueLens is not in
 the delivery path.
 
@@ -10,10 +10,14 @@ the delivery path.
 | `QueueLensBrokerDown` | `queuelens_rabbitmq_ready` is 0 for 5 minutes | critical |
 | `DLQAboveThreshold` | a DLQ holds more than 1000 messages for 15 minutes | warning |
 | `DLQGrowing` | a DLQ grew by more than 100 messages in 30 minutes | warning |
+| `QueueLensScopeUnreachable` | an environment and vhost's queues couldn't be read for 5 minutes (`queuelens_management_up` 0) | warning |
 | `QueueLensActionFailures` | more than 3 failed actions in 15 minutes | warning |
 | `ReplayPolicyPaused` | a replay policy paused itself after 3 failed runs ([POLICIES.md](POLICIES.md)) | warning |
 
-The DLQ alerts carry a `queue` label.
+The DLQ alerts carry `environment`, `vhost` and `queue` labels, for every environment and
+vhost QueueLens knows. A DLQ name that appears in two vhosts is two alerts. While a scope
+can't be read, its DLQs drop out of `queuelens_dlq_messages`, and their alerts would look
+resolved. `QueueLensScopeUnreachable` says why they went quiet.
 
 ## In-app alerts or Alertmanager?
 
@@ -45,7 +49,7 @@ working `/metrics`. Add `up{job="queuelens"} == 0` to your rules for that.
    | critical | `webhook` and `slack` |
    | warning, or none | `slack` |
 
-   Grouped by `alertname` and `queue`, so each DLQ gets its own message, with fire
+   Grouped by `alertname`, `environment`, `vhost` and `queue`, so each DLQ gets its own message, with fire
    *and* resolve notifications. Slack titles come from the rules' `summary` annotation
    and the text from `description`; the webhook gets Alertmanager's standard JSON
    (`version: "4"`), for a pager, an incident bot or your own service. Set

@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from typing import Any, cast
 
@@ -12,6 +13,7 @@ from app.auth.basic import get_current_username
 from app.observability.metrics import (
     ACTIONS,
     DLQ_MESSAGES,
+    MANAGEMENT_UP,
     OPERATION_SECONDS,
     POLICY_PAUSED,
     PREVIEW_REQUESTS,
@@ -21,25 +23,38 @@ from app.observability.metrics import (
 router = APIRouter(tags=["metrics"])
 
 ALERT_RULES_FILE = Path(__file__).resolve().parents[3] / "deploy" / "prometheus" / "alerts.yml"
+SCOPE_READ_SECONDS = 5.0  # a slow broker must not hold up the scrape of all the others
 
 
 def _samples(metric: Any) -> list[Any]:
     return list(next(iter(metric.collect())).samples)
 
 
+async def _dlqs(manager: Any, env: str, vhost: str) -> list[Any] | None:
+    """One scope's DLQs, or None when they can't be read (that broker is down)."""
+    try:
+        service = cast(QueueService, await manager.queue_service_for(env, vhost))
+        return await asyncio.wait_for(service.list_queues(dlq_only=True), SCOPE_READ_SECONDS)
+    except Exception:  # noqa: BLE001 - reported as queuelens_management_up 0
+        return None
+
+
 async def _refresh_gauges(request: Request) -> None:
-    """Point-in-time gauges are refreshed at read time so they reflect the broker right now."""
+    """Point-in-time gauges are refreshed at read time so they reflect the broker right now.
+    DLQs are read from every environment and vhost at once, each from its Management API."""
     connection = request.app.state.rabbitmq_connection
     RABBITMQ_READY.set(1 if (connection.is_started and connection.is_connected) else 0)
-    try:
-        queues = await cast(QueueService, request.app.state.queue_service).list_queues(
-            dlq_only=True
-        )
-        DLQ_MESSAGES.clear()
-        for queue in queues:
-            DLQ_MESSAGES.labels(queue=queue.name).set(queue.messages)
-    except Exception:  # broker or management API down — the ready gauge covers it
-        RABBITMQ_READY.set(0)
+    manager = request.app.state.environment_manager
+    scopes = manager.scopes()
+    found = await asyncio.gather(*(_dlqs(manager, env, vhost) for env, vhost in scopes))
+    DLQ_MESSAGES.clear()
+    MANAGEMENT_UP.clear()
+    for (env, vhost), queues in zip(scopes, found, strict=True):
+        MANAGEMENT_UP.labels(environment=env, vhost=vhost).set(0 if queues is None else 1)
+        if queues is None and (env, vhost) == manager.default_key:
+            RABBITMQ_READY.set(0)  # as before: the default's Management API down counts
+        for queue in queues or []:
+            DLQ_MESSAGES.labels(environment=env, vhost=vhost, queue=queue.name).set(queue.messages)
     # from the database, so every replica reports it, not only the one that runs policies
     POLICY_PAUSED.clear()
     for policy in await request.app.state.replay_policies.list():

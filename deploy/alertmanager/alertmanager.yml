@@ -9,7 +9,7 @@
 
 route:
   receiver: slack
-  group_by: [alertname, queue]  # one thread per rule and DLQ
+  group_by: [alertname, environment, vhost, queue]  # one thread per rule and DLQ
   group_wait: 30s               # collect what fires together into the first message
   group_interval: 5m            # at most one update per group every 5 minutes
   repeat_interval: 4h           # remind while it is still firing

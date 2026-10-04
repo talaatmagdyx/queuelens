@@ -177,7 +177,7 @@
           {error && <Alert tone="danger" style={{ marginBottom: 14 }}>{error}</Alert>}
 
           {building && (
-            <Card title="New Alert Rule" subtitle="Notify when a condition holds on matching queues." style={{ marginBottom: 18 }}>
+            <Card title="New Alert Rule" subtitle={'Notify when a condition holds on matching queues in ' + ((window.QL.broker || {}).environment || 'this environment') + ' · ' + ((window.QL.broker || {}).vhost || '/') + ', the environment and vhost of this tab.'} style={{ marginBottom: 18 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 14, marginTop: 8 }}>
                 <Input label="Rule Name" required placeholder="DLQ backlog critical" value={draft.name} onChange={d('name')} />
                 <Input label="Queue Pattern" required value={draft.pattern} onChange={d('pattern')} />
@@ -214,6 +214,7 @@
               <DataTable rowKey="id"
                 columns={[
                   { key: 'name', label: 'Rule', render: (r) => <span style={{ fontWeight: 600, color: 'var(--slate-900)', whiteSpace: 'normal' }}>{r.name}</span> },
+                  { key: 'where', label: 'Watches', render: (r) => <span style={{ fontSize: 12.5, color: 'var(--slate-600)', whiteSpace: 'normal' }}>{r.environment} · {r.vhost}</span> },
                   { key: 'cond', label: 'Condition', render: (r) => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--slate-600)', whiteSpace: 'normal' }}>{r.pattern} · {r.metric} {r.operator} {r.threshold}{r.duration_seconds ? ` for ${Math.round(r.duration_seconds / 60)}m` : ''}</span> },
                   { key: 'severity', label: 'Severity', render: (r) => <StatusPill tone={SEV_TONE[r.severity]}>{r.severity}</StatusPill> },
                   { key: 'channels', label: 'Channels', render: (r) => <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 5 }}>{r.channels.length ? r.channels.map((c) => <ChannelChip key={c} id={c} config={channels} />) : <span style={{ fontSize: 12, color: 'var(--slate-400)' }}>in-app only</span>}</span> },

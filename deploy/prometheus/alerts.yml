@@ -15,23 +15,35 @@ groups:
           description: "queuelens_rabbitmq_ready has been 0 for 5 minutes."
 
       - alert: DLQAboveThreshold
-        # every replica reports the same DLQs: one alert per queue, not per pod
-        expr: max by (queue) (queuelens_dlq_messages) > 1000
+        # every replica reports the same DLQs: one alert per queue, not per pod; a DLQ name
+        # can recur in another environment or vhost, so those stay apart
+        expr: max by (environment, vhost, queue) (queuelens_dlq_messages) > 1000
         for: 15m
         labels:
           severity: warning
         annotations:
-          summary: "DLQ {{ $labels.queue }} holds more than 1000 messages"
+          summary: "DLQ {{ $labels.queue }} in {{ $labels.environment }} · {{ $labels.vhost }} holds more than 1000 messages"
           description: "{{ $labels.queue }} has {{ $value | printf \"%.0f\" }} dead letters."
 
       - alert: DLQGrowing
-        expr: max by (queue) (delta(queuelens_dlq_messages[30m])) > 100
+        expr: max by (environment, vhost, queue) (delta(queuelens_dlq_messages[30m])) > 100
         for: 0m
         labels:
           severity: warning
         annotations:
-          summary: "DLQ {{ $labels.queue }} is growing fast"
+          summary: "DLQ {{ $labels.queue }} in {{ $labels.environment }} · {{ $labels.vhost }} is growing fast"
           description: "{{ $labels.queue }} grew by {{ $value | printf \"%.0f\" }} messages in 30 minutes."
+
+      - alert: QueueLensScopeUnreachable
+        # an unreadable environment's DLQs drop out of queuelens_dlq_messages, which would
+        # look like their alerts resolved: this says why they went quiet
+        expr: max by (environment, vhost) (queuelens_management_up) == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "QueueLens can't read {{ $labels.environment }} · {{ $labels.vhost }}"
+          description: "Its DLQs aren't monitored: check that broker's Management API and the credentials QueueLens uses."
 
       - alert: QueueLensActionFailures
         # each replica counts its own actions: add them up
