@@ -1,0 +1,19 @@
+{{- $pdb := .Values.podDisruptionBudget }}
+{{- /* one replica: a budget could only block node drains */}}
+{{- if and $pdb.enabled (gt (int .Values.replicaCount) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "queuelens.fullname" . }}
+  labels:
+    {{- include "queuelens.labels" . | nindent 4 }}
+spec:
+  {{- if $pdb.minAvailable }}
+  minAvailable: {{ $pdb.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "queuelens.selectorLabels" . | nindent 6 }}
+{{- end }}

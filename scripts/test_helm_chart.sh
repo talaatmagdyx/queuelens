@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 # Tests the Helm chart in deploy/helm/queuelens.
 #
-#   scripts/test_helm_chart.sh render   lint, render several value sets, refuse bad ones,
-#                                       validate the manifests with kubeconform
-#   scripts/test_helm_chart.sh kind     install into a throwaway kind cluster and check it
-#   scripts/test_helm_chart.sh          both
+#   scripts/test_helm_chart.sh render          lint, render several value sets, refuse bad
+#                                              ones, validate the manifests with kubeconform
+#   scripts/test_helm_chart.sh kind            install into a throwaway kind cluster, one
+#                                              replica on SQLite, and check it
+#   scripts/test_helm_chart.sh kind-replicas   two replicas on a throwaway PostgreSQL there:
+#                                              they share logins, rules and one alert leader
+#   scripts/test_helm_chart.sh                 all three
 #
+# Phases run in the order given, and the kind ones share one cluster and image build.
 # Needs helm and docker (kubeconform runs from its image unless it is on PATH); the kind
-# test also needs kind, kubectl, curl and openssl. That test creates its own cluster
+# phases also need kind, kubectl, curl and openssl. They create their own cluster
 # (KIND_CLUSTER, default ql-helm) with a kubeconfig in a temp dir, so your kubeconfig and
-# current context are never touched, and deletes the cluster when it exits. Every
+# current context are never touched, and delete the cluster when the script exits. Every
 # credential is generated at run time.
 #
 #   IMAGE=queuelens:helm-test   image built from this checkout and loaded into the cluster
 #   SKIP_BUILD=1                load IMAGE as it is instead of building it
-#   LOCAL_PORT=18765            local end of the port-forward
+#   LOCAL_PORT=18765            local end of the port-forward (kind-replicas: and the next)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -60,8 +64,7 @@ refuses() {  # WHAT MESSAGE HELM_ARGS...: rendering must fail with MESSAGE
 }
 
 render() {
-  OUT="$(mktemp -d)"
-  trap 'rm -rf "$OUT"' EXIT
+  OUT="$(mktemp -d)"  # removed by cleanup
   say "helm lint + template"
   render_case defaults \
     --set-string "secretEnv.QUEUELENS_ADMIN_PASSWORD=$(gen)" \
@@ -73,6 +76,9 @@ render() {
   render_case ingress-servicemonitor -f "$CHART/ci/ingress-servicemonitor-values.yaml"
   render_case sidecar -f "$CHART/ci/sidecar-values.yaml"
   render_case replicas -f "$CHART/ci/replicas-values.yaml"
+  render_case replicas-min-available -f "$CHART/ci/replicas-values.yaml" \
+    --set-string podDisruptionBudget.minAvailable=50%
+  render_case replicas-no-pdb -f "$CHART/ci/replicas-values.yaml" --set podDisruptionBudget.enabled=false
 
   say "rendered manifests"
   for name in defaults existing-secret postgres ingress-servicemonitor sidecar; do
@@ -81,6 +87,7 @@ render() {
     has "$name" 'readOnlyRootFilesystem: true'
     has "$name" 'runAsUser: 999'
     has "$name" 'path: /ready'
+    lacks "$name" '^kind: PodDisruptionBudget$'
   done
   has defaults '^kind: Secret$'
   has defaults 'QUEUELENS_SECRET_KEY: '
@@ -109,7 +116,12 @@ render() {
   has replicas 'maxUnavailable: 0'
   has replicas 'sessionAffinity: ClientIP'
   lacks replicas '^kind: PersistentVolumeClaim$'
-  ok "one replica, Recreate, non-root, read-only root, /ready probe; each case renders what it should"
+  has replicas '^kind: PodDisruptionBudget$'
+  has replicas '^  maxUnavailable: 1$'
+  has replicas-min-available '^  minAvailable: 50%$'
+  lacks replicas-min-available '^  maxUnavailable: '
+  lacks replicas-no-pdb '^kind: PodDisruptionBudget$'
+  ok "one replica, Recreate, non-root, read-only root, /ready probe, no PodDisruptionBudget; each case renders what it should"
 
   say "refused value sets"
   refuses "an install without credentials" "secretEnv.QUEUELENS_ADMIN_PASSWORD is required"
@@ -129,8 +141,6 @@ render() {
     say "kubeconform, Kubernetes $version"
     cat "$OUT"/*.yaml | validate -kubernetes-version "$version"
   done
-  rm -rf "$OUT"
-  trap - EXIT
 }
 
 # ------------------------------------------------------------------ kind
@@ -146,66 +156,72 @@ expect() {  # WHAT NEEDLE CURL_ARGS...: the response must contain NEEDLE
   ok "$what"
 }
 
-forward() {  # (re)start the port-forward; a forward ends with the pod it reached
-  if [ -n "${PF_PID:-}" ]; then
-    kill "$PF_PID" 2>/dev/null || true
-    wait "$PF_PID" 2>/dev/null || true
-  fi
-  kubectl -n "$NS" port-forward svc/queuelens "$PORT:8000" >"$WORK/port-forward.log" 2>&1 &
-  PF_PID=$!
-  for _ in $(seq 1 30); do
-    curl -sf "$URL/health" >/dev/null 2>&1 && return 0
-    sleep 1
+stop_forwards() {
+  local pid
+  for pid in ${PF_PIDS:-}; do
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
   done
-  cat "$WORK/port-forward.log"
-  die "port-forward to svc/queuelens did not come up"
+  PF_PIDS=""
 }
 
-kind_cleanup() {
-  local status=$?
-  if [ -n "${PF_PID:-}" ]; then
-    kill "$PF_PID" 2>/dev/null || true
-    wait "$PF_PID" 2>/dev/null || true
-  fi
-  if [ "$status" -ne 0 ]; then
+forward() {  # [TARGET=PORT]...: replace the port-forwards, by default svc/queuelens=$PORT;
+             # a forward ends with the pod it reached
+  stop_forwards
+  [ $# -gt 0 ] || set -- "svc/queuelens=$PORT"
+  local spec
+  for spec in "$@"; do
+    kubectl -n "$NS" port-forward "${spec%=*}" "${spec##*=}:8000" >>"$WORK/port-forward.log" 2>&1 &
+    PF_PIDS="${PF_PIDS:-} $!"
+  done
+  for spec in "$@"; do
+    for _ in $(seq 1 30); do
+      curl -sf "http://127.0.0.1:${spec##*=}/health" >/dev/null 2>&1 && continue 2
+      sleep 1
+    done
+    cat "$WORK/port-forward.log"
+    die "port-forward to ${spec%=*} did not come up"
+  done
+}
+
+kind_down() {  # STATUS: diagnostics if it is not 0, then delete the cluster
+  stop_forwards
+  if [ "$1" -ne 0 ]; then
     say "diagnostics"
     kubectl get pods -A -o wide || true
     kubectl -n "$NS" describe pods || true
-    kubectl -n "$NS" logs -l "$SELECTOR" --tail=100 || true
+    kubectl -n "$NS" logs -l app.kubernetes.io/name=queuelens --prefix --tail=100 || true
     kubectl -n "$NS" logs deploy/rabbitmq --tail=60 || true
     kubectl -n "$NS" logs deploy/rabbitmq --previous --tail=60 || true
+    kubectl -n "$NS" logs deploy/postgres --tail=60 2>/dev/null || true
   fi
   say "deleting kind cluster $CLUSTER"
   kind delete cluster --name "$CLUSTER" --kubeconfig "$KUBECONFIG" || true
   rm -rf "$WORK"
 }
 
-kind_test() {
+kind_up() {  # once per run: the cluster, a throwaway RabbitMQ and the QueueLens image
+  [ -z "${WORK:-}" ] || return 0
   CLUSTER="${KIND_CLUSTER:-ql-helm}"
   PORT="${LOCAL_PORT:-18765}"
   URL="http://127.0.0.1:$PORT"
-  local image="${IMAGE:-queuelens:helm-test}"
+  IMAGE="${IMAGE:-queuelens:helm-test}"
   if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
     die "a kind cluster named $CLUSTER already exists; delete it or set KIND_CLUSTER"
   fi
-  WORK="$(mktemp -d)"
+  WORK="$(mktemp -d)"  # cleanup deletes the cluster once this is set
   # every kind, kubectl and helm call below uses this file, never ~/.kube/config
   export KUBECONFIG="$WORK/kubeconfig"
-  trap kind_cleanup EXIT
 
   say "kind cluster $CLUSTER"
   kind create cluster --name "$CLUSTER" --kubeconfig "$KUBECONFIG" --wait 120s
   kubectl create namespace "$NS"
 
   say "throwaway RabbitMQ"
-  local rmq_pass admin_pass operator_pass amqp_url fernet_key
-  rmq_pass="$(gen)"
-  admin_pass="$(gen)"
-  operator_pass="$(gen)"
-  amqp_url="amqp://queuelens:${rmq_pass}@rabbitmq:5672/"
-  fernet_key="$(openssl rand -base64 32 | tr '+/' '-_')"  # what QUEUELENS_SECRET_KEY takes
+  RMQ_PASS="$(gen)"
+  AMQP_URL="amqp://queuelens:${RMQ_PASS}@rabbitmq:5672/"
   kubectl -n "$NS" create secret generic rabbitmq \
-    --from-literal=RABBITMQ_DEFAULT_USER=queuelens --from-literal="RABBITMQ_DEFAULT_PASS=$rmq_pass"
+    --from-literal=RABBITMQ_DEFAULT_USER=queuelens --from-literal="RABBITMQ_DEFAULT_PASS=$RMQ_PASS"
   kubectl -n "$NS" apply -f - <<'EOF'
 apiVersion: apps/v1
 kind: Deployment
@@ -247,24 +263,31 @@ EOF
 
   # the broker image pulls while QueueLens builds
   if [ -z "${SKIP_BUILD:-}" ]; then
-    say "docker build $image"
-    docker build -t "$image" "$ROOT"
+    say "docker build $IMAGE"
+    docker build -t "$IMAGE" "$ROOT"
   fi
-  kind load docker-image "$image" --name "$CLUSTER"
+  kind load docker-image "$IMAGE" --name "$CLUSTER"
   kubectl -n "$NS" rollout status deploy/rabbitmq --timeout=300s
+  BASE=(
+    --set "image.repository=${IMAGE%:*}" --set "image.tag=${IMAGE##*:}"
+    --set env.QUEUELENS_RABBITMQ_MANAGEMENT_URL=http://rabbitmq:15672
+    --set env.QUEUELENS_RABBITMQ_MANAGEMENT_USERNAME=queuelens
+  )
+}
+
+kind_test() {
+  local admin_pass operator_pass fernet_key
+  admin_pass="$(gen)"
+  operator_pass="$(gen)"
+  fernet_key="$(openssl rand -base64 32 | tr '+/' '-_')"  # what QUEUELENS_SECRET_KEY takes
 
   say "helm install, credentials in an existing Secret"
   kubectl -n "$NS" create secret generic queuelens-credentials \
     --from-literal="QUEUELENS_ADMIN_PASSWORD=$admin_pass" \
-    --from-literal="QUEUELENS_RABBITMQ_URL=$amqp_url" \
-    --from-literal="QUEUELENS_RABBITMQ_MANAGEMENT_PASSWORD=$rmq_pass" \
+    --from-literal="QUEUELENS_RABBITMQ_URL=$AMQP_URL" \
+    --from-literal="QUEUELENS_RABBITMQ_MANAGEMENT_PASSWORD=$RMQ_PASS" \
     --from-literal="QUEUELENS_SECRET_KEY=$fernet_key"
-  local base=(
-    --set "image.repository=${image%:*}" --set "image.tag=${image##*:}"
-    --set env.QUEUELENS_RABBITMQ_MANAGEMENT_URL=http://rabbitmq:15672
-    --set env.QUEUELENS_RABBITMQ_MANAGEMENT_USERNAME=queuelens
-  )
-  helm install queuelens "$CHART" -n "$NS" --wait --timeout 5m "${base[@]}" \
+  helm install queuelens "$CHART" -n "$NS" --wait --timeout 5m "${BASE[@]}" \
     --set existingSecret=queuelens-credentials
   local auth=(-u "admin:$admin_pass")
   forward
@@ -300,13 +323,13 @@ EOF
     cat >"$WORK/secret-values.yaml" <<EOF
 secretEnv:
   QUEUELENS_ADMIN_PASSWORD: "$admin_pass"
-  QUEUELENS_RABBITMQ_URL: "$amqp_url"
-  QUEUELENS_RABBITMQ_MANAGEMENT_PASSWORD: "$rmq_pass"
+  QUEUELENS_RABBITMQ_URL: "$AMQP_URL"
+  QUEUELENS_RABBITMQ_MANAGEMENT_PASSWORD: "$RMQ_PASS"
   QUEUELENS_SECRET_KEY: "$fernet_key"
   QUEUELENS_USERS_JSON: '{"helm-operator": "$operator_pass"}'
 EOF
   )
-  helm upgrade queuelens "$CHART" -n "$NS" --wait --timeout 5m "${base[@]}" -f "$WORK/secret-values.yaml"
+  helm upgrade queuelens "$CHART" -n "$NS" --wait --timeout 5m "${BASE[@]}" -f "$WORK/secret-values.yaml"
   forward
   expect "the alert rule survived the upgrade" '"name":"helm-persistence-check"' "${auth[@]}" "$URL/api/alerts"
   expect "an optional Secret key reaches the app" '"role":"Operator"' -u "helm-operator:$operator_pass" "$URL/api/me"
@@ -314,9 +337,9 @@ EOF
 
   say "an existing Secret without a required key"
   kubectl -n "$NS" create secret generic incomplete \
-    --from-literal="QUEUELENS_RABBITMQ_URL=$amqp_url" \
-    --from-literal="QUEUELENS_RABBITMQ_MANAGEMENT_PASSWORD=$rmq_pass"
-  helm install incomplete "$CHART" -n "$NS" "${base[@]}" \
+    --from-literal="QUEUELENS_RABBITMQ_URL=$AMQP_URL" \
+    --from-literal="QUEUELENS_RABBITMQ_MANAGEMENT_PASSWORD=$RMQ_PASS"
+  helm install incomplete "$CHART" -n "$NS" "${BASE[@]}" \
     --set existingSecret=incomplete --set persistence.enabled=false >/dev/null
   local reason=""
   for _ in $(seq 1 60); do
@@ -332,9 +355,147 @@ EOF
   say "kind test passed"
 }
 
-case "${1:-all}" in
-  render) render ;;
-  kind) kind_test ;;
-  all) render && kind_test ;;
-  *) echo "usage: $0 [render|kind]" >&2; exit 2 ;;
-esac
+two_pods() {  # SELECTOR: set A and B to the names of its two pods
+  set -- $(kubectl -n "$NS" get pod -l "$1" -o jsonpath='{.items[*].metadata.name}')
+  [ $# = 2 ] || die "expected two pods, got: ${*:-none}"
+  A=$1 B=$2
+}
+
+one_alert_leader() {  # SELECTOR: one of its pods, and nothing else, holds an advisory lock
+  local held="" leader=""
+  for _ in $(seq 1 30); do
+    held="$(kubectl -n "$NS" exec deploy/postgres -- psql -U queuelens -tAc \
+      "SELECT host(a.client_addr) FROM pg_locks l JOIN pg_stat_activity a USING (pid)
+       WHERE l.locktype = 'advisory' AND l.granted" || true)"
+    if [ -n "$held" ] && [[ "$held" != *$'\n'* ]]; then
+      leader="$(kubectl -n "$NS" get pod -l "$1" \
+        -o jsonpath="{.items[?(@.status.podIP==\"$held\")].metadata.name}")"
+      [ -z "$leader" ] || { ok "one replica evaluates the alert rules: $leader holds the lock"; return 0; }
+    fi
+    sleep 2
+  done
+  die "expected one replica holding the alert-engine lock; advisory locks held from: ${held:-nowhere}"
+}
+
+kind_replicas_test() {
+  local release=replicas deploy=replicas-queuelens pg_pass admin_pass got="" i code
+  local selector="app.kubernetes.io/instance=$release,app.kubernetes.io/name=queuelens"
+  local url_b="http://127.0.0.1:$((PORT + 1))"
+
+  say "throwaway PostgreSQL"
+  pg_pass="$(gen)"
+  admin_pass="$(gen)"
+  kubectl -n "$NS" create secret generic postgres \
+    --from-literal=POSTGRES_USER=queuelens --from-literal="POSTGRES_PASSWORD=$pg_pass"
+  kubectl -n "$NS" apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: postgres}
+  template:
+    metadata:
+      labels: {app: postgres}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17
+          envFrom:
+            - secretRef: {name: postgres}
+          ports:
+            - {name: postgres, containerPort: 5432}
+          # over TCP: the server initdb runs first listens on the socket only
+          readinessProbe:
+            exec: {command: [pg_isready, -h, 127.0.0.1, -U, queuelens]}
+            periodSeconds: 2
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector: {app: postgres}
+  ports:
+    - {name: postgres, port: 5432}
+EOF
+  kubectl -n "$NS" rollout status deploy/postgres --timeout=300s
+
+  say "helm install, two replicas on PostgreSQL, the password as PGPASSWORD in the Secret"
+  kubectl -n "$NS" create secret generic replicas-credentials \
+    --from-literal="QUEUELENS_ADMIN_PASSWORD=$admin_pass" \
+    --from-literal="QUEUELENS_RABBITMQ_URL=$AMQP_URL" \
+    --from-literal="QUEUELENS_RABBITMQ_MANAGEMENT_PASSWORD=$RMQ_PASS" \
+    --from-literal="PGPASSWORD=$pg_pass"
+  # both pods start at once, on an empty database
+  helm install "$release" "$CHART" -n "$NS" --wait --timeout 5m "${BASE[@]}" \
+    --set existingSecret=replicas-credentials --set replicaCount=2 --set persistence.enabled=false \
+    --set-string env.QUEUELENS_DATABASE_URL=postgresql+asyncpg://queuelens@postgres:5432/queuelens
+  two_pods "$selector"
+  [ "$(kubectl -n "$NS" get pod -l "$selector" \
+    -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}')" = "0 0" ] \
+    || die "a replica restarted: they could not start together on an empty database"
+  ok "two replicas started together on an empty database, neither restarted"
+  for _ in $(seq 1 30); do
+    got="$(kubectl -n "$NS" get pdb "$deploy" -o jsonpath='{.status.currentHealthy}/{.status.disruptionsAllowed}' || true)"
+    [ "$got" = 2/1 ] && break
+    sleep 2
+  done
+  [ "$got" = 2/1 ] || die "PodDisruptionBudget: healthy/allowed disruptions is $got, not 2/1"
+  ok "the PodDisruptionBudget covers both pods and lets one go at a time"
+
+  say "the replicas share state: each pod port-forwarded on its own"
+  local auth=(-u "admin:$admin_pass")
+  forward "pod/$A=$PORT" "pod/$B=$((PORT + 1))"
+  for i in $(seq 1 10); do
+    code="$(curl -s --max-time 15 -o /dev/null -w '%{http_code}' -u "helm-intruder:$(gen)" "$URL/api/me" || true)"
+    [ "$code" = 401 ] || die "failed login $i on $A answered $code, not 401"
+  done
+  ok "10 failed logins on $A"
+  expect "the next one, on $B, answers 429: the login limiter is shared" 429 \
+    -o /dev/null -w '%{http_code}' -u "helm-intruder:$(gen)" "$url_b/api/me"
+  expect "an alert rule is created on $A" '"name":"helm-replicas-check"' "${auth[@]}" \
+    -H 'content-type: application/json' \
+    -d '{"name":"helm-replicas-check","pattern":"*.dlq","threshold":5}' "$URL/api/alerts"
+  expect "$B lists it" '"name":"helm-replicas-check"' "${auth[@]}" "$url_b/api/alerts"
+  one_alert_leader "$selector"
+
+  say "rollout restart"
+  local old_a=$A old_b=$B
+  kubectl -n "$NS" rollout restart "deploy/$deploy"
+  kubectl -n "$NS" rollout status "deploy/$deploy" --timeout=300s
+  kubectl -n "$NS" wait --for=delete "pod/$old_a" "pod/$old_b" --timeout=120s
+  kubectl -n "$NS" wait --for=condition=Ready pod -l "$selector" --timeout=180s
+  two_pods "$selector"
+  ok "both pods were replaced and are Ready"
+  forward "pod/$A=$PORT" "pod/$B=$((PORT + 1))"
+  expect "the alert rule survived the restart, on $A" '"name":"helm-replicas-check"' "${auth[@]}" "$URL/api/alerts"
+  expect "and on $B" '"name":"helm-replicas-check"' "${auth[@]}" "$url_b/api/alerts"
+  one_alert_leader "$selector"
+
+  say "kind-replicas test passed"
+}
+
+cleanup() {
+  local status=$?
+  [ -z "${OUT:-}" ] || rm -rf "$OUT"
+  [ -z "${WORK:-}" ] || kind_down "$status"
+}
+
+trap cleanup EXIT
+[ $# -gt 0 ] || set -- render kind kind-replicas
+for phase in "$@"; do
+  case "$phase" in
+    render | kind | kind-replicas) ;;
+    *) echo "usage: $0 [render] [kind] [kind-replicas]" >&2; exit 2 ;;
+  esac
+done
+for phase in "$@"; do
+  case "$phase" in
+    render) render ;;
+    kind) kind_up; kind_test ;;
+    kind-replicas) kind_up; kind_replicas_test ;;
+  esac
+done

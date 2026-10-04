@@ -92,6 +92,9 @@ QUEUELENS_TEST_POSTGRES_URL=postgresql+asyncpg://postgres@127.0.0.1:5433/postgre
 - **docker** job — image build.
 - **publish** (tags only) — multi-arch images to GHCR, only after test, docker and
   acceptance pass.
+- **publish-chart** (tags only) — the Helm chart to `oci://ghcr.io/talaatmagdyx/charts`,
+  after publish and the helm job. It fails when Chart.yaml's `appVersion` isn't the tag or
+  its `version` is already published.
 
 Also on every PR: **CodeQL** (`codeql.yml` — Python, the console's JavaScript, and the
 workflows themselves; vendored minified libraries are excluded), results under
@@ -134,7 +137,10 @@ git push --tags
 ```
 
 Version lives in `pyproject.toml` (and `create_app`'s `version=`) — keep them in sync with
-the tag.
+the tag. So does the chart's `appVersion` in `deploy/helm/queuelens/Chart.yaml`, whose own
+`version` goes up with every release (a published chart version is never replaced). GHCR
+creates the chart package private: after the first chart release, make `charts/queuelens`
+public in its package settings, as for the image.
 
 
 ## Front-end pipeline

@@ -4,7 +4,7 @@ The Helm chart in [`deploy/helm/queuelens`](../deploy/helm/queuelens) runs the
 `ghcr.io/talaatmagdyx/queuelens` image (tag: the chart's `appVersion`) as one pod with:
 
 - a **Deployment**: one replica with `Recreate` on SQLite, or several with rolling updates
-  on PostgreSQL ([more than one replica](#more-than-one-replica));
+  and a **PodDisruptionBudget** on PostgreSQL ([more than one replica](#more-than-one-replica));
 - a **PersistentVolumeClaim** for `/app/data`, where the SQLite database lives;
 - a **Secret** with the credentials, unless you bring your own (`existingSecret`);
 - a **Service**, a **ServiceAccount** without an API token, and optionally an **Ingress**
@@ -14,10 +14,26 @@ The pod runs as the image's `queuelens` user (uid/gid 999) with a read-only root
 filesystem, no capabilities and no privilege escalation. Readiness is `GET /ready`,
 liveness and startup are `GET /health` ([probes](OPERATIONS.md#health-probes)).
 
-Every value is commented in [`values.yaml`](../deploy/helm/queuelens/values.yaml). The
-chart is not in a chart repository; install it from a checkout.
+Every value is commented in [`values.yaml`](../deploy/helm/queuelens/values.yaml).
 
 ## Install
+
+Every release publishes the chart to GHCR as an OCI artifact,
+`oci://ghcr.io/talaatmagdyx/charts/queuelens`. Its versions are the chart's, not
+QueueLens's: each chart version deploys the QueueLens release in its `appVersion`, and CI
+publishes a chart only when that is the release tag. Pick one for `CHART_VERSION` below
+(without `--version`, Helm takes the latest):
+
+```bash
+helm show chart oci://ghcr.io/talaatmagdyx/charts/queuelens   # the latest: version, appVersion
+```
+
+From a checkout, `deploy/helm/queuelens` works anywhere the `oci://` reference does.
+
+GHCR creates a new package private, also when CI's push links it to the repository: it
+inherits the repository's access, not its visibility. Until the owner makes the
+`charts/queuelens` package public (package settings, as for the image), pulling it needs
+`helm registry login ghcr.io` with a token that can read it.
 
 QueueLens needs three credentials, and the chart has no defaults for them: an install
 without them fails ([required values](#required-values)). Put them in a Secret, with the
@@ -32,8 +48,8 @@ kubectl -n queuelens create secret generic queuelens-credentials \
   --from-literal=QUEUELENS_RABBITMQ_MANAGEMENT_PASSWORD="${RABBITMQ_PASSWORD}" \
   --from-literal=QUEUELENS_SECRET_KEY="$(openssl rand -base64 32 | tr '+/' '-_')"
 
-helm install queuelens deploy/helm/queuelens -n queuelens \
-  --set existingSecret=queuelens-credentials \
+helm install queuelens oci://ghcr.io/talaatmagdyx/charts/queuelens --version "$CHART_VERSION" \
+  -n queuelens --set existingSecret=queuelens-credentials \
   --set env.QUEUELENS_RABBITMQ_MANAGEMENT_URL=http://rabbitmq.messaging:15672 \
   --set env.QUEUELENS_RABBITMQ_MANAGEMENT_USERNAME=queuelens
 ```
@@ -256,6 +272,14 @@ once, the login limiter counts every replica's failures, and one replica (whiche
 an advisory lock) evaluates the alert rules ([OPERATIONS.md](OPERATIONS.md#deployment-model--constraints-read-this-first)).
 Updates roll one pod at a time (`maxUnavailable: 0`).
 
+**Disruptions.** With more than one replica the chart adds a PodDisruptionBudget, so a
+node drain evicts one pod at a time: `podDisruptionBudget.maxUnavailable` (default 1), or
+`minAvailable`, a number or a percentage, which replaces it; `podDisruptionBudget.enabled:
+false` leaves it out. It counts Ready pods, and `/ready` needs the broker: during a broker
+outage no pod is Ready, and a drain waits for the broker to come back. If it must not, set
+`readinessProbe.httpGet.path` to `/health` ([above](#prometheus-servicemonitor)). One
+replica gets no budget: it could only block drains.
+
 **Sticky sessions.** A browse snapshot lives on the replica that took it, so a client
 should keep talking to the same one. The chart sets `sessionAffinity: ClientIP` on the
 Service. An ingress controller routes to pods directly, though, so it needs its own; with
@@ -277,7 +301,8 @@ bundled rules take `max by (queue)` and `sum by (action)`, so the alerts come ou
 ## Upgrade
 
 ```bash
-helm upgrade queuelens deploy/helm/queuelens -n queuelens -f my-values.yaml
+helm upgrade queuelens oci://ghcr.io/talaatmagdyx/charts/queuelens --version "$CHART_VERSION" \
+  -n queuelens -f my-values.yaml
 ```
 
 - A new chart moves the image to its `appVersion`; pin `image.tag` to choose the version.
@@ -296,4 +321,9 @@ refused, and validates the manifests with kubeconform. `scripts/test_helm_chart.
 builds the image, installs it next to a throwaway RabbitMQ in a kind cluster of its own
 (its own kubeconfig, deleted afterwards), and checks `/health`, `/ready`, `/api/me` and
 `/metrics`, that data survives a pod restart and an upgrade, and that a Secret missing a
-required key stops the pod. CI runs both.
+required key stops the pod. `scripts/test_helm_chart.sh kind-replicas` installs two
+replicas next to a throwaway PostgreSQL, the password as `PGPASSWORD` in the Secret: both
+start at once on the empty database, failed logins on one pod make the other answer `429`,
+an alert rule created on one is listed by the other, exactly one of them holds the
+alert-engine lock, and all of it holds after a `kubectl rollout restart`. Given several
+phases, the script runs them in one cluster. CI runs all three.
