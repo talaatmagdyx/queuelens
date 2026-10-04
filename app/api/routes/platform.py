@@ -267,6 +267,9 @@ async def invite_user(
     )
     if not created:
         raise HTTPException(status_code=409, detail="User already exists")
+    await _audit_user_change(
+        request, user, "invite_user", {"user": body.username, "new_role": body.role}
+    )
     email_result: dict[str, Any] | None = None
     if body.email:
         channels = await request.app.state.settings_store.get("channels", {}) or {}
@@ -313,14 +316,15 @@ def _changeable(request: Request, admin: CurrentUser, username: str) -> None:
 
 
 async def _audit_user_change(
-    request: Request, admin: CurrentUser, action: str, metadata: dict[str, Any]
+    request: Request, actor: CurrentUser, action: str, metadata: dict[str, Any]
 ) -> None:
+    """Account changes are audited like broker actions: who changed which account."""
     from datetime import UTC, datetime
 
     from app.domain.models import AuditEntry
 
     await request.app.state.audit_repository.record(AuditEntry(
-        username=admin.username, action=action, timestamp=datetime.now(UTC),
+        username=actor.username, action=action, timestamp=datetime.now(UTC),
         result="success", metadata=metadata,
     ))
 
@@ -386,6 +390,7 @@ async def change_my_password(
     )
     if not changed:
         raise HTTPException(status_code=403, detail="Current password is incorrect")
+    await _audit_user_change(request, user, "change_password", {"user": user.username})
     return {"changed": True}
 
 

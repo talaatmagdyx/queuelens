@@ -128,3 +128,18 @@ async def test_a_deactivation_applies_on_every_replica_at_once(tmp_path) -> None
     finally:
         for replica in (a, b):
             await replica.state.database.close()
+
+
+async def test_invites_and_password_changes_are_audited(app) -> None:
+    invited = (await _call(app, "POST", "/api/users/invite", ADMIN,
+                           {"username": "rita", "role": "Viewer"})).json()
+    new = cred() + cred()  # 10+ characters
+    changed = await _call(app, "POST", "/api/users/me/password", ("rita", invited["password"]),
+                          {"current_password": invited["password"], "new_password": new})
+    assert changed.status_code == 200
+    rows = {row["action"]: row for row in await app.state.audit_repository.list()}
+    assert (rows["invite_user"]["username"], rows["invite_user"]["metadata"]["user"],
+            rows["invite_user"]["metadata"]["new_role"]) == ("admin", "rita", "Viewer")
+    assert (rows["change_password"]["username"],
+            rows["change_password"]["metadata"]["user"]) == ("rita", "rita")
+    assert new not in str(rows) and invited["password"] not in str(rows)  # never a password

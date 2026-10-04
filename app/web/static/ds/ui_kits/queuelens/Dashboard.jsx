@@ -18,7 +18,17 @@
     park: { icon: 'flag', color: 'var(--purple-600)', label: 'Park' },
     delete: { icon: 'trash-2', color: 'var(--red-600)', label: 'Delete' },
     publish: { icon: 'send', color: 'var(--green-700)', label: 'Publish (Test)' },
+    invite_user: { icon: 'user-plus', color: 'var(--slate-700)', label: 'User Invited' },
+    update_user: { icon: 'user-cog', color: 'var(--slate-700)', label: 'User Changed' },
+    delete_user: { icon: 'user-x', color: 'var(--red-600)', label: 'User Removed' },
+    change_password: { icon: 'key-round', color: 'var(--slate-700)', label: 'Password Changed' },
+    export_snapshot: { icon: 'download', color: 'var(--slate-700)', label: 'Export' },
+    add_environment: { icon: 'server', color: 'var(--slate-700)', label: 'Environment Added' },
+    remove_environment: { icon: 'server', color: 'var(--red-600)', label: 'Environment Removed' },
+    switch_environment: { icon: 'server', color: 'var(--slate-700)', label: 'Environment Switch' },
   };
+  // an action this console doesn't know yet shows as itself, never as some other action
+  const actionMeta = (action) => ACTION_META[action] || { icon: 'activity', color: 'var(--slate-600)', label: action };
   const RESULT_TONE = { Success: 'success', Started: 'warning', Failed: 'danger' };
   const RESULT_ICON = { Success: { n: 'check-circle', c: 'var(--green-600)' }, Started: { n: 'clock', c: 'var(--amber-600)' }, Failed: { n: 'x-circle', c: 'var(--red-600)' } };
 
@@ -82,7 +92,7 @@
               { key: 'st', label: '', width: 30, render: (r) => { const ic = RESULT_ICON[r.result]; return <Icon name={ic.n} size={17} color={ic.c} />; } },
               { key: 'time', label: 'Time' },
               { key: 'user', label: 'User', render: () => 'admin' },
-              { key: 'action', label: 'Action', render: (r) => { const m = ACTION_META[r.action]; return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: m.color, fontWeight: 600 }}><Icon name={m.icon} size={14} />{m.label}</span>; } },
+              { key: 'action', label: 'Action', render: (r) => { const m = actionMeta(r.action); return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: m.color, fontWeight: 600 }}><Icon name={m.icon} size={14} />{m.label}</span>; } },
               { key: 'queue', label: 'Queue', render: (r) => <a href="#" onClick={(e) => e.preventDefault()} style={{ color: 'var(--text-link)', fontWeight: 600, textDecoration: 'none' }}>{r.queue}</a> },
               { key: 'target', label: 'Target' },
               { key: 'result', label: 'Result', render: (r) => <StatusPill tone={RESULT_TONE[r.result]}>{r.result}</StatusPill> },
@@ -99,5 +109,5 @@
   }
 
   window.QL.screens.Dashboard = Dashboard;
-  Object.assign(window.QL, { STATUS, TYPE_TONE, ACTION_META, RESULT_TONE, RESULT_ICON });
+  Object.assign(window.QL, { STATUS, TYPE_TONE, ACTION_META, actionMeta, RESULT_TONE, RESULT_ICON });
 })();

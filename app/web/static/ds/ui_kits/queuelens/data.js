@@ -52,6 +52,15 @@ window.QL.screens = window.QL.screens || {};
   }
 
   function target(e) {
+    var m = e.metadata || {};
+    if (m.user) {  // account changes: whose, and to what
+      var change = [m.new_role, m.active === false ? 'deactivated' : m.active === true ? 'reactivated' : null]
+        .filter(Boolean).join(', ');
+      return m.user + (change ? ' \u2192 ' + change : '');
+    }
+    if (e.action === 'export_snapshot') return (m.messages != null ? m.messages + ' messages' : 'snapshot') + ' (' + (m.format || '') + ')';
+    // add / remove name the environment changed; a switch names the one checked
+    if (/_environment$/.test(e.action || '')) return m.name || ((m.environment || '\u2014') + (m.vhost ? ' / ' + m.vhost : ''));
     return e.target_queue || (e.target_exchange
       ? e.target_exchange + ' / ' + (e.target_routing_key || '') : '—');
   }
@@ -87,7 +96,9 @@ window.QL.screens = window.QL.screens || {};
     if (action === 'replay') {
       return (e.metadata && e.metadata.mode) === 'copy' ? 'replay_copy' : 'replay_move';
     }
-    return action === 'park' || action === 'delete' ? action : 'replay_move';
+    // anything else (account changes, exports, environments) keeps its own name: the
+    // audit trail must never show one action as another
+    return action;
   }
 
   var queuesRaw = (getJson('/api/queues') || {}).queues || [];
