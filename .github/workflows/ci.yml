@@ -201,6 +201,20 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
+      # before anything is pushed: the app and the chart must both be this release
+      - name: The tag matches pyproject.toml and the chart's appVersion
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          app="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)"
+          chart="$(sed -n 's/^appVersion: *//p' deploy/helm/queuelens/Chart.yaml | tr -d "\"'")"
+          if [ "$app" != "$want" ]; then
+            echo "::error file=pyproject.toml::version is $app, the tag is $GITHUB_REF_NAME"
+            exit 1
+          fi
+          if [ "$chart" != "$want" ]; then
+            echo "::error file=deploy/helm/queuelens/Chart.yaml::appVersion is $chart, the tag is $GITHUB_REF_NAME"
+            exit 1
+          fi
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
@@ -242,14 +256,8 @@ jobs:
       - uses: azure/setup-helm@v4
         with:
           version: v4.0.4
-      - name: Package; the chart must deploy this release's image
-        run: |
-          app_version="$(helm show chart "$CHART" | sed -n 's/^appVersion: *//p' | tr -d "\"'")"
-          if [ "$app_version" != "${GITHUB_REF_NAME#v}" ]; then
-            echo "::error file=$CHART/Chart.yaml::appVersion is $app_version, the tag is $GITHUB_REF_NAME"
-            exit 1
-          fi
-          helm package "$CHART" --destination "$RUNNER_TEMP/chart"
+      - name: Package (publish checked that appVersion is this release)
+        run: helm package "$CHART" --destination "$RUNNER_TEMP/chart"
       - name: Push to ${{ env.CHART_REPO }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
