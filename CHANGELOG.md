@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.19.0 — 2026-10-05
 
 ### Changed
 - **Monitoring covers every environment and vhost.** Before, `/metrics` and the in-app
@@ -24,6 +24,25 @@
   - A new **`QueueLensScopeUnreachable`** alert fires when a scope can't be read for 5
     minutes.
   - The example Alertmanager config groups by environment and vhost too.
+
+### Upgrade notes
+- **Check your own Prometheus rules on `queuelens_dlq_messages`.** It now has
+  `environment` and `vhost` labels, and reports every environment and vhost.
+  - **Aggregations:** one without `by (environment, vhost, queue)`, such as
+    `max by (queue)`, adds up the same queue name across scopes. Add the labels, or filter
+    to one scope (`{environment="production"}`).
+  - **Bundled rules:** the ones in `deploy/prometheus/alerts.yml` already group by them.
+  - **New rule:** add `QueueLensScopeUnreachable` from the same file.
+- **Alertmanager:** `group_by` should include `environment` and `vhost`, as in
+  `deploy/alertmanager/alertmanager.yml`. Otherwise the same DLQ name in two vhosts
+  shares one notification thread.
+- **Existing in-app alert rules keep watching the default environment and vhost.** Two
+  columns are added to `alert_rules` at startup. To watch another scope, create the rule
+  from a tab on that environment.
+- **Each scrape reads every scope's Management API, at once and with 5 seconds each.** A
+  profile whose broker is unreachable shows up as `queuelens_management_up 0` rather than
+  slowing the scrape.
+- **Helm chart 0.6.0** deploys QueueLens 0.19.0.
 
 ## v0.18.1 — 2026-10-04
 
