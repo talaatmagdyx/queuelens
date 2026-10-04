@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.18.0 — 2026-10-04
 
 ### Fixed
 - **A replay policy could act on the wrong broker.**
@@ -20,6 +20,15 @@
   pauses and notifies. A new `failed` value of `queuelens_policy_runs_total{result}`
   counts these runs.
 - **One policy that can't run no longer stops the others in the same pass.**
+
+### Upgrade notes
+- **No action needed.** Two columns are added to `replay_policies` at startup. Existing
+  policies keep running where they always did: the default environment and vhost.
+- **Check your policies if you use several environments or vhosts.** A policy created
+  before this release while looking at another one ran in the default environment and
+  vhost. It still does, and the new **Runs In** column now says so. If you meant it for the
+  other environment, recreate it from a tab on that environment and delete the old one.
+- **Helm chart 0.5.0** deploys QueueLens 0.18.0.
 
 ## v0.17.2 — 2026-10-04
 
