@@ -225,6 +225,44 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+  publish-chart:
+    # the Helm chart as an OCI artifact (docs/KUBERNETES.md#install): after the image it
+    # deploys, and only if the chart tests pass
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [publish, helm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      CHART: deploy/helm/queuelens
+      CHART_REPO: oci://ghcr.io/${{ github.repository_owner }}/charts
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.0.4
+      - name: Package; the chart must deploy this release's image
+        run: |
+          app_version="$(helm show chart "$CHART" | sed -n 's/^appVersion: *//p' | tr -d "\"'")"
+          if [ "$app_version" != "${GITHUB_REF_NAME#v}" ]; then
+            echo "::error file=$CHART/Chart.yaml::appVersion is $app_version, the tag is $GITHUB_REF_NAME"
+            exit 1
+          fi
+          helm package "$CHART" --destination "$RUNNER_TEMP/chart"
+      - name: Push to ${{ env.CHART_REPO }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GITHUB_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          version="$(helm show chart "$CHART" | sed -n 's/^version: *//p')"
+          # a published chart version is never replaced
+          if helm show chart "$CHART_REPO/queuelens" --version "$version" >/dev/null 2>&1; then
+            echo "::error file=$CHART/Chart.yaml::chart $version is already published: bump version"
+            exit 1
+          fi
+          helm push "$RUNNER_TEMP/chart/queuelens-$version.tgz" "$CHART_REPO"
+
   alerting:
     # deploy/ examples (docs/ALERTING.md): promtool rule tests, amtool routing, and a real
     # Alertmanager delivering to a local Slack/webhook sink — stdlib Python + Docker, < 1 min
@@ -236,7 +274,8 @@ jobs:
 
   helm:
     # deploy/helm/queuelens: lint, render the ci/ value sets, refuse bad ones, validate with
-    # kubeconform, then install it next to a throwaway RabbitMQ in a kind cluster
+    # kubeconform, then install it next to a throwaway RabbitMQ in a kind cluster: one
+    # replica on SQLite, then two on a throwaway PostgreSQL
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -250,4 +289,4 @@ jobs:
       - name: Lint, render, validate
         run: scripts/test_helm_chart.sh render
       - name: Install in kind
-        run: scripts/test_helm_chart.sh kind
+        run: scripts/test_helm_chart.sh kind kind-replicas  # one cluster for both

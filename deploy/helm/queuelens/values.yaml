@@ -12,6 +12,15 @@
 # (docs/KUBERNETES.md#more-than-one-replica).
 replicaCount: 1
 
+# With more than one replica, a PodDisruptionBudget lets node drains and other voluntary
+# evictions take only maxUnavailable pods at a time. Never rendered for one replica,
+# where it could only block drains.
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+  # A number or a percentage, e.g. "50%"; replaces maxUnavailable when set.
+  minAvailable: ""
+
 image:
   repository: ghcr.io/talaatmagdyx/queuelens
   # Defaults to the chart's appVersion.
