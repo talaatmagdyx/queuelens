@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.16.1 — 2026-10-04
 
 ### Fixed
 - **The Audit Log showed every action it didn't know as "Replay (Move)".** Removing a
