@@ -59,6 +59,13 @@ window.QL.screens = window.QL.screens || {};
       return m.user + (change ? ' \u2192 ' + change : '');
     }
     if (e.action === 'update_settings') return (m.keys || []).join(', ') || '\u2014';
+    if (e.action === 'run_replay_policy') {
+      return [m.replayed && m.replayed + ' replayed', m.parked && m.parked + ' parked', m.failed && m.failed + ' failed']
+        .filter(Boolean).join(', ') || 'nothing moved';
+    }
+    if (/_replay_policy$/.test(e.action || '')) {
+      return (m.name || 'policy ' + m.policy) + (m.enabled === true ? ' \u2192 enabled' : m.enabled === false ? ' \u2192 paused' : '');
+    }
     if (/_alert_rule$/.test(e.action || '')) {
       return (m.name || 'rule ' + m.rule) + (m.enabled === true ? ' \u2192 enabled' : m.enabled === false ? ' \u2192 disabled' : '');
     }

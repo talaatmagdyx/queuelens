@@ -100,3 +100,22 @@ class LoginFailureModel(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     key: Mapped[str] = mapped_column(String(64), index=True)  # sha256 of (ip, user) or ip
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class ReplayPolicyModel(Base):
+    """A DLQ that QueueLens retries by itself: replays with backoff, parks the exhausted."""
+
+    __tablename__ = "replay_policies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128))
+    queue: Mapped[str] = mapped_column(String(255))
+    max_deaths: Mapped[int] = mapped_column(Integer, default=3)  # at this many: park
+    backoff_minutes: Mapped[int] = mapped_column(Integer, default=5)  # x 2^(deaths - 1)
+    interval_minutes: Mapped[int] = mapped_column(Integer, default=10)
+    cap: Mapped[int] = mapped_column(Integer, default=100)  # messages per run
+    enabled: Mapped[bool] = mapped_column(default=True)
+    created_by: Mapped[str] = mapped_column(String(128), default="")
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_result: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)

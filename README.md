@@ -114,6 +114,7 @@ deliberately lazy toward RabbitMQ:
 | Alerts — external delivery (email / Slack / PagerDuty / webhook) | 🧪 Experimental |
 | Prometheus metrics + bundled rules | ✅ Stable |
 | Alertmanager example (Slack / webhook), tested in CI | ✅ Stable |
+| Replay policies (automatic retry with backoff, parking the exhausted) | 🧪 Experimental |
 | Helm chart | 🧪 Experimental |
 | PostgreSQL datastore | 🧪 Experimental |
 | Multiple replicas (PostgreSQL, sticky sessions) | 🧪 Experimental |
@@ -323,6 +324,7 @@ The short version (the full checklist lives in [docs/OPERATIONS.md](docs/OPERATI
 | [docs/SAFETY.md](docs/SAFETY.md) | The safety model: every guarantee, its enforcement, the failure matrix |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | Deployment model & constraints, security posture, backups, troubleshooting |
 | [docs/SSO.md](docs/SSO.md) | SSO behind oauth2-proxy, Authelia or an SSO ingress: identity headers, group → role mapping, trusted proxies |
+| [docs/POLICIES.md](docs/POLICIES.md) | Replay policies: automatic retry with exponential backoff, parking, guard rails, the API |
 | [docs/ALERTING.md](docs/ALERTING.md) | Prometheus rules → Alertmanager → Slack / webhook: wiring, secret files, tests, tuning, in-app alerts vs Alertmanager |
 | [docs/KUBERNETES.md](docs/KUBERNETES.md) | Helm chart: install, required secrets, PostgreSQL, ingress/TLS, ServiceMonitor, sidecar proxy, more than one replica, upgrades |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Local setup, test strategy, front-end pipeline, release checklist |

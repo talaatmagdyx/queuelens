@@ -15,6 +15,7 @@ from app.infrastructure.persistence.models import (
     AppSettingModel,
     LoginFailureModel,
     NotificationModel,
+    ReplayPolicyModel,
     UserModel,
 )
 
@@ -257,6 +258,78 @@ _TIMING_DECOY = hash_password(secrets.token_hex(16))
 # is the one it was verified against: a password changed or an account deactivated on
 # any replica takes effect at once on all of them.
 VERIFIED_FOR_SECONDS = 60.0
+
+
+POLICY_FIELDS = ("name", "queue", "max_deaths", "backoff_minutes", "interval_minutes", "cap",
+                 "enabled")
+
+
+class ReplayPolicyRepository:
+    def __init__(self, database: Database) -> None:
+        self._database = database
+
+    @staticmethod
+    def _to_dict(row: ReplayPolicyModel) -> dict[str, Any]:
+        return {
+            **{field: getattr(row, field) for field in ("id", *POLICY_FIELDS)},
+            "created_by": row.created_by,
+            "last_run_at": _as_utc(row.last_run_at).isoformat() if row.last_run_at else None,
+            "last_result": row.last_result or {},
+            "consecutive_failures": row.consecutive_failures,
+        }
+
+    async def list(self) -> list[dict[str, Any]]:
+        async with self._database.session() as session:
+            rows = (await session.scalars(select(ReplayPolicyModel).order_by(ReplayPolicyModel.id)))
+            return [self._to_dict(row) for row in rows.all()]
+
+    async def get(self, policy_id: int) -> dict[str, Any] | None:
+        async with self._database.session() as session:
+            row = await session.get(ReplayPolicyModel, policy_id)
+            return self._to_dict(row) if row else None
+
+    async def create(self, created_by: str, **fields: Any) -> dict[str, Any]:
+        async with self._database.session() as session:
+            row = ReplayPolicyModel(created_by=created_by, **fields)
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return self._to_dict(row)
+
+    async def update(self, policy_id: int, **fields: Any) -> dict[str, Any] | None:
+        async with self._database.session() as session:
+            row = await session.get(ReplayPolicyModel, policy_id)
+            if row is None:
+                return None
+            for key, value in fields.items():
+                setattr(row, key, value)
+            if fields.get("enabled"):
+                row.consecutive_failures = 0  # re-enabled: the count starts over
+            await session.commit()
+            await session.refresh(row)
+            return self._to_dict(row)
+
+    async def delete(self, policy_id: int) -> bool:
+        async with self._database.session() as session:
+            row = await session.get(ReplayPolicyModel, policy_id)
+            if row is None:
+                return False
+            await session.delete(row)
+            await session.commit()
+            return True
+
+    async def record_run(self, policy_id: int, at: datetime, result: dict[str, Any],
+                         failed: bool) -> int:
+        """Store a run's outcome; returns the consecutive failed runs so far."""
+        async with self._database.session() as session:
+            row = await session.get(ReplayPolicyModel, policy_id)
+            if row is None:
+                return 0
+            row.last_run_at = at
+            row.last_result = result
+            row.consecutive_failures = row.consecutive_failures + 1 if failed else 0
+            await session.commit()
+            return row.consecutive_failures
 
 
 class LoginFailureRepository:

@@ -657,3 +657,87 @@ async def test_two_replicas_take_turns_scanning_one_queue(tmp_path) -> None:
         await connection.close()
         async with httpx.AsyncClient(base_url=MANAGEMENT_URL, auth=auth, timeout=10) as mgmt:
             await mgmt.delete(f"/api/queues/%2F/{queue}")
+
+
+@pytest.mark.asyncio
+async def test_a_replay_policy_against_real_dead_letters(tmp_path) -> None:
+    """Real x-death history from real rejections: backoff reads the broker's timestamps,
+    a run skips an origin nobody consumes, replays to it once someone does, and parks a
+    message that has died too often."""
+    import asyncio
+    from datetime import UTC, datetime, timedelta
+
+    from app.application.replay_policies import PolicyRunner
+
+    suffix = uuid.uuid4().hex[:8]
+    work, dlq = f"it.policy.work.{suffix}", f"it.policy.work.{suffix}.dlq"
+    auth = (_amqp.username or "guest", _amqp.password or "guest")
+    connection = await aio_pika.connect_robust(AMQP_URL)
+    received: list[str] = []
+
+    async def dead_letter(n: int) -> None:
+        async with connection.channel() as channel:
+            queue = await channel.declare_queue(work, passive=True)
+            await channel.default_exchange.publish(
+                aio_pika.Message(f'{{"n": {n}}}'.encode(), message_id=f"p{n}"), work)
+            for _ in range(50):
+                message = await queue.get(no_ack=False, fail=False)
+                if message:
+                    await message.reject(requeue=False)  # the broker writes x-death
+                    return
+                await asyncio.sleep(0.05)
+
+    async def consumers_on(queue: str, want: int) -> None:
+        async with httpx.AsyncClient(base_url=MANAGEMENT_URL, auth=auth, timeout=10) as mgmt:
+            for _ in range(60):  # the Management API reports consumers a few seconds late
+                if (await mgmt.get(f"/api/queues/%2F/{queue}")).json().get("consumers") == want:
+                    return
+                await asyncio.sleep(0.5)
+
+    try:
+        async with connection.channel() as channel:
+            await channel.declare_queue(dlq, durable=True)
+            await channel.declare_queue(work, durable=True, arguments={
+                "x-dead-letter-exchange": "", "x-dead-letter-routing-key": dlq})
+        for n in range(3):
+            await dead_letter(n)
+        app = create_app(_settings(tmp_path))
+        async with app.router.lifespan_context(app):
+            policy = dict(await app.state.replay_policies.create(
+                "admin", name="work", queue=dlq, max_deaths=3, backoff_minutes=5,
+                interval_minutes=10, cap=100, enabled=True))
+            now = PolicyRunner(app.state)  # the real clock: they died a moment ago
+            assert (await now.run(policy, preview=True))["waiting"] == 3
+            later = PolicyRunner(app.state, clock=lambda: datetime.now(UTC) + timedelta(hours=2))
+            skipped = await later.run(policy)
+            assert (skipped["skipped_no_consumers"], skipped["replayed"]) == (3, 0)
+
+            listener = await connection.channel()
+            work_queue = await listener.declare_queue(work, passive=True)
+
+            async def on_message(message: aio_pika.abc.AbstractIncomingMessage) -> None:
+                received.append(message.message_id)
+                await message.ack()
+
+            await work_queue.consume(on_message)
+            await consumers_on(work, 1)
+            replayed = await later.run(policy)
+            for _ in range(40):
+                if len(received) == 3:
+                    break
+                await asyncio.sleep(0.1)
+            assert replayed["replayed"] == 3 and sorted(received) == ["p0", "p1", "p2"]
+            await listener.close()
+            await consumers_on(work, 0)
+
+            await dead_letter(9)
+            parking = dict(await app.state.replay_policies.update(policy["id"], max_deaths=1))
+            parked = await later.run(parking)
+            assert parked["parked"] == 1
+            rows = await app.state.audit_repository.list(action="run_replay_policy")
+            assert rows and rows[0]["username"] == "policy:work"
+    finally:
+        await connection.close()
+        async with httpx.AsyncClient(base_url=MANAGEMENT_URL, auth=auth, timeout=10) as mgmt:
+            for queue in (work, dlq, f"{dlq}.parking"):
+                await mgmt.delete(f"/api/queues/%2F/{queue}")
