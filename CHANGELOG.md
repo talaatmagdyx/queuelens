@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Replay policy metrics:**
+  - `queuelens_policy_runs_total{policy,result}`: one count per run, with `result` one
+    of idle, success or partial.
+  - `queuelens_policy_messages_total{policy,outcome}`: messages counted by outcome
+    (replayed, parked, failed, or held because the target had no consumers).
+  - `queuelens_policy_paused{policy}`: 1 while a policy has paused itself after failed
+    runs.
+- **`ReplayPolicyPaused` Prometheus alert rule** in deploy/prometheus/alerts.yml. It has
+  a promtool test and is covered by the alerting pipeline check.
+- **The acceptance suite covers replay policies.** It checks:
+  - previews and Admin-only creation;
+  - holding back replays when the target has no consumers;
+  - replays to the origin queue, each audited as `policy:<name>`;
+  - parking at the death limit;
+  - who may pause a policy and who may re-enable it;
+  - the new metrics.
+- **A Replay Policies screenshot** in the README and on the site.
+
+### Fixed
+- **Audit Log table:**
+  - A long user name such as `policy:orders retry` no longer squeezes the Queue column
+    until it breaks names mid-word.
+  - The table no longer pushes the row's details button off the card.
+
+### Changed
+- **docs/ARCHITECTURE.md is up to date.** It now covers:
+  - per-request environments, snapshots and queue locks;
+  - Basic Auth and SSO;
+  - how replicas coordinate on PostgreSQL;
+  - the background tasks;
+  - replay policies.
+
 ## v0.17.0 — 2026-10-04
 
 ### Added

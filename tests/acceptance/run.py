@@ -1444,9 +1444,13 @@ async def g19():
     check(19, "JSON metrics summary consistent", s["rabbitmq_ready"] and s["dlq_backlog"] == sum(d["messages"] for d in s["dlq"]))
     y = (await api("GET", "/api/metrics/alert-rules")).text
     rules = (await api("GET", "/api/alert-rules")).json()["rules"]
-    exprs_ok = all(re.search(r"queuelens_(rabbitmq_ready|dlq_messages|actions_total)", r["expr"]) for r in rules)
+    # every queuelens_* metric a rule uses must be one this server exports (a HELP line at least)
+    exprs_ok = all(re.findall(r"queuelens_\w+", r["expr"])
+                   and all(f"# HELP {name} " in m2 for name in re.findall(r"queuelens_\w+", r["expr"]))
+                   for r in rules)
     check(19, "Bundled Prometheus alert rules served + reference real metrics",
-          len(rules) == 4 and "QueueLensBrokerDown" in y and exprs_ok, [r["name"] for r in rules])
+          len(rules) == open(f"{REPO}/deploy/prometheus/alerts.yml").read().count("- alert: ")
+          and "QueueLensBrokerDown" in y and exprs_ok, [r["name"] for r in rules])
     check(19, "Alert-delivery outcomes exported as a Prometheus metric", "deliver" in m2,
           "no delivery metric exists — outcomes live only in the notifications table", bad="FAIL")
     files = os.listdir(f"{REPO}/deploy/prometheus")
@@ -1546,6 +1550,90 @@ async def g10():
 
 
 # ================================================================== final phase: timers, restarts, rate limit
+# ================================================================== G30 replay policies
+POLICY = {}
+
+
+async def g30_setup():
+    """Dead letters now, run the policy minutes later (backoff 1 min): see g30."""
+    await decl("t30.dlq")
+    await decl("t30.work", {"x-dead-letter-exchange": "", "x-dead-letter-routing-key": "t30.dlq"})
+    for i in range(3):
+        await pub("t30.work", {"policy": i}, message_id=f"t30-{i}")
+    await deadletter("t30.work", 3)
+    await wait_ql_count("t30.dlq", 3)
+    body = {"name": "t30 work", "queue": "t30.dlq", "max_deaths": 3, "backoff_minutes": 1,
+            "interval_minutes": 60, "cap": 100, "enabled": False}  # run by hand in g30 only
+    denied = await api("POST", "/api/policies", json=body, auth=USERS["oper1"])
+    created = await api("POST", "/api/policies", json=body)
+    POLICY.update(created.json() if created.status_code == 200 else {})
+    check(30, "Only an Admin creates a replay policy (Operator 403)",
+          denied.status_code == 403 and created.status_code == 200, (denied.status_code, created.status_code))
+
+
+async def g30():
+    if not POLICY:
+        check(30, "Replay policy exists", False, "g30_setup did not create it")
+        return
+    url = f"/api/policies/{POLICY['id']}"
+    preview_r = (await api("POST", url + "/preview", auth=USERS["oper1"])).json()
+    check(30, "Preview (Operator) shows the due messages and their origin, moving nothing",
+          preview_r.get("targets") == {"t30.work": {"due": 3, "consumers": 0}} and await count("t30.dlq") == 3,
+          preview_r)
+    held = (await api("POST", url + "/run")).json()
+    check(30, "A run holds back replays into a queue with no consumers",
+          held.get("skipped_no_consumers") == 3 and held.get("replayed") == 0 and await count("t30.dlq") == 3, held)
+
+    got: list[str] = []
+    listener = await CONN.channel()
+    queue = await listener.declare_queue("t30.work", passive=True)
+
+    async def on_message(message):
+        got.append(message.message_id)
+        await message.ack()
+
+    await queue.consume(on_message)
+    async with httpx.AsyncClient(base_url=MGMT, auth=MAUTH, timeout=10) as m:
+        await until(lambda: _consumers(m, "t30.work", 1), 30)
+    ran = (await api("POST", url + "/run")).json()
+    await until(lambda: _done(got, 3), 10)
+    check(30, "A run replays due messages to the queue they died in (x-death)",
+          ran.get("replayed") == 3 and sorted(got) == ["t30-0", "t30-1", "t30-2"], (ran, got))
+    await listener.close()
+
+    rows = (await api("GET", "/api/audit", params={"username": "policy:t30 work", "limit": 50})).json()["events"]
+    check(30, "Every replayed message is audited as policy:<name>",
+          sum(1 for r in rows if r["action"] == "replay" and r["result"] == "success") == 3, len(rows))
+
+    for i in range(2):
+        await pub("t30.work", {"exhausted": i}, message_id=f"t30-x{i}")
+    await deadletter("t30.work", 2)
+    await wait_ql_count("t30.dlq", 2)
+    await api("PUT", url, json={"name": "t30 work", "queue": "t30.dlq", "max_deaths": 1, "backoff_minutes": 1,
+                                "interval_minutes": 60, "cap": 100, "enabled": False})
+    parked = (await api("POST", url + "/run")).json()
+    check(30, "A run parks messages at the death limit",
+          parked.get("parked") == 2 and await count("t30.dlq.parking") == 2, parked)
+
+    codes = ((await api("PATCH", url, json={"enabled": True}, auth=USERS["oper1"])).status_code,
+             (await api("PATCH", url, json={"enabled": True})).status_code,
+             (await api("PATCH", url, json={"enabled": False}, auth=USERS["oper1"])).status_code)
+    check(30, "Operators pause a policy; only an Admin turns one back on", codes == (403, 200, 200), codes)
+    metrics = (await api("GET", "/metrics")).text
+    check(30, "/metrics counts what policies did",
+          'queuelens_policy_messages_total{outcome="replayed",policy="t30 work"} 3.0' in metrics
+          and 'queuelens_policy_paused{policy="t30 work"} 0.0' in metrics,
+          [line for line in metrics.splitlines() if "policy" in line and not line.startswith("#")][:6])
+
+
+async def _consumers(mgmt, queue, want):
+    return (await mgmt.get(f"/api/queues/%2F/{queue}")).json().get("consumers") == want
+
+
+async def _done(got, want):
+    return len(got) >= want
+
+
 async def final():
     wait = 32 - (time.monotonic() - min(EXPIRY_TOKEN["t"], TOPO["t0"]))
     if wait > 0:
@@ -1686,7 +1774,8 @@ async def main():
     assert start_server(), "server did not start: " + open(LOG).read()[-2000:]
     CLIENT = httpx.AsyncClient(base_url=BASE, timeout=60)
     CONN = await aio_pika.connect_robust(AMQP)
-    groups = [g24, g12, g1, g2, g3, g4, g5, g6, g7, g8, g9, g13, g20, g21, g15_18, g19, g10, final]
+    groups = [g24, g12, g30_setup, g1, g2, g3, g4, g5, g6, g7, g8, g9, g13, g20, g21, g15_18, g19,
+              g10, g30, final]
     try:
         for g in groups:
             print(f"\n--- {g.__name__} ---", flush=True)

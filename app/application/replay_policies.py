@@ -22,6 +22,7 @@ from typing import Any
 from app.application.action_service import configured_target
 from app.application.bulk_runs import execute_audited
 from app.domain.models import AuditEntry, MessageRecord, ReplayTarget
+from app.observability.metrics import POLICY_MESSAGES, POLICY_RUNS
 
 logger = logging.getLogger(__name__)
 PAUSE_AFTER_FAILED_RUNS = 3
@@ -215,9 +216,16 @@ class PolicyRunner:
                       username: str) -> None:
         state = self._state
         failed_run = result["failed"] > 0
+        moved = result["replayed"] or result["parked"]
+        POLICY_RUNS.labels(policy=policy["name"],
+                           result="partial" if failed_run else "success" if moved else "idle").inc()
+        for outcome, key in (("replayed", "replayed"), ("parked", "parked"),
+                             ("failed", "failed"), ("held", "skipped_no_consumers")):
+            if result[key]:
+                POLICY_MESSAGES.labels(policy=policy["name"], outcome=outcome).inc(result[key])
         failed_runs = await state.replay_policies.record_run(
             policy["id"], self._clock(), result, failed_run)
-        if result["replayed"] or result["parked"] or failed_run:
+        if moved or failed_run:
             await state.audit_repository.record(AuditEntry(
                 username=username, action="run_replay_policy", timestamp=self._clock(),
                 source_queue=policy["queue"], result="partial" if failed_run else "success",

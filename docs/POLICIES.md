@@ -44,6 +44,17 @@ the one), and only against the **default environment**, the same as alert rules.
 Policies are checked every 30 seconds. **Preview** reads the DLQ and shows what a run
 would do, moving nothing; **Run now** runs one immediately.
 
+## Metrics
+
+| Metric | |
+|---|---|
+| `queuelens_policy_runs_total{policy, result}` | runs: `idle` (nothing due), `success`, `partial` (some publishes failed) |
+| `queuelens_policy_messages_total{policy, outcome}` | messages `replayed`, `parked`, `failed`, or `held` (no consumers) |
+| `queuelens_policy_paused{policy}` | 1 while a policy has paused itself; read from the database, so every replica reports it |
+
+The bundled rules alert on a paused policy (`ReplayPolicyPaused`,
+[ALERTING.md](ALERTING.md)).
+
 ## API
 
 | Method | Path | Who | |

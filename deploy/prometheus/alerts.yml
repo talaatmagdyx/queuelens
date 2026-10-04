@@ -42,3 +42,13 @@ groups:
         annotations:
           summary: "QueueLens actions are failing"
           description: "{{ $value | printf \"%.0f\" }} failed actions in the last 15 minutes — check the audit log."
+
+      - alert: ReplayPolicyPaused
+        # every replica reports the same database-backed gauge
+        expr: max by (policy) (queuelens_policy_paused) == 1
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Replay policy {{ $labels.policy }} paused itself"
+          description: "{{ $labels.policy }} stopped after failed runs: check the audit log, then re-enable it."

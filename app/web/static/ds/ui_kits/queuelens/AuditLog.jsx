@@ -93,10 +93,10 @@
               columns={[
                 // date over time, and long names wrap: the table has to fit its card
                 { key: 'time', label: 'Time', render: (r) => <span style={{ whiteSpace: 'normal', display: 'inline-block', width: 84 }}>{r.time}</span> },
-                { key: 'user', label: 'User' },
+                { key: 'user', label: 'User', render: (r) => <span style={{ whiteSpace: 'normal', display: 'inline-block', maxWidth: 120 }}>{r.user}</span> },
                 { key: 'action', label: 'Action', render: (r) => { const m = actionMeta(r.action); return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: m.color, fontWeight: 600, whiteSpace: 'normal' }}><Icon name={m.icon} size={14} />{m.label}</span>; } },
-                { key: 'queue', label: 'Queue', render: (r) => <span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', display: 'inline-block', maxWidth: 150 }}>{atDots(r.queue)}</span> },
-                { key: 'target', label: 'Target / Destination', render: (r) => <span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', display: 'inline-block', maxWidth: 170 }}>{atDots(r.target)}</span> },
+                { key: 'queue', label: 'Queue', render: (r) => <span style={{ whiteSpace: 'normal', overflowWrap: 'break-word', display: 'inline-block', maxWidth: 150 }}>{atDots(r.queue)}</span> },
+                { key: 'target', label: 'Target / Destination', render: (r) => <span style={{ whiteSpace: 'normal', overflowWrap: 'break-word', display: 'inline-block', maxWidth: 170 }}>{atDots(r.target)}</span> },
                 { key: 'result', label: 'Result', render: (r) => <StatusPill tone={RESULT_TONE[r.result]}>{r.result}</StatusPill> },
                 { key: 'duration', label: 'Duration' },
                 { key: 'd', label: '', align: 'right', render: (r) => <IconButton icon="eye" size={28} onClick={() => setSel(r)} /> },

@@ -1,7 +1,7 @@
 # Alerting with Prometheus and Alertmanager
 
 QueueLens exports metrics at `/metrics`, and
-[`deploy/prometheus/alerts.yml`](../deploy/prometheus/alerts.yml) turns them into four
+[`deploy/prometheus/alerts.yml`](../deploy/prometheus/alerts.yml) turns them into five
 alerts. Prometheus evaluates the rules and Alertmanager delivers them — QueueLens is not in
 the delivery path.
 
@@ -11,6 +11,7 @@ the delivery path.
 | `DLQAboveThreshold` | a DLQ holds more than 1000 messages for 15 minutes | warning |
 | `DLQGrowing` | a DLQ grew by more than 100 messages in 30 minutes | warning |
 | `QueueLensActionFailures` | more than 3 failed actions in 15 minutes | warning |
+| `ReplayPolicyPaused` | a replay policy paused itself after 3 failed runs ([POLICIES.md](POLICIES.md)) | warning |
 
 The DLQ alerts carry a `queue` label.
 

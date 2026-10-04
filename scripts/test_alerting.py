@@ -48,6 +48,8 @@ ALERTS: list[Alert] = [
     ("QueueLensActionFailures", {"action": "replay", "result": "failed"},
      "QueueLens actions are failing",
      "15 failed actions in the last 15 minutes — check the audit log."),
+    ("ReplayPolicyPaused", {"policy": "orders"}, "Replay policy orders paused itself",
+     "orders stopped after failed runs: check the audit log, then re-enable it."),
 ]
 BROKER_DOWN = ALERTS[0]
 

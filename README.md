@@ -283,6 +283,17 @@ delivered in-app too.
 
 </td>
 </tr>
+<tr>
+<td colspan="2">
+
+**Replay policies** — QueueLens retries a DLQ by itself: due messages go back to the
+queue they died in with exponential backoff, the exhausted are parked, and every run is
+audited ([how it works](docs/POLICIES.md)).
+
+![Replay policies](docs/screenshots/policies.png)
+
+</td>
+</tr>
 </table>
 
 ## QueueLens vs. RabbitMQ Management UI

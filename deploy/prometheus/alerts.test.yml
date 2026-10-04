@@ -127,3 +127,25 @@ tests:
               summary: QueueLens actions are failing
               # increase() extrapolates: 2 + 2 over 5m of samples in a 15m window reads 4
               description: 4 failed actions in the last 15 minutes — check the audit log.
+
+  # A policy that paused itself alerts once, whatever the replica count; a policy a person
+  # disabled (gauge 0) never does.
+  - interval: 1m
+    input_series:
+      - series: 'queuelens_policy_paused{job="queuelens", instance="10.0.0.1:8000", policy="orders"}'
+        values: '0x2 1x5'
+      - series: 'queuelens_policy_paused{job="queuelens", instance="10.0.0.2:8000", policy="orders"}'
+        values: '0x2 1x5'
+      - series: 'queuelens_policy_paused{job="queuelens", instance="10.0.0.1:8000", policy="billing"}'
+        values: '0x7'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: ReplayPolicyPaused
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: ReplayPolicyPaused
+        exp_alerts:
+          - exp_labels: {severity: warning, policy: orders}
+            exp_annotations:
+              summary: Replay policy orders paused itself
+              description: "orders stopped after failed runs: check the audit log, then re-enable it."
