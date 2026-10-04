@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.16.0 — 2026-10-04
 
 ### Added
 - **Admins can change roles, deactivate, reactivate and remove accounts.** Until now
@@ -20,6 +20,16 @@
   `GET /api/queues/{q}/snapshots/{id}/export`), with the page filters applied. Messages
   are masked as the console shows them, CSV cells can't open as formulas, and every
   export is audited.
+- **The Helm chart is published to GHCR** on every release:
+  `helm install queuelens oci://ghcr.io/talaatmagdyx/charts/queuelens --version 0.3.0`. A
+  tag must match both the app version and the chart's `appVersion` before any image is
+  pushed, and a published chart version is never replaced.
+- **The Helm chart adds a PodDisruptionBudget with more than one replica**
+  (`maxUnavailable: 1`; `podDisruptionBudget.minAvailable`, or `enabled: false`). One
+  replica gets none.
+- **CI tests two replicas on a throwaway PostgreSQL in kind.** They start together on an
+  empty database, share the login limiter and alert rules, elect one alert leader, and
+  survive a rollout restart.
 
 ### Fixed
 - The Users page marked an account "Invited" only when it was inactive, which never
@@ -29,6 +39,15 @@
 - **The Alerts table overflowed its card** by about 400 px. Channel chips now show just the
   channel (unconfigured ones in amber, with the details in a tooltip), and the rule and
   condition cells wrap.
+- **The acceptance suite's failed-login timing check failed on shared CI runners**, where
+  bursts of load land on one account's samples. It now compares the fastest of 7
+  interleaved attempts per account; the code paths were equal all along (36 vs 36 ms locally).
+
+### Upgrade notes
+- **No breaking changes.**
+- **Helm chart 0.3.0** deploys QueueLens 0.16.0. The first chart package on GHCR starts
+  private: the owner makes `charts/queuelens` public once in its package settings.
+- **New audit actions:** `update_user`, `delete_user`, `export_snapshot`.
 
 ## v0.15.0 — 2026-10-03
 
