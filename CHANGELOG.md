@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.17.2 — 2026-10-04
 
 ### Fixed
 - **On RabbitMQ 4.x, replay policies never parked a message that kept failing.**
@@ -18,6 +18,14 @@
   messages.
 - **A new integration test** sends a message to a consumer that rejects it every time,
   on RabbitMQ 3.13 and 4.1, and checks that the policy parks it at the third death.
+
+### Upgrade notes
+- **If you run replay policies on RabbitMQ 4.x, upgrade.** Before this release, a message
+  that kept failing was replayed forever. Messages already caught in that loop start
+  counting from the upgrade, so they are parked within `max_deaths` more failures. Their
+  earlier deaths were never recorded.
+- **New header:** replays add `x-queuelens-deaths`. API messages gain a `deaths` field.
+- **Helm chart 0.4.2** deploys QueueLens 0.17.2.
 
 ## v0.17.1 — 2026-10-04
 
