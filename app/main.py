@@ -188,7 +188,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # API docs and schema sit behind the same auth as the API (registered below)
     app = FastAPI(
         title="QueueLens",
-        version="0.17.0",
+        version="0.17.1",
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,

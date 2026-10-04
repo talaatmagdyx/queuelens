@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.17.1 — 2026-10-04
 
 ### Added
 - **Replay policy metrics:**
@@ -34,6 +34,12 @@
   - how replicas coordinate on PostgreSQL;
   - the background tasks;
   - replay policies.
+
+### Upgrade notes
+- **No breaking changes.** There is nothing to migrate.
+- **Helm chart 0.4.1** deploys QueueLens 0.17.1.
+- **To get the new alert,** add the `ReplayPolicyPaused` rule from
+  deploy/prometheus/alerts.yml to your Prometheus rules.
 
 ## v0.17.0 — 2026-10-04
 
