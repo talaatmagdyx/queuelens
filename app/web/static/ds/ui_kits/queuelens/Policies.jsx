@@ -113,7 +113,7 @@
             columns={[
               { key: 'name', label: 'Policy', render: (p) => <span style={{ fontWeight: 600, color: 'var(--slate-900)', whiteSpace: 'normal' }}>{p.name}</span> },
               { key: 'queue', label: 'DLQ', render: (p) => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, whiteSpace: 'normal', overflowWrap: 'break-word' }}>{p.queue}</span> },
-              { key: 'where', label: 'Runs In', render: (p) => <span style={{ fontSize: 12.5, color: 'var(--slate-600)', whiteSpace: 'normal' }}>{where(p)}</span> },
+              { key: 'where', label: 'Runs In', render: (p) => <span style={{ fontSize: 12.5, color: 'var(--slate-600)' }}>{p.environment}<br /><span style={{ color: 'var(--slate-400)' }}>vhost {p.vhost}</span></span> },
               { key: 'rule', label: 'Rule', render: (p) => <span style={{ fontSize: 12.5, color: 'var(--slate-600)', whiteSpace: 'normal' }}>backoff {p.backoff_minutes}m × 2ⁿ⁻¹ · park at {p.max_deaths} · every {p.interval_minutes}m · ≤ {p.cap}</span> },
               { key: 'last', label: 'Last Run', render: (p) => <span style={{ fontSize: 12.5, whiteSpace: 'normal' }}>{lastRun(p)}{p.consecutive_failures ? <StatusPill tone="danger" style={{ marginLeft: 6 }}>{p.consecutive_failures} failed in a row</StatusPill> : null}</span> },
               { key: 'on', label: 'Enabled', align: 'right', render: (p) => <span onClick={(e) => e.stopPropagation()} title={!isAdmin && !p.enabled ? 'Only an Admin can turn a policy back on' : ''}><Switch checked={p.enabled} onChange={() => (canAct && (p.enabled || isAdmin)) && toggle(p)} /></span> },
