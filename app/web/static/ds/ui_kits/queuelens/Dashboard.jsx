@@ -26,6 +26,10 @@
     add_environment: { icon: 'server', color: 'var(--slate-700)', label: 'Environment Added' },
     remove_environment: { icon: 'server', color: 'var(--red-600)', label: 'Environment Removed' },
     switch_environment: { icon: 'server', color: 'var(--slate-700)', label: 'Environment Switch' },
+    update_settings: { icon: 'settings', color: 'var(--slate-700)', label: 'Settings Changed' },
+    create_alert_rule: { icon: 'bell-plus', color: 'var(--slate-700)', label: 'Alert Rule Added' },
+    update_alert_rule: { icon: 'bell', color: 'var(--slate-700)', label: 'Alert Rule Changed' },
+    delete_alert_rule: { icon: 'bell-off', color: 'var(--red-600)', label: 'Alert Rule Removed' },
   };
   // an action this console doesn't know yet shows as itself, never as some other action
   const actionMeta = (action) => ACTION_META[action] || { icon: 'activity', color: 'var(--slate-600)', label: action };
