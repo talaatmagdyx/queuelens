@@ -188,6 +188,15 @@ override, else `QUEUELENS_REFETCH_WINDOW_SIZE`). With `?snapshot=<id>`, the mess
 from that snapshot and the broker isn't read. `404` when the fingerprint matches zero **or
 multiple** messages; ambiguity is treated as not-found rather than guessing.
 
+### `GET /api/queues/{queue_name}/snapshots/{snapshot_id}/export`
+Download a snapshot's messages as `?format=json` (default) or `csv`, with the same
+`contains` / `payload_format` / `min_deaths` filters as its pages. Messages are rendered and
+masked as the console shows them, and the broker isn't read. CSV columns: `fingerprint`,
+`message_id`, `correlation_id`, `timestamp`, `exchange`, `routing_key`, `deaths`,
+`payload_format`, `payload`, `headers`; a cell that would open as a spreadsheet formula
+is prefixed with `'`. Every export is audited (`export_snapshot`, with the message
+count). `404` for an expired snapshot, or one taken in another environment or vhost.
+
 ## Actions
 
 All actions are `POST`, require `"confirm": true`, and follow the same lifecycle: audit
@@ -281,6 +290,8 @@ selection is capped at the bulk limit (`400` above it).
 | `target` | no | Replay target; falls back to the configured target, else `400` |
 | `payload_contains` | no | Only messages whose raw body contains this substring |
 | `fingerprints` | no (max 1000) | Explicit selection: only these fingerprints are considered (combines with `payload_contains` as an intersection) |
+| `snapshot` | no | The snapshot the selection was picked from: the scan reaches down to its deepest message |
+| `match` | no | Instead of `fingerprints`: every message of `snapshot` matching `{"contains", "payload_format", "min_deaths"}`, the filters of its pages ("select all matching"). Needs `snapshot`; more matches than the bulk limit is `400` |
 
 Response:
 

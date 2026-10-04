@@ -233,6 +233,29 @@ window.QL.screens = window.QL.screens || {};
     });
   };
   window.QL.postJson = function (path, body) { return window.QL.requestJson('POST', path, body); };
+  // A file from the API, saved by the browser. XHR with the tab's scope headers: a plain
+  // link can't send them, and the file belongs to this tab's environment.
+  window.QL.download = function (path, filename) {
+    return new Promise(function (resolve, reject) {
+      var x = new XMLHttpRequest();
+      x.open('GET', path);
+      x.responseType = 'blob';
+      scoped(x);
+      x.onload = function () {
+        if (x.status < 200 || x.status >= 300) { reject(new Error('HTTP ' + x.status)); return; }
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(x.response);
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+        resolve();
+      };
+      x.onerror = function () { reject(new Error('Network error')); };
+      x.send();
+    });
+  };
   window.QL.putJson = function (path, body) { return window.QL.requestJson('PUT', path, body); };
 
   window.QL.fetchServerSettings = function () { return getJson('/api/settings') || {}; };
