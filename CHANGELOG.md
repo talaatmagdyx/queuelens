@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.18.1 — 2026-10-04
 
 ### Added
 - **A replay policy's history.** **History** on the Replay Policies screen opens the Audit
@@ -9,6 +9,10 @@
 - **The Audit Log can show one account's actions.** It fetches them from the server, so
   they aren't limited to the latest 500 actions of everyone. **Clear Filters** goes back
   to all accounts.
+
+### Upgrade notes
+- **No breaking changes, and no schema changes.**
+- **Helm chart 0.5.1** deploys QueueLens 0.18.1.
 
 ## v0.18.0 — 2026-10-04
 
