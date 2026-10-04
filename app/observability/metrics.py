@@ -1,5 +1,5 @@
-"""Prometheus metrics. Counters are updated where actions execute; the two
-gauges are refreshed at scrape time so they reflect the broker right now."""
+"""Prometheus metrics. Counters are updated where actions execute; the gauges are
+refreshed at scrape time so they reflect the broker (and the database) right now."""
 
 from prometheus_client import Counter, Gauge, Histogram
 
@@ -36,4 +36,23 @@ ALERT_DELIVERIES = Counter(
     "queuelens_alert_deliveries_total",
     "Alert notification deliveries by channel and result (ok | failed | skipped)",
     ["channel", "result"],
+)
+
+POLICY_RUNS = Counter(
+    "queuelens_policy_runs_total",
+    "Replay policy runs by policy and result (idle | success | partial)",
+    ["policy", "result"],
+)
+
+POLICY_MESSAGES = Counter(
+    "queuelens_policy_messages_total",
+    "Messages replay policies acted on, by policy and outcome "
+    "(replayed | parked | failed | held: no consumers)",
+    ["policy", "outcome"],
+)
+
+POLICY_PAUSED = Gauge(
+    "queuelens_policy_paused",
+    "1 while a replay policy has paused itself after failed runs, else 0",
+    ["policy"],
 )

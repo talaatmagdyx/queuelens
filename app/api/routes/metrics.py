@@ -7,11 +7,13 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.api.scope import broker, broker_scope
 from app.application.queue_service import QueueService
+from app.application.replay_policies import PAUSE_AFTER_FAILED_RUNS
 from app.auth.basic import get_current_username
 from app.observability.metrics import (
     ACTIONS,
     DLQ_MESSAGES,
     OPERATION_SECONDS,
+    POLICY_PAUSED,
     PREVIEW_REQUESTS,
     RABBITMQ_READY,
 )
@@ -38,6 +40,11 @@ async def _refresh_gauges(request: Request) -> None:
             DLQ_MESSAGES.labels(queue=queue.name).set(queue.messages)
     except Exception:  # broker or management API down — the ready gauge covers it
         RABBITMQ_READY.set(0)
+    # from the database, so every replica reports it, not only the one that runs policies
+    POLICY_PAUSED.clear()
+    for policy in await request.app.state.replay_policies.list():
+        paused = not policy["enabled"] and policy["consecutive_failures"] >= PAUSE_AFTER_FAILED_RUNS
+        POLICY_PAUSED.labels(policy=policy["name"]).set(1 if paused else 0)
 
 
 @router.get("/metrics")

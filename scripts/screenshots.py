@@ -82,6 +82,11 @@ def prepare(base: str, auth: tuple[str, str]) -> None:
         page = api.get(f"/api/queues/{queue}/messages?snapshot=new&limit=50").json()
         return page["snapshot"]["id"], [page["messages"][i]["fingerprint"] for i in positions]
 
+    # a replay policy with a real run: it parks the orders that died 3 or 5 times
+    policy = api.post("/api/policies", json={
+        "name": "orders retry", "queue": "orders.created.dlq", "max_deaths": 3,
+        "backoff_minutes": 5, "interval_minutes": 10, "cap": 100}).json()
+    api.post(f"/api/policies/{policy['id']}/run").raise_for_status()
     sid, fps = pick("payments.retry.dlq", [10, 11, 12])
     for fp in fps:
         api.post("/api/messages/park", json={"source_queue": "payments.retry.dlq",
@@ -156,6 +161,8 @@ def capture(base: str, auth: tuple[str, str]) -> None:
         shot(page, "audit.png")
         nav(page, "Topology", "Topology")
         shot(page, "topology.png")
+        nav(page, "Replay Policies", "orders retry")
+        shot(page, "policies.png")
         nav(page, "Configuration", "Broker Connection")
         page.wait_for_selector("text=Connection successful")
         shot(page, "configuration.png")

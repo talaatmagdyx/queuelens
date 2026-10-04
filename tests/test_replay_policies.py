@@ -115,10 +115,10 @@ async def _no_delivery(*_args: Any, **_kw: Any) -> dict[str, Any]:
     return {}
 
 
-async def _policy(app, **extra: Any) -> dict[str, Any]:
-    return dict(await app.state.replay_policies.create(
-        "admin", name="orders", queue="q.dlq", max_deaths=3, backoff_minutes=5,
-        interval_minutes=10, cap=100, enabled=True, **extra))
+async def _policy(app, **overrides: Any) -> dict[str, Any]:
+    fields = {"name": "orders", "queue": "q.dlq", "max_deaths": 3, "backoff_minutes": 5,
+              "interval_minutes": 10, "cap": 100, "enabled": True, **overrides}
+    return dict(await app.state.replay_policies.create("admin", **fields))
 
 
 @pytest.mark.asyncio
@@ -217,5 +217,24 @@ async def test_admins_manage_policies_and_operators_can_only_pause(tmp_path) -> 
         actions = [r["action"] for r in await app.state.audit_repository.list()]
         assert {"create_replay_policy", "update_replay_policy",
                 "delete_replay_policy"} <= set(actions)
+    finally:
+        await app.state.database.close()
+
+
+@pytest.mark.asyncio
+async def test_metrics_count_what_policies_did_and_flag_a_paused_one(tmp_path) -> None:
+    app = _app(tmp_path, [_dead(1, 1, 60)], {"orders": 1})
+    await app.state.database.start()
+    try:
+        app.state.bulk_service.fail = True
+        policy = await _policy(app, name="metered")
+        for _ in range(3):
+            await app.state.policy_runner.run(policy)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+            text = (await http.get("/metrics", auth=("admin", PW["admin"]))).text
+        assert 'queuelens_policy_paused{policy="metered"} 1.0' in text
+        assert 'queuelens_policy_runs_total{policy="metered",result="partial"} 3.0' in text
+        assert 'queuelens_policy_messages_total{outcome="failed",policy="metered"} 3.0' in text
     finally:
         await app.state.database.close()
