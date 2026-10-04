@@ -214,7 +214,7 @@
               <DataTable rowKey="id"
                 columns={[
                   { key: 'name', label: 'Rule', render: (r) => <span style={{ fontWeight: 600, color: 'var(--slate-900)', whiteSpace: 'normal' }}>{r.name}</span> },
-                  { key: 'where', label: 'Watches', render: (r) => <span style={{ fontSize: 12.5, color: 'var(--slate-600)', whiteSpace: 'normal' }}>{r.environment} · {r.vhost}</span> },
+                  { key: 'where', label: 'Watches', render: (r) => <span style={{ fontSize: 12.5, color: 'var(--slate-600)' }}>{r.environment}<br /><span style={{ color: 'var(--slate-400)' }}>vhost {r.vhost}</span></span> },
                   { key: 'cond', label: 'Condition', render: (r) => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--slate-600)', whiteSpace: 'normal' }}>{r.pattern} · {r.metric} {r.operator} {r.threshold}{r.duration_seconds ? ` for ${Math.round(r.duration_seconds / 60)}m` : ''}</span> },
                   { key: 'severity', label: 'Severity', render: (r) => <StatusPill tone={SEV_TONE[r.severity]}>{r.severity}</StatusPill> },
                   { key: 'channels', label: 'Channels', render: (r) => <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 5 }}>{r.channels.length ? r.channels.map((c) => <ChannelChip key={c} id={c} config={channels} />) : <span style={{ fontSize: 12, color: 'var(--slate-400)' }}>in-app only</span>}</span> },

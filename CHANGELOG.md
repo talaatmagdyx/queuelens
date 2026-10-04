@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **Easier-to-read scope columns.** The Alerts screen's **Watches** column and the Replay
+  Policies screen's **Runs In** column show the environment, with its vhost on a second,
+  muted line. The screenshots are refreshed to show these columns and the History button.
+
 ## v0.19.0 — 2026-10-05
 
 ### Changed
