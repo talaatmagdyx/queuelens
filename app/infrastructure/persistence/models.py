@@ -44,6 +44,10 @@ class AlertRuleModel(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128))
     pattern: Mapped[str] = mapped_column(String(255), default="*")
+    # the queues it watches: the environment and vhost it was created in (set at startup
+    # for rules from before 0.19, which watched the default ones)
+    environment: Mapped[str | None] = mapped_column(String(128))
+    vhost: Mapped[str | None] = mapped_column(String(255))
     metric: Mapped[str] = mapped_column(String(32), default="messages_ready")
     operator: Mapped[str] = mapped_column(String(4), default=">")
     threshold: Mapped[int] = mapped_column(Integer, default=100)

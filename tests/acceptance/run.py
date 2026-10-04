@@ -1366,7 +1366,7 @@ async def g15_18():
 
     real, ae.post_webhook = ae.post_webhook, fake
     try:
-        eng = AlertEngine(rules=None, notifications=None, settings_store=Store(), get_queue_service=None)
+        eng = AlertEngine(rules=None, notifications=None, settings_store=Store(), queue_service_for=None)
         await eng.dispatch(["pagerduty"], "Rule fired: x", "m", severity="Alert", dedup_key="rule-1")
         await eng.dispatch(["pagerduty"], "Recovered: x", "m", severity="Alert", dedup_key="rule-1",
                            resolve=True)
@@ -1432,7 +1432,15 @@ async def g19():
         return float(hit.group(1)) if hit else None
 
     check(19, "queuelens_rabbitmq_ready = 1", val(m2, "queuelens_rabbitmq_ready") == 1.0)
-    check(19, "queuelens_dlq_messages per DLQ", val(m2, 'queuelens_dlq_messages{queue="t1.orders.dlq"}') == 5.0)
+    dlq = 'queuelens_dlq_messages{environment="%s",queue="t1.orders.dlq",vhost="/"}'
+    check(19, "queuelens_dlq_messages per DLQ, in every environment (staging shares this vhost)",
+          val(m2, dlq % "development") == 5.0 and val(m2, dlq % "staging") == 5.0,
+          (val(m2, dlq % "development"), val(m2, dlq % "staging")))
+    up = 'queuelens_management_up{environment="%s",vhost="%s"}'
+    check(19, "An environment whose queues can't be read is down, not empty",
+          val(m2, up % ("development", "/")) == 1.0 and val(m2, up % ("broken", "/")) == 0.0
+          and 'environment="broken",queue=' not in m2,
+          (val(m2, up % ("development", "/")), val(m2, up % ("broken", "/"))))
     check(19, "queuelens_preview_requests_total increments",
           val(m2, "queuelens_preview_requests_total") == val(m1, "queuelens_preview_requests_total") + 1)
     check(19, "queuelens_actions_total by action/result (incl. bulk envelopes)",
@@ -1484,6 +1492,18 @@ async def g10():
     check(11, "Two vhosts browsed at once — each request sees only its own",
           "t10.staging.dlq" in staged and "t1.orders.dlq" not in staged
           and "t1.orders.dlq" in default and "t10.staging.dlq" not in default)
+    rule = (await api("POST", "/api/alerts", headers=stg_scope, json={
+        "name": "t10 staged", "pattern": "t10.staging.dlq", "metric": "messages", "operator": ">=",
+        "threshold": 1, "severity": "Info"})).json()
+    async def staged_note():
+        return [n for n in await notifications() if n["title"] == "Rule fired: t10 staged"]
+
+    note = await until(staged_note, 15)
+    await api("DELETE", f"/api/alerts/{rule.get('id')}")
+    check(15, "An alert rule watches the environment and vhost it was created in",
+          (rule.get("environment"), rule.get("vhost")) == ("staging", "ql-staging")
+          and note and "in staging · ql-staging" in note[0]["message"],
+          (rule.get("environment"), rule.get("vhost"), note and note[0]["message"]))
     r = await api("GET", f"/api/queues/{quote('t10.staging.dlq', safe='')}/messages", headers=stg_scope)
     msgs = r.json().get("messages", []) if r.status_code == 200 else []
     check(11, "Preview works in the scoped vhost", msgs and msgs[0]["payload"] == {"env": "staging"})

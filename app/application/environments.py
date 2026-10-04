@@ -218,6 +218,24 @@ class EnvironmentManager:
             )
         return out
 
+    def scopes(self) -> tuple[tuple[str, str], ...]:
+        """Every configured (environment, vhost), the default first."""
+        return tuple((name, str(vhost)) for name, profile in self._profiles.items()
+                     for vhost in profile["vhosts"])
+
+    async def queue_service_for(self, env: str | None, vhost: str | None) -> Any:
+        """Queue stats for monitoring (alert rules, /metrics). Unlike resolve(), this reads
+        the Management API only: it opens no AMQP connection and creates no vhost."""
+        key = self.scope(env, vhost)
+        if key == self.default_key:
+            return self._state.queue_service
+        bundle = self._bundles.get(key)
+        if bundle is None:
+            bundle = _build_bundle(self._settings_for(*key), self._batch_store, self._coordinator)
+            self._bundles[key] = bundle
+        await bundle.management_client.start()  # idempotent; resolve() finishes the start
+        return bundle.queue_service
+
     def attach_default(self) -> Bundle:
         """Build the default bundle and expose it on app.state without starting it."""
         bundle = self._bundles.get(self.default_key)

@@ -72,14 +72,14 @@ class AlertEngine:
         rules: AlertRuleRepository,
         notifications: NotificationRepository,
         settings_store: SettingsRepository,
-        get_queue_service: Any,  # callable returning the active env's queue service
+        queue_service_for: Any,  # async (environment, vhost) -> that scope's queue service
         interval_seconds: float = 15.0,
         is_leader: Callable[[], Awaitable[bool]] | None = None,  # one evaluator per database
     ) -> None:
         self._rules = rules
         self._notifications = notifications
         self._settings_store = settings_store
-        self._get_queue_service = get_queue_service
+        self._queue_service_for = queue_service_for
         self._interval = interval_seconds
         self._is_leader = is_leader
         # (rule_id, queue) -> first time the condition was observed true.
@@ -117,58 +117,73 @@ class AlertEngine:
         if not rules:
             self._pending.clear()
             return []
-        queue_service = self._get_queue_service()
-        queues = await queue_service.list_queues(dlq_only=False)
+        by_scope: dict[tuple[str | None, str | None], list[dict[str, Any]]] = {}
+        for rule in rules:  # each rule watches the environment and vhost it was made in
+            by_scope.setdefault((rule["environment"], rule["vhost"]), []).append(rule)
         now = datetime.now(UTC)
         created: list[dict[str, Any]] = []
-
-        for rule in rules:
-            matched = [q for q in queues if fnmatch.fnmatch(q.name, rule["pattern"])]
-            offenders = []
-            for q in matched:
-                value = {
-                    "messages_ready": q.messages_ready,
-                    "messages": q.messages,
-                    "consumers": q.consumers,
-                    "publish_rate": getattr(q, "publish_rate", None) or 0,
-                }.get(rule["metric"], 0)
-                if condition_holds(float(value), rule["operator"], float(rule["threshold"])):
-                    offenders.append((q.name, value))
-
-            key_base = rule["id"]
-            if offenders:
-                first = self._pending.setdefault((key_base, "*"), now)
-                held = (now - first).total_seconds()
-                if (
-                    held >= rule["duration_seconds"]
-                    and not rule["fired"]
-                    and await self._rules.mark_fired(key_base, now)  # False: fired elsewhere
-                ):
-                    detail = ", ".join(f"{name}={value}" for name, value in offenders[:5])
-                    notification = await self._fire(
-                        rule,
-                        level=rule["severity"],
-                        title=f"Rule fired: {rule['name']}",
-                        message=(
-                            f"{rule['pattern']} · {rule['metric']} {rule['operator']} "
-                            f"{rule['threshold']} — {detail}"
-                        ),
-                        fired_at=now,
-                    )
-                    created.append(notification)
-            else:
-                self._pending.pop((key_base, "*"), None)
-                if rule["fired"] and await self._rules.set_fired(key_base, False):
-                    notification = await self._fire(
-                        rule,
-                        level="Success",
-                        title=f"Recovered: {rule['name']}",
-                        message=f"{rule['pattern']} · condition no longer holds",
-                        resolve=True,
-                        fired_at=rule["last_fired_at"],  # the incident this recovery closes
-                    )
+        for (env, vhost), scoped in by_scope.items():
+            try:
+                queue_service = await self._queue_service_for(env, vhost)
+                queues = await queue_service.list_queues(dlq_only=False)
+            except Exception:  # noqa: BLE001 - unreadable: its rules neither fire nor recover
+                logger.warning("alert rules for %s / %s skipped: queues unreadable",
+                               env, vhost, exc_info=True)
+                continue
+            for rule in scoped:
+                notification = await self._evaluate(rule, queues, now)
+                if notification is not None:
                     created.append(notification)
         return created
+
+    async def _evaluate(self, rule: dict[str, Any], queues: list[Any],
+                        now: datetime) -> dict[str, Any] | None:
+        """One rule against its scope's queues: the notification it fired, if any."""
+        where = f" in {rule['environment']} · {rule['vhost']}" if rule["environment"] else ""
+        matched = [q for q in queues if fnmatch.fnmatch(q.name, rule["pattern"])]
+        offenders = []
+        for q in matched:
+            value = {
+                "messages_ready": q.messages_ready,
+                "messages": q.messages,
+                "consumers": q.consumers,
+                "publish_rate": getattr(q, "publish_rate", None) or 0,
+            }.get(rule["metric"], 0)
+            if condition_holds(float(value), rule["operator"], float(rule["threshold"])):
+                offenders.append((q.name, value))
+
+        key_base = rule["id"]
+        if offenders:
+            first = self._pending.setdefault((key_base, "*"), now)
+            held = (now - first).total_seconds()
+            if (
+                held >= rule["duration_seconds"]
+                and not rule["fired"]
+                and await self._rules.mark_fired(key_base, now)  # False: fired elsewhere
+            ):
+                detail = ", ".join(f"{name}={value}" for name, value in offenders[:5])
+                return await self._fire(
+                    rule,
+                    level=rule["severity"],
+                    title=f"Rule fired: {rule['name']}",
+                    message=(
+                        f"{rule['pattern']}{where} · {rule['metric']} {rule['operator']} "
+                        f"{rule['threshold']} — {detail}"
+                    ),
+                    fired_at=now,
+                )
+        else:
+            self._pending.pop((key_base, "*"), None)
+            if rule["fired"] and await self._rules.set_fired(key_base, False):
+                return await self._fire(
+                    rule,
+                    level="Success",
+                    title=f"Recovered: {rule['name']}",
+                    message=f"{rule['pattern']}{where} · condition no longer holds",
+                    resolve=True,
+                    fired_at=rule["last_fired_at"],  # the incident this recovery closes
+                )
+        return None
 
     async def _fire(
         self,

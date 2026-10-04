@@ -31,32 +31,43 @@ tests:
         alertname: QueueLensBrokerDown
         exp_alerts: []
 
-  # Above 1000 for 15 minutes fires; exactly 1000 never does.
+  # Above 1000 for 15 minutes fires; exactly 1000 never does. The same DLQ name in another
+  # environment and vhost is another alert.
   - interval: 1m
     input_series:
-      - series: 'queuelens_dlq_messages{job="queuelens", instance="queuelens:8000", queue="orders.dlq"}'
+      - series: 'queuelens_dlq_messages{job="queuelens", instance="queuelens:8000", environment="development", vhost="/", queue="orders.dlq"}'
         values: '900 1500x20'  # above from 1m
-      - series: 'queuelens_dlq_messages{job="queuelens", instance="queuelens:8000", queue="billing.dlq"}'
+      - series: 'queuelens_dlq_messages{job="queuelens", instance="queuelens:8000", environment="development", vhost="/", queue="billing.dlq"}'
         values: '1000x21'
+      - series: 'queuelens_dlq_messages{job="queuelens", instance="queuelens:8000", environment="staging", vhost="ql-staging", queue="orders.dlq"}'
+        values: '1200x21'
     alert_rule_test:
       - eval_time: 15m
         alertname: DLQAboveThreshold
-        exp_alerts: []
+        exp_alerts:
+          - exp_labels: {severity: warning, environment: staging, vhost: ql-staging, queue: orders.dlq}
+            exp_annotations:
+              summary: DLQ orders.dlq in staging · ql-staging holds more than 1000 messages
+              description: orders.dlq has 1200 dead letters.
       - eval_time: 16m
         alertname: DLQAboveThreshold
         exp_alerts:
-          - exp_labels: {severity: warning, queue: orders.dlq}
+          - exp_labels: {severity: warning, environment: development, vhost: "/", queue: orders.dlq}
             exp_annotations:
-              summary: DLQ orders.dlq holds more than 1000 messages
+              summary: DLQ orders.dlq in development · / holds more than 1000 messages
               description: orders.dlq has 1500 dead letters.
+          - exp_labels: {severity: warning, environment: staging, vhost: ql-staging, queue: orders.dlq}
+            exp_annotations:
+              summary: DLQ orders.dlq in staging · ql-staging holds more than 1000 messages
+              description: orders.dlq has 1200 dead letters.
 
   # 290 dead letters at once fires on the next evaluation (no `for:`) and clears once the
   # jump leaves the 30m window; a steady 3/min (~90 per 30m) never fires.
   - interval: 1m
     input_series:
-      - series: 'queuelens_dlq_messages{job="queuelens", instance="queuelens:8000", queue="orders.dlq"}'
+      - series: 'queuelens_dlq_messages{job="queuelens", instance="queuelens:8000", environment="development", vhost="/", queue="orders.dlq"}'
         values: '40x40 330x40'  # jumps at 41m
-      - series: 'queuelens_dlq_messages{job="queuelens", instance="queuelens:8000", queue="billing.dlq"}'
+      - series: 'queuelens_dlq_messages{job="queuelens", instance="queuelens:8000", environment="development", vhost="/", queue="billing.dlq"}'
         values: '0+3x80'
     alert_rule_test:
       - eval_time: 40m
@@ -65,9 +76,9 @@ tests:
       - eval_time: 41m
         alertname: DLQGrowing
         exp_alerts:
-          - exp_labels: {severity: warning, queue: orders.dlq}
+          - exp_labels: {severity: warning, environment: development, vhost: "/", queue: orders.dlq}
             exp_annotations:
-              summary: DLQ orders.dlq is growing fast
+              summary: DLQ orders.dlq in development · / is growing fast
               # delta() extrapolates to the whole window: 290 over 29m of samples reads 300
               description: orders.dlq grew by 300 messages in 30 minutes.
       - eval_time: 71m
@@ -103,9 +114,9 @@ tests:
   # up: 2 on each is 4 in all, which fires though neither pod alone passes 3.
   - interval: 1m
     input_series:
-      - series: 'queuelens_dlq_messages{job="queuelens", instance="10.0.0.1:8000", queue="orders.dlq"}'
+      - series: 'queuelens_dlq_messages{job="queuelens", instance="10.0.0.1:8000", environment="development", vhost="/", queue="orders.dlq"}'
         values: '1500x20'
-      - series: 'queuelens_dlq_messages{job="queuelens", instance="10.0.0.2:8000", queue="orders.dlq"}'
+      - series: 'queuelens_dlq_messages{job="queuelens", instance="10.0.0.2:8000", environment="development", vhost="/", queue="orders.dlq"}'
         values: '1500x20'
       - series: 'queuelens_actions_total{job="queuelens", instance="10.0.0.1:8000", action="park", result="failed"}'
         values: '0x5 2x15'
@@ -115,9 +126,9 @@ tests:
       - eval_time: 16m
         alertname: DLQAboveThreshold
         exp_alerts:
-          - exp_labels: {severity: warning, queue: orders.dlq}
+          - exp_labels: {severity: warning, environment: development, vhost: "/", queue: orders.dlq}
             exp_annotations:
-              summary: DLQ orders.dlq holds more than 1000 messages
+              summary: DLQ orders.dlq in development · / holds more than 1000 messages
               description: orders.dlq has 1500 dead letters.
       - eval_time: 6m
         alertname: QueueLensActionFailures
@@ -149,3 +160,26 @@ tests:
             exp_annotations:
               summary: Replay policy orders paused itself
               description: "orders stopped after failed runs: check the audit log, then re-enable it."
+
+  # An environment QueueLens can't read for 5 minutes alerts; one any replica can read doesn't.
+  - interval: 1m
+    input_series:
+      - series: 'queuelens_management_up{job="queuelens", instance="10.0.0.1:8000", environment="staging", vhost="ql-staging"}'
+        values: '1x2 0x10'  # unreadable from 3m
+      - series: 'queuelens_management_up{job="queuelens", instance="10.0.0.2:8000", environment="staging", vhost="ql-staging"}'
+        values: '1x2 0x10'
+      - series: 'queuelens_management_up{job="queuelens", instance="10.0.0.1:8000", environment="development", vhost="/"}'
+        values: '1x2 0x10'
+      - series: 'queuelens_management_up{job="queuelens", instance="10.0.0.2:8000", environment="development", vhost="/"}'
+        values: '1x12'  # the other replica still reads it
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: QueueLensScopeUnreachable
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: QueueLensScopeUnreachable
+        exp_alerts:
+          - exp_labels: {severity: warning, environment: staging, vhost: ql-staging}
+            exp_annotations:
+              summary: "QueueLens can't read staging · ql-staging"
+              description: "Its DLQs aren't monitored: check that broker's Management API and the credentials QueueLens uses."

@@ -26,8 +26,9 @@ Every audit row written for a scoped request carries `metadata.environment` and
 `POST /api/environments/activate` (`{"environment", "vhost"?}`) checks that a scope is
 reachable (`404` unknown, `502` unreachable) and returns `{"environment", "vhost"}` to
 send from then on; it changes nothing for anyone else. `GET /api/environments` marks the
-asking request's scope `active` and the default one `default`. `/metrics` and the alert
-engine always use the default environment.
+asking request's scope `active` and the default one `default`. `/metrics` reports every
+environment and vhost. An alert rule watches, and a replay policy runs in, the scope of the
+request that created it.
 
 ## Health
 
@@ -46,8 +47,9 @@ Prometheus metrics (requires Basic Auth like the rest of the app — configure
 
 | Metric | Type | Meaning |
 |---|---|---|
-| `queuelens_rabbitmq_ready` | gauge | 1 when the AMQP connection is live (refreshed at scrape time) |
-| `queuelens_dlq_messages{queue}` | gauge | Messages in each detected DLQ (refreshed at scrape time) |
+| `queuelens_rabbitmq_ready` | gauge | 1 when the default environment's AMQP connection is live (refreshed at scrape time) |
+| `queuelens_management_up{environment,vhost}` | gauge | 1 when that environment and vhost's queues could be read at this scrape; 0 means its DLQs are missing below, not empty |
+| `queuelens_dlq_messages{environment,vhost,queue}` | gauge | Messages in each detected DLQ, in every environment and vhost (refreshed at scrape time) |
 | `queuelens_preview_requests_total` | counter | Queue previews served (UI + API) |
 | `queuelens_actions_total{action,result}` | counter | Actions by result; `bulk_<action>` rows are batch envelopes, plain rows count individual messages |
 | `queuelens_operation_duration_seconds{action}` | histogram | Broker operation duration |

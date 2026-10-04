@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+from typing import Any
+
 import httpx
 import pytest
 
@@ -628,7 +631,7 @@ async def test_alert_fired_state_survives_restart(tmp_path) -> None:
         rules=app.state.alert_rules,
         notifications=app.state.notifications,
         settings_store=app.state.settings_store,
-        get_queue_service=lambda: app.state.queue_service,
+        queue_service_for=app.state.environment_manager.queue_service_for,
     )
     assert await fresh.evaluate_once() == []  # no duplicate notification
     await app.state.database.close()
@@ -924,3 +927,40 @@ async def test_login_cache_until_password_changes(tmp_path, monkeypatch) -> None
 
     assert hashes_for_two_logins == 1  # the second request skipped PBKDF2
     assert (stale, fresh) == (False, True)  # the old password died with the change
+
+
+@pytest.mark.asyncio
+async def test_an_alert_rule_watches_the_environment_and_vhost_it_was_created_in(tmp_path) -> None:
+    app = create_app(Settings(
+        auth_enabled=False, database_url=f"sqlite+aiosqlite:///{tmp_path}/w.db",
+        environments_json='{"staging": {"vhosts": ["ql-staging"]}}',
+    ))
+    await app.state.database.start()
+
+    def backlog(n: int) -> Any:
+        async def list_queues(dlq_only: bool = False) -> list[QueueInfo]:
+            return [QueueInfo(name="orders.dlq", vhost="/", messages=n, messages_ready=n,
+                              messages_unacked=0, consumers=0, durable=True, is_dlq=True)]
+        return list_queues
+
+    app.state.queue_service = SimpleNamespace(list_queues=backlog(0))  # the default: quiet
+    staging = await app.state.environment_manager.queue_service_for("staging", "ql-staging")
+    staging.list_queues = backlog(500)
+    in_staging = {"X-QueueLens-Environment": "staging", "X-QueueLens-Vhost": "ql-staging"}
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        rule = (await client.post("/api/alerts", headers=in_staging, json={
+            "name": "backlog", "pattern": "*.dlq", "threshold": 100, "severity": "Alert"})).json()
+    assert (rule["environment"], rule["vhost"]) == ("staging", "ql-staging")
+
+    fired = await app.state.alert_engine.evaluate_once()
+    assert [n["title"] for n in fired] == ["Rule fired: backlog"]
+    assert "*.dlq in staging · ql-staging" in fired[0]["message"]
+
+    async def unreachable(dlq_only: bool = False) -> list[QueueInfo]:
+        raise ConnectionError("management API down")
+
+    staging.list_queues = unreachable  # no data is not "recovered"
+    assert await app.state.alert_engine.evaluate_once() == []
+    assert (await app.state.alert_rules.list())[0]["fired"] is True
+    await app.state.database.close()

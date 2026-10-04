@@ -110,9 +110,8 @@ async def _init_database(app: FastAPI) -> None:
     await app.state.database.start()
     async with app.state.coordinator.lock("startup"):
         await _seed_defaults(app)
-        await app.state.replay_policies.adopt_unscoped(
-            *app.state.environment_manager.default_key
-        )
+        for repository in (app.state.replay_policies, app.state.alert_rules):
+            await repository.adopt_unscoped(*app.state.environment_manager.default_key)
 
 
 SYNC_SECONDS = 5.0
@@ -219,7 +218,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         rules=app.state.alert_rules,
         notifications=app.state.notifications,
         settings_store=app.state.settings_store,
-        get_queue_service=lambda: app.state.queue_service,
+        queue_service_for=manager.queue_service_for,
         interval_seconds=app.state.settings.alert_interval_seconds,
         is_leader=app.state.coordinator.is_leader,
     )

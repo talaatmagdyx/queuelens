@@ -27,6 +27,8 @@ class Database:
         "ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE replay_policies ADD COLUMN environment VARCHAR(128)",
         "ALTER TABLE replay_policies ADD COLUMN vhost VARCHAR(255)",
+        "ALTER TABLE alert_rules ADD COLUMN environment VARCHAR(128)",
+        "ALTER TABLE alert_rules ADD COLUMN vhost VARCHAR(255)",
     )
 
     async def start(self) -> None:

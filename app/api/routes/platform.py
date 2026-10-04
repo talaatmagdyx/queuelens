@@ -146,6 +146,11 @@ async def put_settings_api(
 CHANNELS = ("email", "slack", "webhook", "pagerduty")
 
 
+def _watches(rule: dict[str, Any]) -> dict[str, Any]:
+    """Audit a rule change against the scope the rule watches, not the request's."""
+    return {"environment": rule.get("environment"), "vhost": rule.get("vhost")}
+
+
 class AlertRuleBody(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     pattern: str = Field(default="*", min_length=1, max_length=255)
@@ -172,10 +177,15 @@ async def create_alert(
     body: AlertRuleBody,
     user: CurrentUser = Depends(require_operator),
 ) -> dict[str, Any]:
+    try:  # a rule watches the environment and vhost it was created in
+        environment, vhost = request.app.state.environment_manager.scope(*requested_scope(request))
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error.args[0])) from error
     rule = await request.app.state.alert_rules.create(
-        created_by=user.username, **body.model_dump()
+        created_by=user.username, environment=environment, vhost=vhost, **body.model_dump()
     )
-    await _audit_change(request, user, "create_alert_rule", {"rule": rule["id"], "name": body.name})
+    await _audit_change(request, user, "create_alert_rule",
+                        {"rule": rule["id"], "name": body.name, **_watches(rule)})
     return cast(dict[str, Any], rule)
 
 
@@ -189,7 +199,8 @@ async def update_alert(
     updated = await request.app.state.alert_rules.update(rule_id, **body.model_dump())
     if updated is None:
         raise HTTPException(status_code=404, detail="Alert rule not found")
-    await _audit_change(request, user, "update_alert_rule", {"rule": rule_id, "name": body.name})
+    await _audit_change(request, user, "update_alert_rule",
+                        {"rule": rule_id, "name": body.name, **_watches(updated)})
     return cast(dict[str, Any], updated)
 
 
@@ -208,7 +219,8 @@ async def patch_alert(
     if updated is None:
         raise HTTPException(status_code=404, detail="Alert rule not found")
     await _audit_change(request, user, "update_alert_rule",
-                        {"rule": rule_id, "name": updated["name"], "enabled": body.enabled})
+                        {"rule": rule_id, "name": updated["name"], "enabled": body.enabled,
+                         **_watches(updated)})
     return cast(dict[str, Any], updated)
 
 
@@ -222,7 +234,8 @@ async def delete_alert(
     if not await request.app.state.alert_rules.delete(rule_id):
         raise HTTPException(status_code=404, detail="Alert rule not found")
     await _audit_change(request, user, "delete_alert_rule",
-                        {"rule": rule_id, "name": rules.get(rule_id, {}).get("name")})
+                        {"rule": rule_id, "name": rules.get(rule_id, {}).get("name"),
+                         **_watches(rules.get(rule_id, {}))})
     return {"deleted": rule_id}
 
 

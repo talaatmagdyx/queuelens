@@ -34,17 +34,24 @@ DEPLOY = Path(__file__).resolve().parents[1] / "deploy"
 ROUTES = {"critical": "webhook,slack", "warning": "slack", "": "slack"}
 
 # What Prometheus sends for each rule in alerts.yml: rule, extra labels, rendered summary and
-# description. Two DLQs on one rule: group_by [alertname, queue] must keep them apart.
+# description. One DLQ name in two vhosts on one rule: group_by must keep them apart.
 Alert = tuple[str, dict[str, str], str, str]
 ALERTS: list[Alert] = [
     ("QueueLensBrokerDown", {}, "QueueLens lost its RabbitMQ connection",
      "queuelens_rabbitmq_ready has been 0 for 5 minutes."),
-    ("DLQAboveThreshold", {"queue": "orders.dlq"},
-     "DLQ orders.dlq holds more than 1000 messages", "orders.dlq has 1500 dead letters."),
-    ("DLQAboveThreshold", {"queue": "billing.dlq"},
-     "DLQ billing.dlq holds more than 1000 messages", "billing.dlq has 1200 dead letters."),
-    ("DLQGrowing", {"queue": "payments.dlq"},
-     "DLQ payments.dlq is growing fast", "payments.dlq grew by 300 messages in 30 minutes."),
+    ("DLQAboveThreshold", {"environment": "development", "vhost": "/", "queue": "orders.dlq"},
+     "DLQ orders.dlq in development · / holds more than 1000 messages",
+     "orders.dlq has 1500 dead letters."),
+    ("DLQAboveThreshold", {"environment": "staging", "vhost": "ql-staging", "queue": "orders.dlq"},
+     "DLQ orders.dlq in staging · ql-staging holds more than 1000 messages",
+     "orders.dlq has 1200 dead letters."),
+    ("DLQGrowing", {"environment": "development", "vhost": "/", "queue": "payments.dlq"},
+     "DLQ payments.dlq in development · / is growing fast",
+     "payments.dlq grew by 300 messages in 30 minutes."),
+    ("QueueLensScopeUnreachable", {"environment": "staging", "vhost": "ql-staging"},
+     "QueueLens can't read staging · ql-staging",
+     "Its DLQs aren't monitored: check that broker's Management API and the credentials "
+     "QueueLens uses."),
     ("QueueLensActionFailures", {"action": "replay", "result": "failed"},
      "QueueLens actions are failing",
      "15 failed actions in the last 15 minutes — check the audit log."),

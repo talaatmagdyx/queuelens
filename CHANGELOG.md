@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **Monitoring covers every environment and vhost.** Before, `/metrics` and the in-app
+  alert rules only saw the default one. So a DLQ in `staging`, or in another vhost, could
+  fill up with no alert from either path.
+  - **`queuelens_dlq_messages`:** gains `environment` and `vhost` labels, and reports every
+    configured scope.
+  - **How a scrape reads them:** all at once, from each Management API only, with 5
+    seconds each. No AMQP connection is opened, and no vhost is created.
+  - **New `queuelens_management_up{environment, vhost}`:** 0 when a scope couldn't be read,
+    so a broker that is down isn't mistaken for empty DLQs.
+- **An alert rule watches the environment and vhost it was created in,** like a replay
+  policy.
+  - **Existing rules:** they watch the default one, as they always did.
+  - **Console:** the Alerts list shows the scope under **Watches**.
+  - **Notifications:** they name the scope.
+  - **A scope that can't be read:** its rules neither fire nor recover until it can.
+- **Bundled Prometheus rules:**
+  - `DLQAboveThreshold` and `DLQGrowing` group by environment, vhost and queue, and their
+    summaries name the scope.
+  - A new **`QueueLensScopeUnreachable`** alert fires when a scope can't be read for 5
+    minutes.
+  - The example Alertmanager config groups by environment and vhost too.
+
 ## v0.18.1 — 2026-10-04
 
 ### Added

@@ -87,9 +87,20 @@ class SettingsRepository:
         return await self.get_all()
 
 
+async def _adopt_unscoped(database: Database, model: Any, environment: str, vhost: str) -> None:
+    """Rows from before scopes watched or ran in the default ones: say so."""
+    async with database.session() as session:
+        await session.execute(update(model).where(model.environment.is_(None))
+                              .values(environment=environment, vhost=vhost))
+        await session.commit()
+
+
 class AlertRuleRepository:
     def __init__(self, database: Database) -> None:
         self._database = database
+
+    async def adopt_unscoped(self, environment: str, vhost: str) -> None:
+        await _adopt_unscoped(self._database, AlertRuleModel, environment, vhost)
 
     @staticmethod
     def _to_dict(row: AlertRuleModel) -> dict[str, Any]:
@@ -97,6 +108,8 @@ class AlertRuleRepository:
             "id": row.id,
             "name": row.name,
             "pattern": row.pattern,
+            "environment": row.environment,
+            "vhost": row.vhost,
             "metric": row.metric,
             "operator": row.operator,
             "threshold": row.threshold,
@@ -312,14 +325,7 @@ class ReplayPolicyRepository:
             return self._to_dict(row)
 
     async def adopt_unscoped(self, environment: str, vhost: str) -> None:
-        """Policies from before 0.18 have no scope: they ran in the default one, so they
-        keep running there."""
-        async with self._database.session() as session:
-            await session.execute(
-                update(ReplayPolicyModel).where(ReplayPolicyModel.environment.is_(None))
-                .values(environment=environment, vhost=vhost)
-            )
-            await session.commit()
+        await _adopt_unscoped(self._database, ReplayPolicyModel, environment, vhost)
 
     async def delete(self, policy_id: int) -> bool:
         async with self._database.session() as session:
