@@ -2,16 +2,19 @@
 QUEUELENS_TEST_POSTGRES_URL names a throwaway database: each test drops its tables."""
 
 import asyncio
+import json
 import os
 import time
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
+from sqlalchemy import MetaData, Table, inspect
 
 from app.copy_db import copy
 from app.domain.models import AuditEntry
 from app.infrastructure.persistence.audit_repository import AuditRepository
-from app.infrastructure.persistence.database import Database
+from app.infrastructure.persistence.database import Database, SchemaUpgradeError
 from app.infrastructure.persistence.models import Base
 from app.infrastructure.persistence.store import (
     AlertRuleRepository,
@@ -123,3 +126,94 @@ async def test_copy_db_moves_everything_and_ids_continue(url, tmp_path, far_from
 
     with pytest.raises(SystemExit, match="already has rows"):
         await copy(source_url, url)
+
+
+def _before_migrations() -> MetaData:
+    """Today's tables without the columns Database.MIGRATIONS adds: a database from the
+    release before each of them. A new migration is covered here automatically."""
+    added = {(table, column) for table, column, _ in Database.MIGRATIONS}
+    old = MetaData()
+    for table in Base.metadata.sorted_tables:
+        Table(table.name, old,
+              *(c._copy() for c in table.columns if (table.name, c.name) not in added))
+    return old
+
+
+async def test_a_database_from_an_earlier_release_upgrades_in_place(url) -> None:
+    from app.config import Settings
+    from app.main import _init_database, create_app
+
+    old = _before_migrations()
+    app = create_app(Settings(auth_enabled=False, database_url=url))
+    database = app.state.database
+    async with database.engine.begin() as connection:
+        await connection.run_sync(old.create_all)
+        await connection.execute(old.tables["alert_rules"].insert().values(
+            name="backlog", pattern="*.dlq"))
+        await connection.execute(old.tables["replay_policies"].insert().values(
+            name="orders", queue="orders.dlq"))
+        await connection.execute(old.tables["users"].insert().values(
+            username="dana", password_hash="not-a-hash", role="Admin"))
+    try:
+        await _init_database(app)  # what startup does
+        await _init_database(app)  # and every restart after: nothing left to add
+
+        def columns(sync) -> dict[str, set[str]]:
+            return {table: {c["name"] for c in inspect(sync).get_columns(table)}
+                    for table, _, _ in Database.MIGRATIONS}
+
+        async with database.engine.connect() as connection:
+            present = await connection.run_sync(columns)
+        assert all(column in present[table] for table, column, _ in Database.MIGRATIONS)
+        default = app.state.environment_manager.default_key
+        [rule] = await app.state.alert_rules.list()
+        assert (rule["name"], rule["fired"]) == ("backlog", False)
+        assert (rule["environment"], rule["vhost"]) == default  # it always watched these
+        [policy] = await app.state.replay_policies.list()
+        assert (policy["name"], policy["environment"], policy["vhost"]) == ("orders", *default)
+        [dana] = [u for u in await app.state.users.list() if u["username"] == "dana"]
+        assert (dana["role"], dana["must_change_password"]) == ("Admin", False)
+    finally:
+        await database.close()
+
+
+async def test_a_column_that_cannot_be_added_stops_startup_and_says_which(url, monkeypatch) -> None:
+    database = Database(url)
+    await database.start()
+    await AlertRuleRepository(database).create(name="backlog")
+    # NOT NULL without a default can't be added to a table that has rows, on any database
+    impossible = ("alert_rules", "impossible", "INTEGER NOT NULL")
+    monkeypatch.setattr(Database, "MIGRATIONS", (*Database.MIGRATIONS, impossible))
+    try:
+        with pytest.raises(SchemaUpgradeError, match=r"alert_rules\.impossible"):
+            await database.start()
+    finally:
+        await database.close()
+
+
+async def test_replicas_starting_together_upgrade_an_old_database_once(url) -> None:
+    if url.startswith("sqlite"):
+        pytest.skip("one replica on SQLite")
+    old = Database(url)
+    async with old.engine.begin() as connection:
+        await connection.run_sync(_before_migrations().create_all)
+    await old.close()
+    replicas = [Database(url) for _ in range(3)]
+    try:  # the schema lock lets one add the columns; the others then find them there
+        await asyncio.gather(*(replica.start() for replica in replicas))
+    finally:
+        for replica in replicas:
+            await replica.close()
+
+
+def test_every_column_added_since_the_last_release_has_a_migration() -> None:
+    """tests/schema_released.json is the schema of the last release (v0.19.0). A column a
+    table has gained since must be in Database.MIGRATIONS, or upgraded databases lack it.
+    Refresh the file when a release adds a table, so its later columns are checked too."""
+    released = json.loads((Path(__file__).parent / "schema_released.json").read_text())
+    listed = {(table, column) for table, column, _ in Database.MIGRATIONS}
+    missing = [(table.name, column.name) for table in Base.metadata.sorted_tables
+               if table.name in released for column in table.columns
+               if column.name not in released[table.name]
+               and (table.name, column.name) not in listed]
+    assert not missing, f"add these to Database.MIGRATIONS: {missing}"

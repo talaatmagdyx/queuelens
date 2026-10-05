@@ -1,7 +1,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from sqlalchemy import text
+from sqlalchemy import Connection, inspect, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -15,36 +15,57 @@ from app.infrastructure.persistence.models import Base
 SCHEMA_LOCK = lock_key("queuelens", "schema")
 
 
+class SchemaUpgradeError(RuntimeError):
+    """A column a newer release needs could not be added: QueueLens doesn't start."""
+
+
 class Database:
     def __init__(self, database_url: str) -> None:
         self.engine: AsyncEngine = create_async_engine(database_url)
         self._sessions = async_sessionmaker(self.engine, expire_on_commit=False)
 
-    # Additive column migrations for databases created by earlier releases.
-    # create_all only creates missing tables — it never alters existing ones.
-    MIGRATIONS = (
-        "ALTER TABLE alert_rules ADD COLUMN fired BOOLEAN NOT NULL DEFAULT FALSE",
-        "ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT FALSE",
-        "ALTER TABLE replay_policies ADD COLUMN environment VARCHAR(128)",
-        "ALTER TABLE replay_policies ADD COLUMN vhost VARCHAR(255)",
-        "ALTER TABLE alert_rules ADD COLUMN environment VARCHAR(128)",
-        "ALTER TABLE alert_rules ADD COLUMN vhost VARCHAR(255)",
+    # Columns added to a table after its first release. create_all only creates missing
+    # tables, it never alters existing ones, so a database from an earlier release gets
+    # these at startup. Add new columns here: tests/test_databases.py upgrades a database
+    # that lacks every one of them.
+    MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+        ("alert_rules", "fired", "BOOLEAN NOT NULL DEFAULT FALSE"),
+        ("users", "must_change_password", "BOOLEAN NOT NULL DEFAULT FALSE"),
+        ("replay_policies", "environment", "VARCHAR(128)"),
+        ("replay_policies", "vhost", "VARCHAR(255)"),
+        ("alert_rules", "environment", "VARCHAR(128)"),
+        ("alert_rules", "vhost", "VARCHAR(255)"),
     )
 
     async def start(self) -> None:
         async with self.engine.begin() as connection:
             if connection.dialect.name == "postgresql":
-                # replicas starting together on an empty database would race CREATE TABLE
+                # held until commit: replicas starting together would otherwise race
+                # CREATE TABLE and ALTER TABLE
                 await connection.execute(
                     text("SELECT pg_advisory_xact_lock(:key)"), {"key": SCHEMA_LOCK}
                 )
-            await connection.run_sync(Base.metadata.create_all)
-        for statement in self.MIGRATIONS:
+            await connection.run_sync(self._create_and_upgrade)
+
+    @classmethod
+    def _create_and_upgrade(cls, connection: Connection) -> None:
+        Base.metadata.create_all(connection)
+        columns: dict[str, set[str]] = {}
+        for table, column, ddl in cls.MIGRATIONS:
+            if table not in columns:
+                columns[table] = {c["name"] for c in inspect(connection).get_columns(table)}
+            if column in columns[table]:
+                continue
+            statement = f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"
             try:
-                async with self.engine.begin() as connection:
-                    await connection.execute(text(statement))
-            except Exception:  # noqa: BLE001 - column already exists
-                pass
+                connection.execute(text(statement))
+            except Exception as error:
+                raise SchemaUpgradeError(
+                    f"Could not add the column {table}.{column} this release needs ({error}). "
+                    f"Run `{statement}` as a database user allowed to alter tables, or give "
+                    f"QueueLens's user that right, then start QueueLens again."
+                ) from error
+            columns[table].add(column)
 
     async def close(self) -> None:
         await self.engine.dispose()
