@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Fixed
+- **Database upgrades are safe, and a failed one says so.**
+  - **Before:** columns added by newer releases were applied with every error ignored. A
+    column that couldn't be added, for example because QueueLens's database user may not
+    alter tables, left QueueLens running without it, and the Alerts or Users screen then
+    failed. On PostgreSQL, replicas starting together on an old database also raced to add
+    the same column.
+  - **Now:** QueueLens adds only the columns that are missing, inside the schema lock. If
+    one can't be added, it doesn't start, and the error names the column and the
+    `ALTER TABLE` to run.
+- **New tests for upgrades,** on SQLite and PostgreSQL:
+  - A database from before every added column upgrades in place, and its rows survive.
+  - Replicas starting together on such a database don't race.
+  - A column that can't be added stops startup.
+  - A model column added without a migration is caught.
+- **OPERATIONS.md had the wrong failed-login limits.** They're 10 a minute per IP and
+  username plus 50 per IP, counted in the database, not "10 per IP, in memory".
+
 ### Changed
 - **Easier-to-read scope columns.** The Alerts screen's **Watches** column and the Replay
   Policies screen's **Runs In** column show the environment, with its vhost on a second,

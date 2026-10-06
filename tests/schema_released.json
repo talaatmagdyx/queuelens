@@ -1,0 +1,87 @@
+{
+ "alert_rules": [
+  "channels",
+  "created_by",
+  "duration_seconds",
+  "enabled",
+  "environment",
+  "fired",
+  "id",
+  "last_fired_at",
+  "metric",
+  "name",
+  "operator",
+  "pattern",
+  "severity",
+  "threshold",
+  "vhost"
+ ],
+ "app_settings": [
+  "key",
+  "value"
+ ],
+ "audit_events": [
+  "action",
+  "error_message",
+  "id",
+  "message_fingerprint",
+  "metadata_json",
+  "payload_hash",
+  "request_ip",
+  "result",
+  "source_queue",
+  "target_exchange",
+  "target_queue",
+  "target_routing_key",
+  "target_type",
+  "timestamp",
+  "user_agent",
+  "username"
+ ],
+ "bulk_batches": [
+  "expires_at",
+  "id",
+  "payload"
+ ],
+ "login_failures": [
+  "at",
+  "id",
+  "key"
+ ],
+ "notifications": [
+  "delivery",
+  "id",
+  "level",
+  "message",
+  "rule_id",
+  "source",
+  "timestamp",
+  "title"
+ ],
+ "replay_policies": [
+  "backoff_minutes",
+  "cap",
+  "consecutive_failures",
+  "created_by",
+  "enabled",
+  "environment",
+  "id",
+  "interval_minutes",
+  "last_result",
+  "last_run_at",
+  "max_deaths",
+  "name",
+  "queue",
+  "vhost"
+ ],
+ "users": [
+  "active",
+  "created_at",
+  "email",
+  "invited_by",
+  "must_change_password",
+  "password_hash",
+  "role",
+  "username"
+ ]
+}

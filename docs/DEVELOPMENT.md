@@ -128,6 +128,22 @@ line is bumped by hand); security fixes arrive immediately.
 4. Unit test with fakes + integration assertion if it touches the broker.
 5. Update [API.md](API.md) and, if behavior-relevant, [SAFETY.md](SAFETY.md).
 
+## Adding a database column
+
+`create_all` creates missing tables but never alters existing ones. So a column added to a
+table that an earlier release shipped also goes in `Database.MIGRATIONS`, in
+`app/infrastructure/persistence/database.py`, as `(table, column, SQL type)`. Make the
+column nullable, or give it a default, so it can be added to a table that already has rows.
+
+At startup, QueueLens adds any listed column the database lacks. It does this inside the
+schema lock, so replicas starting together don't race. If a column can't be added, QueueLens
+doesn't start, and the error names the column and the `ALTER TABLE` to run.
+
+`tests/test_databases.py` upgrades a database that lacks every listed column, on SQLite and
+PostgreSQL. It also fails when a table has a column that isn't in `tests/schema_released.json`
+(the last release's schema) and isn't listed either: that's a forgotten migration. When a
+release adds a table, refresh that file.
+
 ## Release
 
 ```bash
@@ -135,6 +151,9 @@ ruff check app tests && mypy app && pytest -q   # green gate, broker running
 git tag -a vX.Y.Z -m "…release notes…"
 git push --tags
 ```
+
+If the release adds a table, refresh `tests/schema_released.json` (see
+[Adding a database column](#adding-a-database-column)).
 
 Version lives in `pyproject.toml` (and `create_app`'s `version=`) — keep them in sync with
 the tag. So does the chart's `appVersion` in `deploy/helm/queuelens/Chart.yaml`, whose own

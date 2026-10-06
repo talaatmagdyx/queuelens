@@ -30,7 +30,8 @@ QueueLens is an **internal-network operations tool**:
 - **Monitoring covers every environment and vhost.** `/metrics` reports each one's DLQs.
   An alert rule watches, and a replay policy runs in, the environment and vhost it was
   created in.
-- Failed logins are rate-limited (10/minute per client IP, in-memory).
+- **Failed logins are rate-limited:** 10 a minute per client IP and username, and 50 per
+  IP. They're counted in the database, so the limit holds however many replicas run.
 
 ## Backups & data
 
