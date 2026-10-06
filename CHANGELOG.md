@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **A Makefile for the checks CI runs.**
+  - **`make` (or `make all`)** is the gate before a pull request: lint, types, tests, the
+    frontend precompile, the alerting pipeline, and the Helm chart render.
+  - **The other CI jobs each have a target:** `make acceptance`, `make e2e`,
+    `make test-postgres`, `make helm-kind` and `make screenshots`. Each starts the
+    throwaway services it needs, such as Mailpit, PostgreSQL, a RabbitMQ or a QueueLens
+    server, and stops them when it ends.
+  - **`make help`** lists them all. DEVELOPMENT.md has the details.
+- **`make acceptance` doesn't need openssl.** Its STARTTLS Mailpit generates its own
+  self-signed certificate.
+
 ## v0.19.1 — 2026-10-07
 
 ### Fixed

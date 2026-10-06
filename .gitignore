@@ -21,3 +21,6 @@ acceptance-results*.json
 
 # IDE settings
 .idea/
+
+# make's working files (Babel, the e2e database and server log)
+.cache/
