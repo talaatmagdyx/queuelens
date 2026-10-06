@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.19.1 — 2026-10-07
 
 ### Fixed
 - **Database upgrades are safe, and a failed one says so.**
@@ -24,6 +24,13 @@
 - **Easier-to-read scope columns.** The Alerts screen's **Watches** column and the Replay
   Policies screen's **Runs In** column show the environment, with its vhost on a second,
   muted line. The screenshots are refreshed to show these columns and the History button.
+
+### Upgrade notes
+- **No breaking changes, and no new columns.**
+- **QueueLens's database user needs the right to alter tables when an upgrade adds a
+  column.** It always did. The difference is that a missing right now stops startup with
+  the `ALTER TABLE` to run, instead of being ignored.
+- **Helm chart 0.6.1** deploys QueueLens 0.19.1.
 
 ## v0.19.0 — 2026-10-05
 
