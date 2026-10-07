@@ -9,13 +9,27 @@ python -m venv .venv && source .venv/bin/activate
 python -m pip install '.[dev]'
 ```
 
-Run the full local gate — this is what CI runs:
+Run the local gate before a pull request: `make` (or `make all`). It runs:
+- `ruff` lint, line length 100, rules E/F/I/UP/B
+- `mypy`, strict
+- `pytest`: the RabbitMQ integration tests run when the compose broker is up, and skip otherwise
+- the frontend precompile, as the Docker build does it
+- the alerting pipeline: promtool, amtool, and a real Alertmanager delivery
+- the Helm chart render, with kubeconform
 
-```bash
-ruff check app tests   # lint (line length 100, rules E/F/I/UP/B)
-mypy app               # strict mode
-pytest -q              # unit + route tests; integration test auto-skips without a broker
-```
+The other CI jobs each have a target. Each one starts the throwaway services it needs and
+stops them when it ends:
+
+| Target | Runs | Needs |
+|---|---|---|
+| `make acceptance` | every feature end to end, against the compose broker and two Mailpits | Docker |
+| `make e2e` | the browser smoke test, against a QueueLens on port 8123 | Docker, Playwright |
+| `make test-postgres` | the test suite on PostgreSQL 17 as well (`PG_PORT`, default 55499) | Docker |
+| `make helm-kind` | the chart in a throwaway kind cluster: one replica, then two on PostgreSQL | Docker, kind, kubectl |
+| `make screenshots` | `docs/screenshots/`, regenerated against a throwaway RabbitMQ | Docker, Playwright |
+
+`make help` lists them all. Set `VENV` if your virtualenv isn't `.venv`. The targets keep their
+working files in `.cache/` (git-ignored).
 
 Run the app against the compose broker:
 
@@ -33,8 +47,8 @@ Or the whole stack: `docker compose up --build`. Its one-shot `demo` service run
 `x-death`, some messages that died several times, gzip bodies, a quorum DLQ with a delivery
 limit). It is idempotent.
 
-The README and landing-page screenshots come from `python scripts/screenshots.py` (needs
-`pip install playwright`). It seeds the demo data, starts its own QueueLens, creates some
+The README and landing-page screenshots come from `make screenshots`, which runs
+`scripts/screenshots.py` against a throwaway broker (needs `pip install playwright`). It seeds the demo data, starts its own QueueLens, creates some
 history through the API, and captures every screen at 1440×900 into `docs/screenshots/`.
 Point it at a broker with nothing else on it (`QUEUELENS_RABBITMQ_URL`,
 `QUEUELENS_RABBITMQ_MANAGEMENT_URL`): other queues show up in the shots.

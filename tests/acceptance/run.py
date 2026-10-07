@@ -10,15 +10,8 @@ Exits non-zero on any FAIL or ERROR.
 
 Needs a DISPOSABLE broker — it deletes `t<N>.*` queues, the `t4.ex`/`t8.ex` exchanges
 and the `ql-staging`/`t10-rogue-vhost` vhosts — plus two Mailpit instances (plain SMTP,
-and STARTTLS-only with an untrusted certificate). Locally:
-
-    docker compose up -d rabbitmq
-    docker run -d --rm -p 1025:1025 -p 8025:8025 axllent/mailpit
-    openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=untrusted.invalid \
-        -keyout /tmp/ql-key.pem -out /tmp/ql-cert.pem && chmod 644 /tmp/ql-*.pem
-    docker run -d --rm -p 1026:1025 -p 8027:8025 -v /tmp:/certs:ro axllent/mailpit \
-        --smtp-tls-cert /certs/ql-cert.pem --smtp-tls-key /certs/ql-key.pem --smtp-require-starttls
-    ACCEPTANCE=1 python tests/acceptance/run.py
+and STARTTLS-only with an untrusted certificate). Locally, `make acceptance` starts the
+two Mailpits (the compose broker too), runs this, and stops them.
 
 Endpoints are overridable with ACCEPTANCE_* env vars (see below); CI runs it as the
 `acceptance` job. ACCEPTANCE_DATABASE_URL (postgresql+asyncpg://...) runs it on a
