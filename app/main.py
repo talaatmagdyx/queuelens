@@ -239,6 +239,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return await call_next(request)
 
+    @app.middleware("http")
+    async def _refuse_cross_site_changes(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        """CSRF: a page on another site can make a signed-in browser post a form here, and
+        the browser attaches its cached Basic credentials. Browsers say where a request
+        comes from in Sec-Fetch-Site, which a page can't set: nothing from another site
+        may change anything. Clients that don't send it (curl, scripts, Prometheus) and the
+        console itself (same-origin) are unaffected."""
+        # ponytail: browsers without Fetch Metadata (Safari before 16.4) aren't covered; an
+        # Origin check would be, but it misfires behind proxies that rewrite Host
+        if request.method not in ("GET", "HEAD", "OPTIONS") and request.headers.get(
+            "sec-fetch-site"
+        ) in ("cross-site", "same-site"):
+            return JSONResponse(
+                {"detail": "Requests from another site can't change anything in QueueLens"},
+                status_code=403,
+            )
+        return await call_next(request)
+
     # added last = outermost: KeepPeer sees the TCP peer, then X-Forwarded-For / -Proto
     # apply from QUEUELENS_TRUSTED_PROXIES only (the image runs uvicorn --no-proxy-headers)
     app.add_middleware(
