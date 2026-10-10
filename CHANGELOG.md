@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.19.2 — 2026-10-11
 
 ### Fixed
 - **Other sites can no longer act through a signed-in browser (CSRF).**
@@ -26,6 +26,14 @@
   - **`make help`** lists them all. DEVELOPMENT.md has the details.
 - **`make acceptance` doesn't need openssl.** Its STARTTLS Mailpit generates its own
   self-signed certificate.
+
+### Upgrade notes
+- **Upgrade if browsers sign in to QueueLens with Basic Auth or through an SSO proxy.**
+  This release closes a CSRF hole that let a page on another site run a replay policy.
+- **Check that your reverse proxy passes `Sec-Fetch-Site` through.** Proxies do by default.
+  A proxy that strips it turns the protection off. A proxy that adds it to every request
+  would break the console, but that's very unusual.
+- **Helm chart 0.6.2** deploys QueueLens 0.19.2.
 
 ## v0.19.1 — 2026-10-07
 
