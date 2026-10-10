@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Fixed
+- **Other sites can no longer act through a signed-in browser (CSRF).**
+  - **The problem:** a page on another site could post a plain HTML form to
+    `/api/policies/{id}/run`. The browser attaches its cached Basic credentials, so the
+    run went ahead. That included runs of a policy an Admin had paused or disabled.
+  - **The fix:** QueueLens now refuses, with `403`, every `POST`, `PUT`, `PATCH` or
+    `DELETE` that the browser marks as coming from another site
+    (`Sec-Fetch-Site: cross-site` / `same-site`). That covers every endpoint, now and
+    later.
+  - **Not affected:** the console (same-origin), and API clients that don't send the
+    header, such as curl, scripts and Prometheus.
+  - **Already safe:** JSON endpoints already refused form-encoded bodies.
+
 ### Added
 - **A Makefile for the checks CI runs.**
   - **`make` (or `make all`)** is the gate before a pull request: lint, types, tests, the

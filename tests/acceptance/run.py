@@ -1589,6 +1589,12 @@ async def g30():
         check(30, "Replay policy exists", False, "g30_setup did not create it")
         return
     url = f"/api/policies/{POLICY['id']}"
+    before = (await api("GET", "/api/policies")).json()["policies"]
+    # what <form method=post action=.../run> on a page elsewhere makes a signed-in browser send
+    forged = await api("POST", url + "/run", headers={"Sec-Fetch-Site": "cross-site"})
+    check(30, "A page on another site can't make a signed-in Admin's browser run a policy",
+          forged.status_code == 403 and (await api("GET", "/api/policies")).json()["policies"] == before,
+          forged.status_code)
     preview_r = (await api("POST", url + "/preview", auth=USERS["oper1"])).json()
     check(30, "Preview (Operator) shows the due messages and their origin, moving nothing",
           preview_r.get("targets") == {"t30.work": {"due": 3, "consumers": 0}} and await count("t30.dlq") == 3,

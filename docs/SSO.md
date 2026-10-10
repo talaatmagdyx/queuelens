@@ -49,6 +49,9 @@ header.
   copy through. oauth2-proxy strips client-supplied `X-Forwarded-*` user headers by
   default (`--skip-auth-strip-headers`). Traefik's `authResponseHeaders` and
   ingress-nginx's `auth-response-headers` replace them too.
+- **Leave `Sec-Fetch-Site` alone.** QueueLens refuses changes that a browser marks as coming
+  from another site, which keeps other sites from acting with the proxy's session
+  cookie. A proxy that strips the header turns that protection off.
 - **Be the only way in.** The trust check already stops forged headers from other
   addresses; also make the proxy the only route to port 8000, through a sidecar, a
   private network or a NetworkPolicy.

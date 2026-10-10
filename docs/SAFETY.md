@@ -141,6 +141,18 @@ Every action — single, bulk, and composer publish — writes a `started` audit
 **before** touching the broker and a `success`/`failed` event after. If the attempt event
 cannot be persisted, the action is rejected — an un-auditable action does not run.
 
+### 6b. Other sites can't act through your browser
+A page on another site can make a signed-in browser send requests to QueueLens. The browser
+attaches its cached Basic credentials, or the SSO proxy's cookies, and SameSite doesn't
+cover Basic credentials. So every request that would change something (`POST`, `PUT`,
+`PATCH`, `DELETE`) is refused with `403` when the browser marks it as coming from another
+site (`Sec-Fetch-Site: cross-site` or `same-site`). A page can't set or remove that header.
+
+The console's own requests are same-origin and pass. API clients like curl and scripts
+don't send the header and are unaffected. JSON endpoints also refuse form-encoded bodies
+(`422`). Browsers too old to send Fetch Metadata (Safari before 16.4) are not covered by
+the header check.
+
 ### 7. Failures degrade honestly
 Unknown queues → `404`. Broker down → `503`, and `/ready` reports it (connection liveness is
 tracked via close/reconnect callbacks because `RobustConnection.is_closed` lies during

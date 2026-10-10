@@ -434,6 +434,7 @@ error page on web routes.
 |---|---|
 | `400` | Missing confirmation; no replay target available; invalid target shape; **unroutable publish** (target exchange routes nowhere) |
 | `401` | Missing/invalid Basic Auth credentials |
+| `403` | The role doesn't allow it; or a request that would change something came from another site (`Sec-Fetch-Site: cross-site` / `same-site`, [SAFETY.md](SAFETY.md)) |
 | `404` | Unknown queue (source or replay target); fingerprint matched zero or multiple messages on detail lookup |
 | `409` | Mutating action where the fingerprint did not match exactly one message — refresh and retry |
 | `422` | Request body failed validation (FastAPI/pydantic) |
